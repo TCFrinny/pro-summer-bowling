@@ -14,16 +14,386 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      match_results: {
+        Row: {
+          created_at: string
+          derived: Json
+          entered_by: string | null
+          id: string
+          linescore_a: Json
+          linescore_b: Json
+          override: Json | null
+          schedule_slot_id: string
+          season_id: string
+          side_a: Json
+          side_b: Json
+          updated_at: string
+          week_id: string
+        }
+        Insert: {
+          created_at?: string
+          derived: Json
+          entered_by?: string | null
+          id?: string
+          linescore_a: Json
+          linescore_b: Json
+          override?: Json | null
+          schedule_slot_id: string
+          season_id: string
+          side_a: Json
+          side_b: Json
+          updated_at?: string
+          week_id: string
+        }
+        Update: {
+          created_at?: string
+          derived?: Json
+          entered_by?: string | null
+          id?: string
+          linescore_a?: Json
+          linescore_b?: Json
+          override?: Json | null
+          schedule_slot_id?: string
+          season_id?: string
+          side_a?: Json
+          side_b?: Json
+          updated_at?: string
+          week_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_results_schedule_slot_id_fkey"
+            columns: ["schedule_slot_id"]
+            isOneToOne: true
+            referencedRelation: "schedule_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_results_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_results_week_id_fkey"
+            columns: ["week_id"]
+            isOneToOne: false
+            referencedRelation: "weeks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      public_snapshots: {
+        Row: {
+          season_id: string
+          snapshot: Json
+          updated_at: string
+        }
+        Insert: {
+          season_id: string
+          snapshot: Json
+          updated_at?: string
+        }
+        Update: {
+          season_id?: string
+          snapshot?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "public_snapshots_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: true
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rostered_bowlers: {
+        Row: {
+          active: boolean
+          archived: boolean
+          bowler_number: string | null
+          created_at: string
+          entry_average: number
+          handicap: number
+          id: string
+          name: string
+          season_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          archived?: boolean
+          bowler_number?: string | null
+          created_at?: string
+          entry_average: number
+          handicap: number
+          id: string
+          name: string
+          season_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          archived?: boolean
+          bowler_number?: string | null
+          created_at?: string
+          entry_average?: number
+          handicap?: number
+          id?: string
+          name?: string
+          season_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rostered_bowlers_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      schedule_slots: {
+        Row: {
+          bowler_a_id: string | null
+          bowler_b_id: string | null
+          bowler_number_a: string | null
+          bowler_number_b: string | null
+          created_at: string
+          id: string
+          lane_pair: string
+          name_a: string | null
+          name_b: string | null
+          slot: number
+          updated_at: string
+          week_id: string
+        }
+        Insert: {
+          bowler_a_id?: string | null
+          bowler_b_id?: string | null
+          bowler_number_a?: string | null
+          bowler_number_b?: string | null
+          created_at?: string
+          id?: string
+          lane_pair: string
+          name_a?: string | null
+          name_b?: string | null
+          slot: number
+          updated_at?: string
+          week_id: string
+        }
+        Update: {
+          bowler_a_id?: string | null
+          bowler_b_id?: string | null
+          bowler_number_a?: string | null
+          bowler_number_b?: string | null
+          created_at?: string
+          id?: string
+          lane_pair?: string
+          name_a?: string | null
+          name_b?: string | null
+          slot?: number
+          updated_at?: string
+          week_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "schedule_slots_bowler_a_id_fkey"
+            columns: ["bowler_a_id"]
+            isOneToOne: false
+            referencedRelation: "rostered_bowlers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "schedule_slots_bowler_b_id_fkey"
+            columns: ["bowler_b_id"]
+            isOneToOne: false
+            referencedRelation: "rostered_bowlers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "schedule_slots_week_id_fkey"
+            columns: ["week_id"]
+            isOneToOne: false
+            referencedRelation: "weeks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seasons: {
+        Row: {
+          created_at: string
+          id: string
+          is_current: boolean
+          label: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_current?: boolean
+          label: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_current?: boolean
+          label?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      substitutes: {
+        Row: {
+          active: boolean
+          archived: boolean
+          bowler_number: string | null
+          created_at: string
+          handicap: number | null
+          id: string
+          name: string
+          season_id: string
+          starting_average: number | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          archived?: boolean
+          bowler_number?: string | null
+          created_at?: string
+          handicap?: number | null
+          id: string
+          name: string
+          season_id: string
+          starting_average?: number | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          archived?: boolean
+          bowler_number?: string | null
+          created_at?: string
+          handicap?: number | null
+          id?: string
+          name?: string
+          season_id?: string
+          starting_average?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "substitutes_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      weeks: {
+        Row: {
+          completed: boolean
+          created_at: string
+          date: string | null
+          id: string
+          published: boolean
+          season_id: string
+          updated_at: string
+          week_number: number
+        }
+        Insert: {
+          completed?: boolean
+          created_at?: string
+          date?: string | null
+          id?: string
+          published?: boolean
+          season_id: string
+          updated_at?: string
+          week_number: number
+        }
+        Update: {
+          completed?: boolean
+          created_at?: string
+          date?: string | null
+          id?: string
+          published?: boolean
+          season_id?: string
+          updated_at?: string
+          week_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weeks_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      week_published: { Args: { _week_id: string }; Returns: boolean }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +520,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin"],
+    },
   },
 } as const
