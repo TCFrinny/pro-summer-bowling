@@ -11,9 +11,17 @@ import {
   type ParticipationStatus,
 } from "@/lib/mock-data";
 import {
+  deleteMatchResult,
   getAdminScheduleData,
   saveMatchResult,
 } from "@/lib/schedule-repo.functions";
+import { SNAPSHOT_QUERY_KEY } from "@/lib/public-snapshot";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
 import {
   SideLinescoreEditor,
   computeSideDerived,
@@ -27,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/results")({
