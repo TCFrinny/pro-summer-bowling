@@ -45,7 +45,9 @@ export function normalizeMarkInput(raw: string): string {
 
 /**
  * Parse a regulation (frames 1..9) mark.
- * Accepts: X, /, -, or a single digit 0..9 (treated as open with that pinfall).
+ * ONLY the league-established saved notation is accepted: X, /, or -.
+ * Whitespace is trimmed and lowercase "x" normalized to "X". No digit-
+ * based shorthand — the running-total field carries pin information.
  */
 export function parseRegulationMark(raw: string): ParsedFrame | FrameParseError {
   const m = normalizeMarkInput(raw);
@@ -53,63 +55,23 @@ export function parseRegulationMark(raw: string): ParsedFrame | FrameParseError 
   if (m === "X") return { mark: "X", impliedContribution: null, classification: "strike" };
   if (m === "/") return { mark: "/", impliedContribution: null, classification: "spare" };
   if (m === "-") return { mark: "-", impliedContribution: 0, classification: "open" };
-  if (/^[0-9]$/.test(m)) {
-    // Numeric digit shorthand for an open frame.
-    return { mark: "-", impliedContribution: Number(m), classification: "open" };
-  }
-  // Two-digit open like "72" (7 + 2 pins) => open with 9 pins.
-  if (/^[0-9][0-9]$/.test(m)) {
-    const a = Number(m[0]);
-    const b = Number(m[1]);
-    if (a + b > 9) return { error: `Two-ball open cannot exceed 9 pins ("${raw}")` };
-    return { mark: "-", impliedContribution: a + b, classification: "open" };
-  }
-  // "N/" spare notation shorthand.
-  if (/^[0-9]\/$/.test(m)) return { mark: "/", impliedContribution: 10, classification: "spare" };
-  return { error: `Illegal regulation mark "${raw}"` };
+  return { error: `Illegal regulation mark "${raw}" — use X, /, or -` };
 }
 
 /**
  * Normalize a tenth-frame admin input into one of the seven allowed
- * saved display strings. Returns null when the input is not interpretable.
+ * saved display strings: XXX, XX, X/, /X, X, /, -. The only
+ * transformations applied are whitespace trim and lowercase→uppercase.
+ * Digit-based shorthand (e.g. "XX7", "X9/", "9/X") is REJECTED — the
+ * running-total field carries pin information, not the mark.
  */
 export function normalizeTenthMark(raw: string): string | null {
   const m = normalizeMarkInput(raw);
   if (m === "") return null;
   if (TENTH_MARK_SET.has(m)) return m;
-  // Common shorthand → normalize.
-  //  X + digit + digit   -> "XX" (bonus pins recorded via cumulative)
-  //  X + digit + "/"     -> "X/"
-  //  digit + "/" + X     -> "/X"
-  //  digit + "/" + digit -> "/"
-  //  digit + "-"         -> "-"
-  //  X + X + digit       -> "XX"
-  //  X + X + "-"         -> "XX"
-  //  digit + digit       -> "-"
-  //  X + digit           -> "X"
-  //  digit + "/"         -> "/"
-  if (/^X[0-9][0-9]$/.test(m)) return "XX";
-  if (/^X[0-9]\/$/.test(m)) return "X/";
-  if (/^[0-9]\/X$/.test(m)) return "/X";
-  if (/^[0-9]\/[0-9-]$/.test(m)) return "/";
-  if (/^XX[0-9]$/.test(m)) return "XX";
-  if (/^XX-$/.test(m)) return "XX";
-  if (/^X-[0-9]$/.test(m)) return "X";
-  if (/^X-$/.test(m)) return "X";
-  if (/^X-\/$/.test(m)) return "X/";
-  if (/^[0-9][0-9]$/.test(m)) {
-    const a = Number(m[0]); const b = Number(m[1]);
-    if (a + b > 9) return null;
-    return "-";
-  }
-  if (/^[0-9]-$/.test(m)) return "-";
-  if (/^-[0-9]$/.test(m)) return "-";
-  if (/^X[0-9]$/.test(m)) return "X";
-  if (/^[0-9]\/$/.test(m)) return "/";
-  if (/^[0-9]$/.test(m)) return "-";
-  if (isValidTenthMark(m)) return m;
   return null;
 }
+
 
 export interface GameBuildInput {
   /** length 10 — raw mark strings as typed by the admin. */
