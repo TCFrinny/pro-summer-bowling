@@ -10,6 +10,24 @@ Phase 1 ships a polished, fully navigable public interface backed by a
 single mock data layer. The backend (Lovable Cloud / Supabase) and admin
 authoring flows arrive in Phase 2.
 
+## Scoring rules (7-point duckpin singles)
+
+Every matchup distributes **exactly 7 points**:
+
+- 3 games per match.
+- Each **game** is worth **2 points** — win = 2, tie = 1 each, loss = 0
+  (based on handicap game score).
+- The 3-game **set** is worth **1 point** based on **total handicap
+  pinfall** — win = 1, tie = 0.5 each, loss = 0.
+- A bowler's match total can be `0, 0.5, 1, 1.5, … 7`. Example scores:
+  `5–2`, `4.5–2.5`, `3.5–3.5`.
+- **Handicap** = `floor(0.80 × (160 − entryAverage))`, minimum 0.
+- **Season length**: 11 weeks.
+- **Season averages** are **scratch only**, displayed to **3 decimals**.
+- **Official standings tiebreaker**: total points **DESC**, then total
+  handicap pinfall **DESC**.
+
+
 ### The performance rule (do not violate)
 
 > **Public page navigation must never trigger expensive season-wide
