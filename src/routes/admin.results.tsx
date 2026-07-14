@@ -145,8 +145,7 @@ function AdminResultsPage() {
   return (
     <AppShell>
       <PageHeader
-        subtitle="Admin · Phase 1 (mock)"
-        title="Weekly Result Entry"
+        title="Admin · Weekly Result Entry"
         subtitle="Enter participation, scratch totals, and any manual W-L override for each scheduled matchup."
       />
 

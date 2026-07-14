@@ -120,8 +120,7 @@ function AdminSchedulePage() {
   return (
     <AppShell>
       <PageHeader
-        subtitle="Admin · Phase 1 (mock)"
-        title="Manual Schedule Editor"
+        title="Admin · Manual Schedule Editor"
         subtitle="Administrators set every week's schedule by hand. Warnings surface duplicates and repeat pairings but never rewrite your choices."
       />
 
