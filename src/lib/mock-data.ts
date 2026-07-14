@@ -512,3 +512,26 @@ export function getEliminationSnapshot(): EliminationSnapshot {
 export function formatPoints(n: number): string {
   return Number.isInteger(n) ? n.toString() : n.toFixed(1);
 }
+
+/** Format a bowler's W-L record, e.g. "31 - 18" or "24.5 - 24.5". */
+export function formatRecord(won: number, lost: number): string {
+  return `${formatPoints(won)} - ${formatPoints(lost)}`;
+}
+
+/**
+ * Standard games-behind formula applied to points won/lost. Works even if
+ * bowlers have completed different numbers of matches.
+ *   PB = ((leaderWon - bowlerWon) + (bowlerLost - leaderLost)) / 2
+ * The leader returns 0; the caller decides how to display that (usually "—").
+ */
+export function computePointsBehind(
+  leader: Pick<Bowler, "points" | "pointsLost">,
+  bowler: Pick<Bowler, "points" | "pointsLost">,
+): number {
+  const pb =
+    ((leader.points - bowler.points) + (bowler.pointsLost - leader.pointsLost)) /
+    2;
+  // Clamp tiny negatives from floating-point noise.
+  return pb < 0 ? 0 : pb;
+}
+
