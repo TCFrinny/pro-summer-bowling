@@ -1,15 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   formatPoints,
   getEliminationSnapshot,
   getStandingsSnapshot,
+  type EliminationRow,
+  type EliminationSnapshot,
   type EliminationStatus,
+  type PublicSnapshot,
 } from "@/lib/mock-data";
 import { sortEliminationRowsByStandings } from "@/lib/elimination-order";
 import { useLeagueSnapshot } from "@/lib/league-store";
+import { snapshotQueryOptions } from "@/lib/public-snapshot";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { saveFullEliminationResult } from "@/lib/elimination-repo.functions";
+import { useSession } from "@/hooks/use-session";
+import { getIsAdmin } from "@/lib/auth.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale } from "lucide-react";
+import {
+  CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale, PlayCircle, AlertTriangle,
+} from "lucide-react";
 
 export const Route = createFileRoute("/elimination")({
   head: () => ({
@@ -61,23 +73,25 @@ const STATUS: Record<
   },
 };
 
+type RunState =
+  | { kind: "idle" }
+  | { kind: "running"; note: string }
+  | { kind: "saving" }
+  | { kind: "error"; message: string; stale: boolean }
+  | { kind: "success" };
+
 function EliminationPage() {
-  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
-  // Read the last-published snapshot. NEVER run a solver here.
+  useLeagueSnapshot(); // re-render when snapshot refreshes
   const snap = getEliminationSnapshot();
   const standings = getStandingsSnapshot();
-
-  // Render order only: mirror the standings ordering without mutating
-  // `snap.rows` or the underlying saved snapshot.
   const orderedRows = sortEliminationRowsByStandings(snap.rows, standings);
 
   const counts = snap.rows.reduce(
-    (acc, r) => {
-      acc[r.status] = (acc[r.status] ?? 0) + 1;
-      return acc;
-    },
+    (acc, r) => { acc[r.status] = (acc[r.status] ?? 0) + 1; return acc; },
     {} as Record<EliminationStatus, number>,
   );
+
+  const mode = snap.calculationMode ?? "bounds_only";
 
   return (
     <AppShell>
@@ -86,23 +100,22 @@ function EliminationPage() {
         subtitle="Displays the last saved elimination proof set. Recalculation only runs when the admin publishes new results."
       />
 
+      <ModeNotice mode={mode} lastCalculatedAt={snap.lastCalculatedAt} />
+      <AdminRunControls />
+
       <Card className="mb-6 bg-card">
         <CardHeader>
           <CardTitle className="flex flex-wrap items-baseline justify-between gap-2 font-display text-xl">
             <span>Snapshot</span>
             <span className="text-xs font-normal text-muted-foreground">
-              Last calculated{" "}
-              {new Date(snap.lastCalculatedAt).toLocaleString()} ·{" "}
+              Last calculated {new Date(snap.lastCalculatedAt).toLocaleString()} ·{" "}
               {snap.weeksRemaining} weeks remaining
             </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
           {(Object.keys(STATUS) as EliminationStatus[]).map((s) => (
-            <div
-              key={s}
-              className={`rounded-md p-3 text-sm ${STATUS[s].className}`}
-            >
+            <div key={s} className={`rounded-md p-3 text-sm ${STATUS[s].className}`}>
               <div className="flex items-center gap-2 text-xs uppercase tracking-widest opacity-90">
                 {STATUS[s].icon} {STATUS[s].label}
               </div>
@@ -130,9 +143,7 @@ function EliminationPage() {
                   {formatPoints(r.bowler.points)}
                 </td>
                 <td className="px-3 py-2">
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${STATUS[r.status].className}`}
-                  >
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${STATUS[r.status].className}`}>
                     {STATUS[r.status].icon} {STATUS[r.status].label}
                   </span>
                 </td>
@@ -152,5 +163,137 @@ function EliminationPage() {
         </table>
       </div>
     </AppShell>
+  );
+}
+
+function ModeNotice({ mode, lastCalculatedAt }: { mode: "bounds_only" | "full"; lastCalculatedAt: string }) {
+  const bounds = mode === "bounds_only";
+  return (
+    <div className={`mb-4 flex items-start gap-2 rounded-md border p-3 text-xs ${bounds ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
+      {bounds ? <AlertTriangle className="mt-0.5 h-4 w-4" /> : <CheckCircle2 className="mt-0.5 h-4 w-4" />}
+      <div>
+        <div className="font-semibold">
+          {bounds ? "Full calculation pending." : "Full schedule calculation completed."}
+        </div>
+        <div className="opacity-80">
+          {bounds
+            ? "Proven clinches/eliminations shown; other statuses remain Not Proven until an admin runs the full calculation."
+            : `Result computed ${new Date(lastCalculatedAt).toLocaleString()}.`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Admin-only: run full solver in a Web Worker and persist the result.
+// ---------------------------------------------------------------------------
+
+function AdminRunControls() {
+  const { session, loading } = useSession();
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (loading || !session) { setIsAdmin(false); return; }
+    getIsAdmin().then((r) => { if (!cancelled) setIsAdmin(!!r.isAdmin); })
+      .catch(() => { if (!cancelled) setIsAdmin(false); });
+    return () => { cancelled = true; };
+  }, [session, loading]);
+
+  const queryClient = useQueryClient();
+  const { data: snapshot } = useQuery(snapshotQueryOptions);
+  const saveFn = useServerFn(saveFullEliminationResult);
+  const [state, setState] = useState<RunState>({ kind: "idle" });
+  const workerRef = useRef<Worker | null>(null);
+
+  useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null; }, []);
+
+  if (!isAdmin || !snapshot) return null;
+
+  const running = state.kind === "running" || state.kind === "saving";
+
+  async function runFull() {
+    if (!snapshot) return;
+    setState({ kind: "running", note: "Starting calculation…" });
+    try {
+      const worker = new Worker(new URL("../lib/elimination.worker.ts", import.meta.url), { type: "module" });
+      workerRef.current = worker;
+      const activeBowlers = snapshot.bowlers;
+      const totalWeeks = Math.max(snapshot.weeks.length, 11);
+      const result = await new Promise<EliminationSnapshot>((resolve, reject) => {
+        worker.onmessage = (evt: MessageEvent<{ kind: "result"; snapshot: EliminationSnapshot } | { kind: "error"; error: string }>) => {
+          if (evt.data.kind === "result") resolve(evt.data.snapshot);
+          else reject(new Error(evt.data.error));
+        };
+        worker.onerror = (e) => reject(new Error(e.message || "Worker error"));
+        worker.postMessage({
+          kind: "run",
+          input: {
+            activeBowlers,
+            weeks: snapshot.weeks,
+            matchesByWeek: snapshot.matchesByWeek,
+            totalWeeks,
+          },
+        });
+      });
+      worker.terminate();
+      workerRef.current = null;
+
+      setState({ kind: "saving" });
+      await saveFn({
+        data: {
+          builtAt: snapshot.builtAt,
+          elimination: {
+            weeksRemaining: result.weeksRemaining,
+            rows: result.rows.map((r: EliminationRow) => ({
+              bowlerId: r.bowler.id,
+              status: r.status,
+              note: r.note,
+              maxFinalPoints: r.maxFinalPoints,
+              nextOpponent: r.nextOpponent,
+              bestMargin: r.bestMargin,
+              // diagnostics intentionally omitted
+            })),
+          },
+        },
+      });
+
+      setState({ kind: "success" });
+      await queryClient.invalidateQueries({ queryKey: snapshotQueryOptions.queryKey });
+    } catch (err) {
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      const msg = err instanceof Error ? err.message : String(err);
+      const stale = /League data changed/i.test(msg);
+      setState({ kind: "error", message: msg, stale });
+    }
+  }
+
+  // Guard against unused-var warnings in the closure.
+  void ({} as PublicSnapshot);
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-border bg-accent/30 p-3 text-xs">
+      <button
+        onClick={runFull}
+        disabled={running}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-60"
+      >
+        {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+        Run Full Calculation
+      </button>
+      {state.kind === "running" && (
+        <span className="text-muted-foreground">Working in your browser — this can take a moment…</span>
+      )}
+      {state.kind === "saving" && <span className="text-muted-foreground">Saving results…</span>}
+      {state.kind === "success" && <span className="text-emerald-300">Full calculation saved.</span>}
+      {state.kind === "error" && (
+        <span className="text-destructive">
+          {state.stale
+            ? "League data changed while the calculation was running. Please run it again."
+            : `Failed: ${state.message}`}
+        </span>
+      )}
+    </div>
   );
 }
