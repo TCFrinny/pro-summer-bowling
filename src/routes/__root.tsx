@@ -128,10 +128,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
-  // Prime the public snapshot cache on the initial navigation so the very
-  // first render already has DB data (SSR-safe: supabase-js runs in Node).
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData(snapshotQueryOptions),
+  // No root loader: fetching on the server would prime the cache, but the
+  // client-side QueryClient is a separate instance (no dehydration wired
+  // up), causing a hydration mismatch where SSR would render the empty
+  // state and the client would flash the local seeded provider before
+  // its own fetch resolves. Fetching purely on the client keeps SSR and
+  // client identical (both render the neutral loading state), so the
+  // seeded snapshot cannot leak into any public page.
 });
 
 function RootShell({ children }: { children: ReactNode }) {
