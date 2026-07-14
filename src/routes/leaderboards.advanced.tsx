@@ -40,7 +40,7 @@ function AdvancedLeaderboardsPage() {
   const completed = WEEKS.filter((w) => w.completed);
   const rows = boards.rows;
   const isSeason = !boards.singleWeek;
-  const perMatchLabel = isSeason ? "Pins / match" : "Match total";
+  const perMatchLabel = isSeason ? "Pins / game" : "Scope total";
 
   return (
     <AppShell>
@@ -86,8 +86,8 @@ function AdvancedLeaderboardsPage() {
           <MetricTable rows={rows} pick={(r) => r.openPct} suffix="%" digits={1} ascending />
         </Board>
         <Board
-          title="Pins Lost (lower is better)"
-          help="Average pins standing after an open frame — derived from cumulative diffs."
+          title="Pins Lost / Game (lower is better)"
+          help="Average pins standing after open frames, divided by actual games rolled."
         >
           <MetricTable rows={rows} pick={(r) => r.pinsLost} digits={2} ascending />
         </Board>
@@ -111,31 +111,31 @@ function AdvancedLeaderboardsPage() {
           )}
         </Board>
 
-        <Board title={`First 5 (${perMatchLabel})`} help="Cumulative through frame 5, per 3-game match.">
+        <Board title={`First 5 (${perMatchLabel})`} help="Cumulative through frame 5, averaged across every game rolled.">
           <MetricTable
             rows={rows}
-            pick={(r) => (isSeason ? r.first5PerMatch : r.first5Total)}
+            pick={(r) => (isSeason ? r.first5PerGame : r.first5Total)}
             digits={isSeason ? 1 : 0}
           />
         </Board>
-        <Board title={`Last 5 (${perMatchLabel})`} help="Final score minus cumulative through frame 5, per match.">
+        <Board title={`Last 5 (${perMatchLabel})`} help="Final score minus cumulative through frame 5, averaged per game.">
           <MetricTable
             rows={rows}
-            pick={(r) => (isSeason ? r.last5PerMatch : r.last5Total)}
+            pick={(r) => (isSeason ? r.last5PerGame : r.last5Total)}
             digits={isSeason ? 1 : 0}
           />
         </Board>
-        <Board title={`Big Opening (${perMatchLabel})`} help="Frames 1–3 pins, summed across the 3-game match.">
+        <Board title={`Big Opening (${perMatchLabel})`} help="Frames 1–3 pins, averaged per game rolled.">
           <MetricTable
             rows={rows}
-            pick={(r) => (isSeason ? r.bigOpeningPerMatch : r.bigOpeningTotal)}
+            pick={(r) => (isSeason ? r.bigOpeningPerGame : r.bigOpeningTotal)}
             digits={isSeason ? 1 : 0}
           />
         </Board>
-        <Board title={`Big Finish (${perMatchLabel})`} help="Frames 8–10 pins, summed across the 3-game match.">
+        <Board title={`Big Finish (${perMatchLabel})`} help="Frames 8–10 pins, averaged per game rolled.">
           <MetricTable
             rows={rows}
-            pick={(r) => (isSeason ? r.bigFinishPerMatch : r.bigFinishTotal)}
+            pick={(r) => (isSeason ? r.bigFinishPerGame : r.bigFinishTotal)}
             digits={isSeason ? 1 : 0}
           />
         </Board>

@@ -113,7 +113,22 @@ export interface Match {
   status: MatchStatus;
   bowlerA: BowlerId;
   bowlerB: BowlerId;
+  /** FROZEN scheduled bowler ID numbers at schedule-publish time.
+   *  Displayed only on Schedule pages. Editing a bowler's ID number
+   *  in Manage Bowlers changes future draft schedules, but a match
+   *  already saved here keeps whatever was published with it. */
+  bowlerNumberA?: string;
+  bowlerNumberB?: string;
   result?: MatchResult;
+}
+
+/** Format a scheduled-bowler cell as "Name (ID 01234)". Used ONLY on
+ *  Schedule and Admin Schedule Builder rows. Never used on standings,
+ *  weekly results, profiles, statistics, leaderboards, lane data, or
+ *  result-entry linescore headings. */
+export function formatScheduleName(name: string, bowlerNumber?: string): string {
+  if (!bowlerNumber) return name;
+  return `${name} (ID ${bowlerNumber})`;
 }
 
 export type GameAward = 0 | 1 | 2;
@@ -639,13 +654,19 @@ export interface BowlerSeasonExtras {
   sparePct: number;
   openPct: number;
   spareConversionPct: number;
+  /** Average pins lost per ACTUAL roster game rolled. Denominator is
+   *  the count of GameLinescore records this bowler personally rolled
+   *  (substitute performances and absent weeks excluded). */
   pinsLost: number;
   consistency: number;
   matchesRostered: number;
-  first5PerMatch: number;
-  last5PerMatch: number;
-  bigOpeningPerMatch: number;
-  bigFinishPerMatch: number;
+  /** Count of GameLinescore records personally rolled (roster only). */
+  gamesRostered: number;
+  /** Per-game averages across every roster GameLinescore. */
+  first5PerGame: number;
+  last5PerGame: number;
+  bigOpeningPerGame: number;
+  bigFinishPerGame: number;
   clutchPct: number;
   clutchMarks: number;
   clutchOpportunities: number;
@@ -662,10 +683,12 @@ export interface AdvancedRow {
   strikes: number; spares: number; opens: number; marks: number;
   markPct: number; strikePct: number; sparePct: number; openPct: number;
   spareConversionPct: number;
+  /** Average pins lost per actual roster game rolled. */
   pinsLost: number;
   consistency: number;
-  first5PerMatch: number; last5PerMatch: number;
-  bigOpeningPerMatch: number; bigFinishPerMatch: number;
+  /** Per-game averages across every roster GameLinescore in scope. */
+  first5PerGame: number; last5PerGame: number;
+  bigOpeningPerGame: number; bigFinishPerGame: number;
   first5Total: number; last5Total: number;
   bigOpeningTotal: number; bigFinishTotal: number;
   clutchMarks: number; clutchOpportunities: number; clutchPct: number;
@@ -727,14 +750,18 @@ interface RosterFrameStats {
   strikes: number; spares: number; opens: number;
   framesRolled: number; openPinsLeft: number;
   gameScores: number[]; scratchPinfall: number;
+  /** Number of scheduled matches this bowler personally rolled. */
   matches: number;
+  /** Number of valid GameLinescore records this bowler personally rolled.
+   *  Sole denominator for per-game rates (First 5, Pins Lost, etc.). */
+  games: number;
   first5: number; last5: number; bigOpening: number; bigFinish: number;
   clutchMarks: number; clutchOpportunities: number;
 }
 function emptyRoster(): RosterFrameStats {
   return {
     strikes: 0, spares: 0, opens: 0, framesRolled: 0, openPinsLeft: 0,
-    gameScores: [], scratchPinfall: 0, matches: 0,
+    gameScores: [], scratchPinfall: 0, matches: 0, games: 0,
     first5: 0, last5: 0, bigOpening: 0, bigFinish: 0,
     clutchMarks: 0, clutchOpportunities: 0,
   };
@@ -945,11 +972,20 @@ export function buildSnapshot(input: {
         s.strikes += ls.strikes; s.spares += ls.spares; s.opens += ls.opens;
         s.framesRolled += ls.framesRolled; s.openPinsLeft += ls.openPinsLeft;
         s.scratchPinfall += ls.scratchSet; s.matches += 1;
-        s.first5 += ls.segments.first5; s.last5 += ls.segments.last5;
-        s.bigOpening += ls.segments.bigOpening; s.bigFinish += ls.segments.bigFinish;
-        s.clutchMarks += ls.segments.clutchMarks;
-        s.clutchOpportunities += ls.segments.clutchOpportunities;
-        for (const g of ls.games) s.gameScores.push(g.scratchTotal);
+        // Per-game aggregation: count every GameLinescore explicitly so
+        // absences, subs, and future partial matches never inflate the
+        // denominator. `ls.games` is the authoritative per-match array.
+        for (const g of ls.games) {
+          s.games += 1;
+          s.first5 += g.segments.first5;
+          s.last5 += g.segments.last5;
+          s.bigOpening += g.segments.bigOpening;
+          s.bigFinish += g.segments.bigFinish;
+          s.clutchMarks += g.segments.clutchMarks;
+          // 2 clutch opportunities per game (frames 9 & 10).
+          s.clutchOpportunities += 2;
+          s.gameScores.push(g.scratchTotal);
+        }
       }
     }
     const marks = s.strikes + s.spares;
@@ -968,13 +1004,16 @@ export function buildSnapshot(input: {
       sparePct: s.framesRolled > 0 ? (s.spares / s.framesRolled) * 100 : 0,
       openPct: s.framesRolled > 0 ? (s.opens / s.framesRolled) * 100 : 0,
       spareConversionPct: spareOpp > 0 ? (s.spares / spareOpp) * 100 : 0,
-      pinsLost: s.opens > 0 ? s.openPinsLeft / s.opens : 0,
+      // Pins Lost / Game — denominator is actual roster games rolled,
+      // not open frames and not matches. Safe for absences/subs.
+      pinsLost: s.games > 0 ? s.openPinsLeft / s.games : 0,
       consistency: stdev(s.gameScores),
       matchesRostered: s.matches,
-      first5PerMatch: s.matches > 0 ? s.first5 / s.matches : 0,
-      last5PerMatch: s.matches > 0 ? s.last5 / s.matches : 0,
-      bigOpeningPerMatch: s.matches > 0 ? s.bigOpening / s.matches : 0,
-      bigFinishPerMatch: s.matches > 0 ? s.bigFinish / s.matches : 0,
+      gamesRostered: s.games,
+      first5PerGame: s.games > 0 ? s.first5 / s.games : 0,
+      last5PerGame: s.games > 0 ? s.last5 / s.games : 0,
+      bigOpeningPerGame: s.games > 0 ? s.bigOpening / s.games : 0,
+      bigFinishPerGame: s.games > 0 ? s.bigFinish / s.games : 0,
       clutchPct: s.clutchOpportunities > 0 ? (s.clutchMarks / s.clutchOpportunities) * 100 : 0,
       clutchMarks: s.clutchMarks,
       clutchOpportunities: s.clutchOpportunities,
@@ -1119,21 +1158,26 @@ export function buildSnapshot(input: {
         const marks = a.strikes + a.spares;
         const spareOpp = a.spares + a.opens;
         const matches = a.matches;
+        const g = a.games;
         return {
           bowlerId: a.bowlerId, bowlerName: a.bowlerName,
-          games: a.games, frames: a.frames, matches,
+          games: g, frames: a.frames, matches,
           strikes: a.strikes, spares: a.spares, opens: a.opens, marks,
           markPct: a.frames > 0 ? (marks / a.frames) * 100 : 0,
           strikePct: a.frames > 0 ? (a.strikes / a.frames) * 100 : 0,
           sparePct: a.frames > 0 ? (a.spares / a.frames) * 100 : 0,
           openPct: a.frames > 0 ? (a.opens / a.frames) * 100 : 0,
           spareConversionPct: spareOpp > 0 ? (a.spares / spareOpp) * 100 : 0,
-          pinsLost: a.opens > 0 ? a.openPinsLeft / a.opens : 0,
-          consistency: isSeason && a.games >= MIN_CONSISTENCY_SEASON ? stdev(a.gameScores) : 0,
-          first5PerMatch: matches > 0 ? a.first5 / matches : 0,
-          last5PerMatch: matches > 0 ? a.last5 / matches : 0,
-          bigOpeningPerMatch: matches > 0 ? a.bigOpening / matches : 0,
-          bigFinishPerMatch: matches > 0 ? a.bigFinish / matches : 0,
+          // Pins Lost / Game — denominator is games rolled, not open frames.
+          pinsLost: g > 0 ? a.openPinsLeft / g : 0,
+          consistency: isSeason && g >= MIN_CONSISTENCY_SEASON ? stdev(a.gameScores) : 0,
+          // Per-game denominators — a match-level sum divided by
+          // matches would double-count when a match ever has fewer
+          // than 3 valid games (partial saves, absences).
+          first5PerGame: g > 0 ? a.first5 / g : 0,
+          last5PerGame: g > 0 ? a.last5 / g : 0,
+          bigOpeningPerGame: g > 0 ? a.bigOpening / g : 0,
+          bigFinishPerGame: g > 0 ? a.bigFinish / g : 0,
           first5Total: a.first5, last5Total: a.last5,
           bigOpeningTotal: a.bigOpening, bigFinishTotal: a.bigFinish,
           clutchMarks: a.clutchMarks, clutchOpportunities: a.clutchOpportunities,
@@ -1249,8 +1293,8 @@ export function getBowlerSeasonExtras(id: BowlerId): BowlerSeasonExtras {
     lanePairUsage: LANE_PAIRS.map((lp) => ({ lanePair: lp, count: 0 })),
     strikes: 0, spares: 0, opens: 0, marks: 0, framesRolled: 0,
     markPct: 0, strikePct: 0, sparePct: 0, openPct: 0,
-    spareConversionPct: 0, pinsLost: 0, consistency: 0, matchesRostered: 0,
-    first5PerMatch: 0, last5PerMatch: 0, bigOpeningPerMatch: 0, bigFinishPerMatch: 0,
+    spareConversionPct: 0, pinsLost: 0, consistency: 0, matchesRostered: 0, gamesRostered: 0,
+    first5PerGame: 0, last5PerGame: 0, bigOpeningPerGame: 0, bigFinishPerGame: 0,
     clutchPct: 0, clutchMarks: 0, clutchOpportunities: 0,
   };
 }

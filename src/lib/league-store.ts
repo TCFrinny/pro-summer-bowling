@@ -54,12 +54,22 @@ export interface RosteredBowlerRecord {
   handicap: number;
   active: boolean;
   archived: boolean;
+  /** Editable 1–10 character ID Number. Displayed ONLY on schedule pages
+   *  as `Name (ID 01234)`. Never used to identify records (that's `id`).
+   *  Optional so v3-imported rows and blank drafts remain valid. */
+  bowlerNumber?: string;
 }
 export interface SubstituteRecord {
   id: string;
   name: string;
   active: boolean;
   archived: boolean;
+  bowlerNumber?: string;
+  /** Substitute's own Starting Average. Required to bowl in a match: the
+   *  sub's handicap (floor(0.80 * (160 - startingAverage))) is used as
+   *  THIS match's scoring handicap. W-L points and handicap pinfall
+   *  still credit the SCHEDULED bowler for the standings. */
+  startingAverage?: number;
 }
 
 export interface ScheduleSlot {
@@ -90,10 +100,18 @@ interface StoreState {
   version: number;
 }
 
-const STORAGE_KEY = "pss.leagueStore.v3";
+const STORAGE_KEY = "pss.leagueStore.v4";
 const OLD_KEYS_TO_CLEAR = ["pss.leagueStore.v1"];
 const OLD_KEY_V2 = "pss.leagueStore.v2";
-const SCHEMA_VERSION = 3;
+const OLD_KEY_V3 = "pss.leagueStore.v3";
+const SCHEMA_VERSION = 4;
+
+/** Format a bowlerNumber for display. Never used to store the value.
+ *  Values are kept verbatim; only trim() is applied on save. */
+export function isValidBowlerNumber(v: string): boolean {
+  const t = v.trim();
+  return t.length >= 1 && t.length <= 10;
+}
 
 // ---------------------------------------------------------------------------
 // Seeding
@@ -121,15 +139,21 @@ function seedDb(): LeagueDatabase {
   }
   return {
     version: SCHEMA_VERSION,
-    rostered: rawBowlers.map((b) => ({
+    rostered: rawBowlers.map((b, i) => ({
       id: b.id, name: b.name, entryAverage: b.entryAverage,
       handicap: b.handicap, active: true, archived: false,
+      // Seed IDs "01001".."01036" — unique, editable, 5 chars. Not
+      // used by any lookup; display-only on schedule pages.
+      bowlerNumber: `0${(1000 + i + 1).toString()}`,
     })),
     subs: [
       "Rick M.", "Terry L.", "Alicia P.", "Marco V.", "Dee K.", "Ronnie F.",
     ].map((name, i) => ({
       id: `s${(i + 1).toString().padStart(2, "0")}`,
       name, active: true, archived: false,
+      bowlerNumber: `09${(100 + i + 1).toString()}`,
+      // Seed sub starting averages so the pool is scoreable out-of-box.
+      startingAverage: 130 + i * 4,
     })),
     weeks: rawWeeks,
     matchesByWeek: matches,
@@ -173,24 +197,85 @@ function loadInitialDb(): LeagueDatabase {
         return parsed;
       }
     }
-    // Try v2 migration.
+    // v3 → v4 migration first (recent installs). Preserves every match
+    // result and schedule verbatim; only injects new optional fields.
+    const v3Raw = window.localStorage.getItem(OLD_KEY_V3);
+    if (v3Raw) {
+      try {
+        const v3 = JSON.parse(v3Raw) as unknown;
+        const migrated = migrateV3ToV4(v3);
+        if (migrated) {
+          window.localStorage.removeItem(OLD_KEY_V3);
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch { /* fall through */ }
+      window.localStorage.removeItem(OLD_KEY_V3);
+    }
+    // Older v2 store → migrate up through v3 then v4.
     const legacy = window.localStorage.getItem(OLD_KEY_V2);
     if (legacy) {
       try {
         const v2 = JSON.parse(legacy) as unknown;
-        const migrated = migrateV2ToV3(v2);
-        if (migrated) {
+        const v3Db = migrateV2ToV3(v2);
+        const v4Db = v3Db ? migrateV3ToV4(v3Db) : null;
+        if (v4Db) {
           window.localStorage.removeItem(OLD_KEY_V2);
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-          return migrated;
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v4Db));
+          return v4Db;
         }
-      } catch { /* fall through to seed */ }
+      } catch { /* fall through */ }
       window.localStorage.removeItem(OLD_KEY_V2);
     }
     return seedDb();
   } catch {
     return seedDb();
   }
+}
+
+/**
+ * v3 → v4 migration.
+ *
+ * v4 additions are ALL optional fields — historic MatchResult values
+ * (linescores, points, overrides, participation) are preserved byte-for-byte:
+ *   - RosteredBowlerRecord.bowlerNumber   (default: "0" + (1000+index))
+ *   - SubstituteRecord.bowlerNumber       (default: "09" + (100+index))
+ *   - SubstituteRecord.startingAverage    (default: 140)
+ *   - Match.bowlerNumberA / bowlerNumberB (backfilled from roster IDs so
+ *     already-published schedules still display an ID cell)
+ *
+ * migrateV2ToV3 remains the shape guarantor for MatchResult; this pass
+ * MUST NOT reshape or drop any completed result.
+ */
+export function migrateV3ToV4(raw: unknown): LeagueDatabase | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v3 = raw as LeagueDatabase;
+  if (!v3.rostered || !v3.matchesByWeek || !v3.weeks) return null;
+  const rostered: RosteredBowlerRecord[] = v3.rostered.map((b, i) => ({
+    ...b,
+    bowlerNumber: b.bowlerNumber ?? `0${(1000 + i + 1).toString()}`,
+  }));
+  const subs: SubstituteRecord[] = (v3.subs ?? []).map((s, i) => ({
+    ...s,
+    bowlerNumber: s.bowlerNumber ?? `09${(100 + i + 1).toString()}`,
+    startingAverage: s.startingAverage ?? 140,
+  }));
+  const rosterNumById = new Map(rostered.map((r) => [r.id, r.bowlerNumber]));
+  const matchesByWeek: Record<number, Match[]> = {};
+  for (const [wk, matches] of Object.entries(v3.matchesByWeek)) {
+    matchesByWeek[Number(wk)] = matches.map((m) => ({
+      ...m,
+      bowlerNumberA: m.bowlerNumberA ?? rosterNumById.get(m.bowlerA),
+      bowlerNumberB: m.bowlerNumberB ?? rosterNumById.get(m.bowlerB),
+    }));
+  }
+  return {
+    version: SCHEMA_VERSION,
+    rostered, subs,
+    weeks: v3.weeks,
+    matchesByWeek,
+    schedulesByWeek: v3.schedulesByWeek ?? {},
+  };
 }
 
 /**
@@ -349,27 +434,38 @@ function nextSubId(): string {
   return `s${n.toString().padStart(2, "0")}`;
 }
 
-export function addRosteredBowler(name: string, entryAverage: number): RosteredBowlerRecord {
+export function addRosteredBowler(
+  name: string, entryAverage: number, bowlerNumber?: string,
+): RosteredBowlerRecord {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name is required.");
   if (isDuplicateActiveRosterName(trimmed))
     throw new Error(`An active roster bowler named "${trimmed}" already exists.`);
+  const bn = bowlerNumber?.trim() || undefined;
+  if (bn && !isValidBowlerNumber(bn))
+    throw new Error("ID Number must be 1–10 characters.");
   const record: RosteredBowlerRecord = {
     id: nextRosterId(),
     name: trimmed,
     entryAverage,
     handicap: computeHandicap(entryAverage),
     active: true, archived: false,
+    bowlerNumber: bn,
   };
   commit({ ...state.db, rostered: [...state.db.rostered, record] });
   return record;
 }
 export function updateRosteredBowler(
   id: string,
-  patch: Partial<Pick<RosteredBowlerRecord, "name" | "entryAverage" | "active">>,
+  patch: Partial<Pick<RosteredBowlerRecord, "name" | "entryAverage" | "active" | "bowlerNumber">>,
 ): void {
   if (patch.name != null && isDuplicateActiveRosterName(patch.name, id))
     throw new Error(`An active roster bowler named "${patch.name.trim()}" already exists.`);
+  if (patch.bowlerNumber != null) {
+    const bn = patch.bowlerNumber.trim();
+    if (bn && !isValidBowlerNumber(bn))
+      throw new Error("ID Number must be 1–10 characters.");
+  }
   commit({
     ...state.db,
     rostered: state.db.rostered.map((b) => {
@@ -377,7 +473,10 @@ export function updateRosteredBowler(
       const name = patch.name != null ? patch.name.trim() : b.name;
       const entryAverage = patch.entryAverage != null ? patch.entryAverage : b.entryAverage;
       const active = patch.active != null ? patch.active : b.active;
-      return { ...b, name, entryAverage, handicap: computeHandicap(entryAverage), active };
+      const bowlerNumber = patch.bowlerNumber != null
+        ? (patch.bowlerNumber.trim() || undefined)
+        : b.bowlerNumber;
+      return { ...b, name, entryAverage, handicap: computeHandicap(entryAverage), active, bowlerNumber };
     }),
   });
 }
@@ -389,30 +488,49 @@ export function archiveRosteredBowler(id: string): void {
   });
 }
 
-export function addSubstitute(name: string): SubstituteRecord {
+export function addSubstitute(
+  name: string,
+  opts?: { bowlerNumber?: string; startingAverage?: number },
+): SubstituteRecord {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Name is required.");
   if (isDuplicateActiveSubName(trimmed))
     throw new Error(`An active substitute named "${trimmed}" already exists.`);
+  const bn = opts?.bowlerNumber?.trim() || undefined;
+  if (bn && !isValidBowlerNumber(bn))
+    throw new Error("ID Number must be 1–10 characters.");
   const record: SubstituteRecord = {
     id: nextSubId(), name: trimmed, active: true, archived: false,
+    bowlerNumber: bn,
+    startingAverage: opts?.startingAverage,
   };
   commit({ ...state.db, subs: [...state.db.subs, record] });
   return record;
 }
 export function updateSubstitute(
   id: string,
-  patch: Partial<Pick<SubstituteRecord, "name" | "active">>,
+  patch: Partial<Pick<SubstituteRecord, "name" | "active" | "bowlerNumber" | "startingAverage">>,
 ): void {
   if (patch.name != null && isDuplicateActiveSubName(patch.name, id))
     throw new Error(`An active substitute named "${patch.name.trim()}" already exists.`);
+  if (patch.bowlerNumber != null) {
+    const bn = patch.bowlerNumber.trim();
+    if (bn && !isValidBowlerNumber(bn))
+      throw new Error("ID Number must be 1–10 characters.");
+  }
   commit({
     ...state.db,
     subs: state.db.subs.map((s) => {
       if (s.id !== id) return s;
       const name = patch.name != null ? patch.name.trim() : s.name;
       const active = patch.active != null ? patch.active : s.active;
-      return { ...s, name, active };
+      const bowlerNumber = patch.bowlerNumber != null
+        ? (patch.bowlerNumber.trim() || undefined)
+        : s.bowlerNumber;
+      const startingAverage = patch.startingAverage != null
+        ? patch.startingAverage
+        : s.startingAverage;
+      return { ...s, name, active, bowlerNumber, startingAverage };
     }),
   });
 }
@@ -446,15 +564,21 @@ export function publishWeek(week: number, slots: ScheduleSlot[]): void {
 function applyScheduleSlots(week: number, slots: ScheduleSlot[], publish: boolean) {
   const existing = state.db.matchesByWeek[week] ?? [];
   const byKey = new Map(existing.map((m) => [`${m.lanePair}-${m.slot}`, m]));
+  const rosterById = new Map(state.db.rostered.map((b) => [b.id, b]));
   const nextMatches: Match[] = slots.map((s) => {
     const key = `${s.lanePair}-${s.slot}`;
     const prior = byKey.get(key);
     if (prior && prior.result) return prior; // frozen: has a saved result
+    // FREEZE the bowler ID numbers into the Match at schedule-save time.
+    // Editing a roster ID later will only affect matches saved AFTER
+    // that edit — historical schedules keep the ID they were published with.
     return {
       id: prior?.id ?? `w${week}-${s.lanePair}-${s.slot}`,
       week, lanePair: s.lanePair, slot: s.slot,
       status: "scheduled",
       bowlerA: s.bowlerA, bowlerB: s.bowlerB,
+      bowlerNumberA: s.bowlerA ? rosterById.get(s.bowlerA)?.bowlerNumber : undefined,
+      bowlerNumberB: s.bowlerB ? rosterById.get(s.bowlerB)?.bowlerNumber : undefined,
     };
   });
   const now = Date.now();
@@ -483,11 +607,15 @@ export interface SideDraft {
   /** Required when status !== "absent". Three 10-frame games. */
   games?: [GameLinescore, GameLinescore, GameLinescore];
   /**
-   * OPTIONAL informational-only substitute average. Never affects scoring.
-   * Scoring handicap is ALWAYS derived from the scheduled bowler's current
-   * roster entry average at save time.
+   * Substitute's own Starting Average — REQUIRED for any substitute row.
+   * The sub's handicap (floor(0.80 * (160 - startingAverage))) becomes THIS
+   * match's scoring handicap for the side. W-L points and the resulting
+   * handicap pinfall are still credited to the SCHEDULED bowler in
+   * standings via the buildSnapshot roster credit rules.
+   * When the admin picks a pool sub with a saved startingAverage, this
+   * may be omitted and the pool value is used.
    */
-  substituteAverageInfo?: number;
+  substituteStartingAverage?: number;
 }
 export interface ResultDraft {
   matchId: string;
@@ -561,13 +689,35 @@ export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   }
   if (errors.length > 0) return { ok: false, errors };
 
-  // FROZEN scheduled entry average / handicap. NEVER swap in a substitute's
-  // informational average — scoring handicap is always the scheduled
-  // bowler's current handicap at save time.
-  const entryA = sched.A.entryAverage;
-  const entryB = sched.B.entryAverage;
-  const hcpA = computeHandicap(entryA);
-  const hcpB = computeHandicap(entryB);
+  // Per-side entry average / handicap for scoring:
+  //   - rostered / absent → scheduled bowler's frozen entry average
+  //   - substitute        → the SUB's Starting Average (draft override or
+  //                         pool record), yielding the sub's handicap
+  // W-L awards + handicap pinfall computed from these still credit the
+  // SCHEDULED bowler in standings via buildSnapshot's roster-credit rules.
+  const resolveSide = (
+    side: "A" | "B", schedRec: RosteredBowlerRecord, sd: SideDraft,
+    part: SideParticipation,
+  ): { entry: number; hcp: number } | null => {
+    if (part.status !== "substitute") {
+      const e = schedRec.entryAverage;
+      return { entry: e, hcp: computeHandicap(e) };
+    }
+    let sa = sd.substituteStartingAverage;
+    if (sa == null && sd.substituteId) {
+      sa = state.db.subs.find((s) => s.id === sd.substituteId)?.startingAverage;
+    }
+    if (sa == null || !Number.isFinite(sa)) {
+      errors.push(`Side ${side}: substitute Starting Average is required.`);
+      return null;
+    }
+    return { entry: sa, hcp: computeHandicap(sa) };
+  };
+  const rA = resolveSide("A", sched.A, draft.sideA, pA);
+  const rB = resolveSide("B", sched.B, draft.sideB, pB);
+  if (!rA || !rB) return { ok: false, errors };
+  const entryA = rA.entry, hcpA = rA.hcp;
+  const entryB = rB.entry, hcpB = rB.hcp;
 
   const linescoreA = draft.sideA.games ? assembleSideLinescore({
     scheduled: rosteredToBowler(sched.A),
@@ -593,6 +743,7 @@ export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   const updatedMatch: Match = { ...match, status: "completed", result };
   try { assertMatchResult(updatedMatch, result); }
   catch (e) { return { ok: false, errors: [(e as Error).message] }; }
+
 
   const wk = updatedMatch.week;
   // REPLACEMENT semantics: map over existing matches so a re-save of the
@@ -756,16 +907,26 @@ export function findSubRecord(id: string, s: StoreState = state): SubstituteReco
       `${m.id}: missing frozen handicaps`);
   }
 
-  // #10 substitute frozen scoring: handicap on the result equals the
-  //     SCHEDULED bowler's handicap at result time (never the sub's).
+  // #10 v4 substitute scoring: when a substitute rolled, the frozen
+  //     handicap on the result is the SUB's handicap (from Starting
+  //     Average). When rostered/absent, it equals the scheduled bowler's.
   for (const m of Object.values(db.matchesByWeek).flat()) {
     if (!m.result) continue;
+    const r = m.result;
     const sA = db.rostered.find((b) => b.id === m.bowlerA);
     const sB = db.rostered.find((b) => b.id === m.bowlerB);
-    if (sA) check(m.result.handicapA === computeHandicap(sA.entryAverage),
-      `${m.id}: side A handicap must be scheduled bowler's handicap`);
-    if (sB) check(m.result.handicapB === computeHandicap(sB.entryAverage),
-      `${m.id}: side B handicap must be scheduled bowler's handicap`);
+    if (sA && r.participationA.status !== "substitute")
+      check(r.handicapA === computeHandicap(sA.entryAverage),
+        `${m.id}: side A handicap must be scheduled bowler's handicap`);
+    if (sB && r.participationB.status !== "substitute")
+      check(r.handicapB === computeHandicap(sB.entryAverage),
+        `${m.id}: side B handicap must be scheduled bowler's handicap`);
+    if (r.participationA.status === "substitute")
+      check(r.handicapA === computeHandicap(r.entryAverageA),
+        `${m.id}: sub A handicap must derive from sub Starting Average`);
+    if (r.participationB.status === "substitute")
+      check(r.handicapB === computeHandicap(r.entryAverageB),
+        `${m.id}: sub B handicap must derive from sub Starting Average`);
   }
 
   // #11 substitute leakage: sub scratch must NOT be attributed to
@@ -787,9 +948,10 @@ export function findSubRecord(id: string, s: StoreState = state): SubstituteReco
     }
   }
 
-  // #12 schema version bumped to v3.
-  check(db.version === SCHEMA_VERSION && SCHEMA_VERSION === 3,
-    "schema version must be v3");
+  // #12 schema version bumped to v4.
+  check(db.version === SCHEMA_VERSION && SCHEMA_VERSION === 4,
+    "schema version must be v4");
+
 
   // #13 v2 → v3 migration backfills frozen names / averages and drops
   //     malformed note-only results.
