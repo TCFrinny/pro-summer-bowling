@@ -7,6 +7,7 @@ import {
   SEASON_LABEL,
   VENUE_NAME,
   WEEKS,
+  formatPoints,
   getStandingsSnapshot,
 } from "@/lib/mock-data";
 import { ArrowRight, Trophy, Users, CalendarDays } from "lucide-react";
@@ -113,7 +114,7 @@ function Index() {
                       avg {r.bowler.scratchAverage.toFixed(3)}
                     </span>
                     <span className="font-display text-lg text-gold">
-                      {r.bowler.points}
+                      {formatPoints(r.bowler.points)}
                     </span>
                   </div>
                 </div>

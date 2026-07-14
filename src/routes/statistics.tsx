@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { BOWLERS, type Bowler } from "@/lib/mock-data";
+import { BOWLERS, formatPoints, type Bowler } from "@/lib/mock-data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ const METRICS: { key: Metric; label: string; format: (b: Bowler) => string }[] =
       label: "Average",
       format: (b) => b.scratchAverage.toFixed(3),
     },
-    { key: "points", label: "Points", format: (b) => b.points.toString() },
+    { key: "points", label: "Points", format: (b) => formatPoints(b.points) },
     {
       key: "scratchPinfall",
       label: "Scratch Pinfall",

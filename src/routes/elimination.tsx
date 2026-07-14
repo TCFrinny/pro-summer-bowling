@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
+  formatPoints,
   getEliminationSnapshot,
   type EliminationStatus,
 } from "@/lib/mock-data";
@@ -111,7 +112,7 @@ function EliminationPage() {
               <tr key={r.bowler.id} className="hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
                 <td className="px-3 py-2 text-right font-display text-base text-gold">
-                  {r.bowler.points}
+                  {formatPoints(r.bowler.points)}
                 </td>
                 <td className="px-3 py-2">
                   <span
