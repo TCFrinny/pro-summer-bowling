@@ -20,6 +20,11 @@ import {
   type WeekSummary,
 } from "../src/lib/mock-data";
 
+import {
+  summarizeGame,
+  type FrameLinescore,
+} from "../src/lib/duckpin";
+
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error("absent-scoring: " + msg);
 }
@@ -32,43 +37,43 @@ const mkBowler = (id: string, name: string, entry: number): Bowler => ({
   movement: 0,
 });
 
-// Build a valid three-game linescore with all frames = X (strikes).
+const allStrikeFrames = (): FrameLinescore[] => ([
+  ...Array.from({ length: 9 }, (_, i) => ({
+    frameNumber: (i + 1) as FrameLinescore["frameNumber"],
+    mark: "X" as const,
+    cumulativeScore: 30 * (i + 1),
+  })),
+  { frameNumber: 10, mark: "XXX", cumulativeScore: 300 },
+]);
+const modestOpenFrames = (): FrameLinescore[] => ([
+  ...Array.from({ length: 9 }, (_, i) => ({
+    frameNumber: (i + 1) as FrameLinescore["frameNumber"],
+    mark: "-" as const,
+    cumulativeScore: 20 * (i + 1),
+  })),
+  { frameNumber: 10, mark: "-", cumulativeScore: 200 },
+]);
+
 function allStrikeLinescore(scheduled: Bowler, entry: number, handicap: number) {
-  const games = [0, 1, 2].map(() => ({
-    frames: [
-      ...Array.from({ length: 9 }, (_, i) => ({
-        frameNumber: (i + 1) as 1,
-        mark: "X" as const,
-        cumulativeScore: 30 * (i + 1),
-      })),
-      { frameNumber: 10 as 10, mark: "XXX" as const, cumulativeScore: 300 },
-    ],
-  }));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const games: [ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>] = [
+    summarizeGame(allStrikeFrames()),
+    summarizeGame(allStrikeFrames()),
+    summarizeGame(allStrikeFrames()),
+  ];
   return assembleSideLinescore({
     scheduled, actualId: scheduled.id, actualName: scheduled.name,
-    isSub: false, entryAverage: entry, handicap,
-    games: games as unknown as Parameters<typeof assembleSideLinescore>[0]["games"],
+    isSub: false, entryAverage: entry, handicap, games,
   });
 }
-
-// A modest realistic linescore: all opens = 20 pinfall per frame ⇒ 200.
 function modestOpenLinescore(scheduled: Bowler, entry: number, handicap: number) {
-  const games = [0, 1, 2].map(() => ({
-    frames: [
-      ...Array.from({ length: 9 }, (_, i) => ({
-        frameNumber: (i + 1) as 1,
-        mark: "-" as const,
-        cumulativeScore: 20 * (i + 1), // 9*20 = 180
-      })),
-      { frameNumber: 10 as 10, mark: "-" as const, cumulativeScore: 200 },
-    ],
-  }));
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const games: [ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>] = [
+    summarizeGame(modestOpenFrames()),
+    summarizeGame(modestOpenFrames()),
+    summarizeGame(modestOpenFrames()),
+  ];
   return assembleSideLinescore({
     scheduled, actualId: scheduled.id, actualName: scheduled.name,
-    isSub: false, entryAverage: entry, handicap,
-    games: games as unknown as Parameters<typeof assembleSideLinescore>[0]["games"],
+    isSub: false, entryAverage: entry, handicap, games,
   });
 }
 
