@@ -3,8 +3,11 @@ import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   formatPoints,
   getEliminationSnapshot,
+  getStandingsSnapshot,
   type EliminationStatus,
+  type EliminationRow,
 } from "@/lib/mock-data";
+import { sortEliminationRowsByStandings } from "@/lib/elimination-order";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale } from "lucide-react";
