@@ -1,13 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, EmptyState, PageHeader } from "@/components/layout/AppShell";
 import {
   WEEKS,
   formatPoints,
   getBowler,
   getMatchesForWeek,
-  type GameAward,
   type Match,
-  type MatchResult,
 } from "@/lib/mock-data";
 import { useState } from "react";
 import {
@@ -19,7 +17,8 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { Crown } from "lucide-react";
+import { ChevronDown, ChevronUp, Crown } from "lucide-react";
+import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
 
 export const Route = createFileRoute("/weekly-results")({
   head: () => ({
@@ -28,7 +27,7 @@ export const Route = createFileRoute("/weekly-results")({
       {
         name: "description",
         content:
-          "Full match linescores for the Pro Summer Singles duckpin league: per-game scores, handicap totals, and 7-point match points.",
+          "Full frame linescores for every completed match — three 10-frame duckpin games per bowler, plus 7-point match breakdown.",
       },
     ],
   }),
@@ -46,7 +45,7 @@ function WeeklyResultsPage() {
     <AppShell>
       <PageHeader
         title="Weekly Results"
-        subtitle="Saved linescores are the source of truth for every score, W-L point, and average shown on the site."
+        subtitle="Every score, W-L point, and season aggregate is derived from these frame linescores."
       >
         <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
           <SelectTrigger className="w-40">
@@ -60,6 +59,12 @@ function WeeklyResultsPage() {
             ))}
           </SelectContent>
         </Select>
+        <Link
+          to="/leaderboards"
+          className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent"
+        >
+          Leaderboards →
+        </Link>
       </PageHeader>
 
       {matches.length === 0 ? (
@@ -82,6 +87,8 @@ function MatchCard({ m }: { m: Match }) {
   const a = getBowler(m.bowlerA)!;
   const b = getBowler(m.bowlerB)!;
   const r = m.result!;
+  const [openA, setOpenA] = useState(false);
+  const [openB, setOpenB] = useState(false);
 
   return (
     <Card className="bg-card">
@@ -112,34 +119,77 @@ function MatchCard({ m }: { m: Match }) {
               </tr>
             </thead>
             <tbody>
-              <SideRow side="A" m={m} r={r} name={a.name} />
-              <SideRow side="B" m={m} r={r} name={b.name} />
+              <SummaryRow side="A" m={m} name={a.name} />
+              <SummaryRow side="B" m={m} name={b.name} />
             </tbody>
           </table>
         </div>
 
-        <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-muted-foreground">
-          <span>Game pts &amp; set pt shown below each score</span>
-          <span>
-            Set: higher hdcp total wins 1 pt (½ each on a tie)
-          </span>
+        <div className="mt-3 grid gap-2">
+          <ExpandRow
+            label={`View full linescore — ${a.name}`}
+            open={openA}
+            onToggle={() => setOpenA((v) => !v)}
+          >
+            <ThreeGameLinescore linescore={r.linescoreA} />
+          </ExpandRow>
+          <ExpandRow
+            label={`View full linescore — ${b.name}`}
+            open={openB}
+            onToggle={() => setOpenB((v) => !v)}
+          >
+            <ThreeGameLinescore linescore={r.linescoreB} />
+          </ExpandRow>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-widest text-muted-foreground">
+          <span>2 pts / game win · 1 pt tie · higher hdcp set wins +1</span>
+          <span>Exactly 7 pts per match</span>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function SideRow({
+function ExpandRow({
+  label,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-border/60">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center justify-between px-3 py-2 text-xs uppercase tracking-widest text-muted-foreground hover:bg-accent/40"
+      >
+        <span>{label}</span>
+        {open ? (
+          <ChevronUp className="h-4 w-4" />
+        ) : (
+          <ChevronDown className="h-4 w-4" />
+        )}
+      </button>
+      {open && <div className="border-t border-border/60 p-3">{children}</div>}
+    </div>
+  );
+}
+
+function SummaryRow({
   side,
   m,
-  r,
   name,
 }: {
   side: "A" | "B";
   m: Match;
-  r: MatchResult;
   name: string;
 }) {
+  const r = m.result!;
   const isA = side === "A";
   const games = isA ? r.gamesA : r.gamesB;
   const awards = isA ? r.gameAwardsA : r.gameAwardsB;
@@ -150,81 +200,79 @@ function SideRow({
   const sp = isA ? r.setPointA : r.setPointB;
   const total = isA ? r.totalPointsA : r.totalPointsB;
   const isSub = isA ? r.isSubA : r.isSubB;
+  const actualName = isA ? r.actualNameA : r.actualNameB;
   const winner = r.winner === side;
   const setWinner = sp === 1;
   const setTied = sp === 0.5;
-  void m;
 
   return (
-    <>
-      <tr className={cn(winner && "bg-primary/10")}>
-        <td className="py-1.5 pr-2">
-          <div className="flex items-center gap-1.5 font-medium">
-            {winner && <Crown className="h-3.5 w-3.5 text-gold" />}
-            <span>{name}</span>
-            {isSub && (
-              <span className="rounded bg-accent px-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">
-                sub
-              </span>
-            )}
-          </div>
-        </td>
-        <td className="py-1.5 text-right">{hdcp}</td>
-        {games.map((g, i) => (
-          <td key={i} className="py-1.5 text-right">
-            <GameCell game={g} award={awards[i]} />
-          </td>
-        ))}
-        <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
-        <td
-          className={cn(
-            "py-1.5 text-right font-semibold",
-            setWinner
-              ? "text-primary"
-              : setTied
-                ? "text-gold"
-                : "text-muted-foreground",
+    <tr className={cn(winner && "bg-primary/10")}>
+      <td className="py-1.5 pr-2">
+        <div className="flex items-center gap-1.5 font-medium">
+          {winner && <Crown className="h-3.5 w-3.5 text-gold" />}
+          <span>{name}</span>
+          {isSub && (
+            <span
+              title={`Rolled by ${actualName}`}
+              className="rounded bg-primary/25 px-1.5 text-[9px] uppercase tracking-widest text-primary"
+            >
+              sub
+            </span>
           )}
-        >
-          {hdcpTotal}
-          <div className="text-[9px] font-normal uppercase text-muted-foreground">
-            set +{formatPoints(sp)}
+        </div>
+        {isSub && (
+          <div className="text-[10px] text-muted-foreground">
+            rolled by {actualName}
           </div>
-        </td>
-        <td className="py-1.5 text-right">
-          <span
+        )}
+      </td>
+      <td className="py-1.5 text-right">{hdcp}</td>
+      {games.map((g, i) => (
+        <td key={i} className="py-1.5 text-right">
+          <div className="font-semibold">{g}</div>
+          <div
             className={cn(
-              "inline-block rounded px-1.5 font-display text-sm",
-              winner ? "bg-gold text-background" : "text-gold",
+              "mt-0.5 text-[9px] font-semibold uppercase",
+              awards[i] === 2
+                ? "text-primary"
+                : awards[i] === 1
+                  ? "text-gold"
+                  : "text-muted-foreground",
             )}
           >
-            {formatPoints(total)}
-          </span>
-          <div className="text-[9px] font-normal uppercase text-muted-foreground">
-            {gp} game · {formatPoints(sp)} set
+            +{awards[i]}
           </div>
         </td>
-      </tr>
-    </>
-  );
-}
-
-function GameCell({ game, award }: { game: number; award: GameAward }) {
-  return (
-    <div>
-      <div className="font-semibold">{game}</div>
-      <div
+      ))}
+      <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
+      <td
         className={cn(
-          "mt-0.5 text-[9px] font-semibold uppercase",
-          award === 2
+          "py-1.5 text-right font-semibold",
+          setWinner
             ? "text-primary"
-            : award === 1
+            : setTied
               ? "text-gold"
               : "text-muted-foreground",
         )}
       >
-        +{award}
-      </div>
-    </div>
+        {hdcpTotal}
+        <div className="text-[9px] font-normal uppercase text-muted-foreground">
+          set +{formatPoints(sp)}
+        </div>
+      </td>
+      <td className="py-1.5 text-right">
+        <span
+          className={cn(
+            "inline-block rounded px-1.5 font-display text-sm",
+            winner ? "bg-gold text-background" : "text-gold",
+          )}
+        >
+          {formatPoints(total)}
+        </span>
+        <div className="text-[9px] font-normal uppercase text-muted-foreground">
+          {gp} game · {formatPoints(sp)} set
+        </div>
+      </td>
+    </tr>
   );
 }

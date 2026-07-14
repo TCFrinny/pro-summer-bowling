@@ -13,11 +13,14 @@ import { Route as WeeklyResultsRouteImport } from './routes/weekly-results'
 import { Route as StatisticsRouteImport } from './routes/statistics'
 import { Route as StandingsRouteImport } from './routes/standings'
 import { Route as ScheduleRouteImport } from './routes/schedule'
+import { Route as LeaderboardsRouteImport } from './routes/leaderboards'
 import { Route as LaneDataRouteImport } from './routes/lane-data'
 import { Route as EliminationRouteImport } from './routes/elimination'
 import { Route as BowlersRouteImport } from './routes/bowlers'
 import { Route as AdminLoginRouteImport } from './routes/admin-login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.index'
+import { Route as LeaderboardsAdvancedRouteImport } from './routes/leaderboards.advanced'
 import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
 
 const WeeklyResultsRoute = WeeklyResultsRouteImport.update({
@@ -38,6 +41,11 @@ const StandingsRoute = StandingsRouteImport.update({
 const ScheduleRoute = ScheduleRouteImport.update({
   id: '/schedule',
   path: '/schedule',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LeaderboardsRoute = LeaderboardsRouteImport.update({
+  id: '/leaderboards',
+  path: '/leaderboards',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LaneDataRoute = LaneDataRouteImport.update({
@@ -65,6 +73,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LeaderboardsIndexRoute = LeaderboardsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LeaderboardsRoute,
+} as any)
+const LeaderboardsAdvancedRoute = LeaderboardsAdvancedRouteImport.update({
+  id: '/advanced',
+  path: '/advanced',
+  getParentRoute: () => LeaderboardsRoute,
+} as any)
 const BowlersBowlerIdRoute = BowlersBowlerIdRouteImport.update({
   id: '/$bowlerId',
   path: '/$bowlerId',
@@ -77,11 +95,14 @@ export interface FileRoutesByFullPath {
   '/bowlers': typeof BowlersRouteWithChildren
   '/elimination': typeof EliminationRoute
   '/lane-data': typeof LaneDataRoute
+  '/leaderboards': typeof LeaderboardsRouteWithChildren
   '/schedule': typeof ScheduleRoute
   '/standings': typeof StandingsRoute
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
+  '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -94,6 +115,8 @@ export interface FileRoutesByTo {
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
+  '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
+  '/leaderboards': typeof LeaderboardsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -102,11 +125,14 @@ export interface FileRoutesById {
   '/bowlers': typeof BowlersRouteWithChildren
   '/elimination': typeof EliminationRoute
   '/lane-data': typeof LaneDataRoute
+  '/leaderboards': typeof LeaderboardsRouteWithChildren
   '/schedule': typeof ScheduleRoute
   '/standings': typeof StandingsRoute
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
+  '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
+  '/leaderboards/': typeof LeaderboardsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -116,11 +142,14 @@ export interface FileRouteTypes {
     | '/bowlers'
     | '/elimination'
     | '/lane-data'
+    | '/leaderboards'
     | '/schedule'
     | '/standings'
     | '/statistics'
     | '/weekly-results'
     | '/bowlers/$bowlerId'
+    | '/leaderboards/advanced'
+    | '/leaderboards/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -133,6 +162,8 @@ export interface FileRouteTypes {
     | '/statistics'
     | '/weekly-results'
     | '/bowlers/$bowlerId'
+    | '/leaderboards/advanced'
+    | '/leaderboards'
   id:
     | '__root__'
     | '/'
@@ -140,11 +171,14 @@ export interface FileRouteTypes {
     | '/bowlers'
     | '/elimination'
     | '/lane-data'
+    | '/leaderboards'
     | '/schedule'
     | '/standings'
     | '/statistics'
     | '/weekly-results'
     | '/bowlers/$bowlerId'
+    | '/leaderboards/advanced'
+    | '/leaderboards/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -153,6 +187,7 @@ export interface RootRouteChildren {
   BowlersRoute: typeof BowlersRouteWithChildren
   EliminationRoute: typeof EliminationRoute
   LaneDataRoute: typeof LaneDataRoute
+  LeaderboardsRoute: typeof LeaderboardsRouteWithChildren
   ScheduleRoute: typeof ScheduleRoute
   StandingsRoute: typeof StandingsRoute
   StatisticsRoute: typeof StatisticsRoute
@@ -187,6 +222,13 @@ declare module '@tanstack/react-router' {
       path: '/schedule'
       fullPath: '/schedule'
       preLoaderRoute: typeof ScheduleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/leaderboards': {
+      id: '/leaderboards'
+      path: '/leaderboards'
+      fullPath: '/leaderboards'
+      preLoaderRoute: typeof LeaderboardsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/lane-data': {
@@ -224,6 +266,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/leaderboards/': {
+      id: '/leaderboards/'
+      path: '/'
+      fullPath: '/leaderboards/'
+      preLoaderRoute: typeof LeaderboardsIndexRouteImport
+      parentRoute: typeof LeaderboardsRoute
+    }
+    '/leaderboards/advanced': {
+      id: '/leaderboards/advanced'
+      path: '/advanced'
+      fullPath: '/leaderboards/advanced'
+      preLoaderRoute: typeof LeaderboardsAdvancedRouteImport
+      parentRoute: typeof LeaderboardsRoute
+    }
     '/bowlers/$bowlerId': {
       id: '/bowlers/$bowlerId'
       path: '/$bowlerId'
@@ -245,12 +301,27 @@ const BowlersRouteChildren: BowlersRouteChildren = {
 const BowlersRouteWithChildren =
   BowlersRoute._addFileChildren(BowlersRouteChildren)
 
+interface LeaderboardsRouteChildren {
+  LeaderboardsAdvancedRoute: typeof LeaderboardsAdvancedRoute
+  LeaderboardsIndexRoute: typeof LeaderboardsIndexRoute
+}
+
+const LeaderboardsRouteChildren: LeaderboardsRouteChildren = {
+  LeaderboardsAdvancedRoute: LeaderboardsAdvancedRoute,
+  LeaderboardsIndexRoute: LeaderboardsIndexRoute,
+}
+
+const LeaderboardsRouteWithChildren = LeaderboardsRoute._addFileChildren(
+  LeaderboardsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
   BowlersRoute: BowlersRouteWithChildren,
   EliminationRoute: EliminationRoute,
   LaneDataRoute: LaneDataRoute,
+  LeaderboardsRoute: LeaderboardsRouteWithChildren,
   ScheduleRoute: ScheduleRoute,
   StandingsRoute: StandingsRoute,
   StatisticsRoute: StatisticsRoute,

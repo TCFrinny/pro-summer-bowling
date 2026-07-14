@@ -1,39 +1,42 @@
 /**
  * Pro Summer Singles — Phase 1 mock data layer.
  *
+ * SOURCE OF TRUTH: full ball-by-ball, frame-by-frame duckpin linescores.
+ * Every completed match stores two `BowlerMatchLinescore` objects (three
+ * `GameLinescore` each). All game totals, scratch sets, handicap totals,
+ * per-game and set awards, standings, statistics, and leaderboards are
+ * DERIVED from those frame records at module load. Nothing is hand-entered.
+ *
  * SCORING (7-point duckpin singles):
- *   - 3 games per match.
- *   - Each game is worth 2 points. Win = 2, tie = 1 each, loss = 0
- *     (based on the handicap game score).
- *   - The 3-game set is worth 1 point, decided by TOTAL HANDICAP PINFALL.
- *     Win = 1, tie = 0.5 each, loss = 0.
- *   - Exactly 7 points are distributed per matchup (ties included).
- *   - Any bowler's match total can be 0, 0.5, 1, 1.5, ... up to 7.
- *   - Handicap = floor(0.80 * (160 - entryAverage)), minimum 0.
- *   - Season length = 11 weeks.
- *   - Official standings: total points won DESC, then handicap pinfall DESC.
- *   - Season averages are SCRATCH ONLY, displayed to 3 decimals.
+ *   - 3 games per match. 2 pts / game win (1 / tie) via HANDICAP game score.
+ *   - 1 set pt via total HANDICAP pinfall (0.5 / tie).
+ *   - Exactly 7 pts distributed per match.
+ *   - Handicap = floor(0.80 * (160 - entryAverage)), min 0.
+ *   - Season = 11 weeks. Official standings: points DESC, then handicap pinfall DESC.
  *
- * LINESCORES ARE THE SOURCE OF TRUTH:
- *   Every completed match stores a full two-bowler linescore (see
- *   `MatchResult`): scheduled + actual bowler per side, sub flag, entry
- *   average, handicap, three scratch games, three handicap games, scratch
- *   and handicap 3-game totals, per-game point awards, set point, and
- *   final match points. All season aggregates and leaderboards are
- *   derived once at module load from these linescores. There are no
- *   hand-entered aggregate numbers that can drift.
+ * SUBSTITUTES:
+ *   - League points and handicap pinfall are credited to the SCHEDULED bowler.
+ *   - Scratch performance, averages, strikes/spares/opens, and advanced
+ *     percentages belong to the ACTUAL bowler who rolled.
+ *   - Roster-only boards exclude off-roster substitute performances.
  *
- *   POA BASELINE (Phase 1): pins-over-average uses each bowler's
- *   ENTRY AVERAGE as the baseline (POA = scratch score − entry average).
- *   When the DB lands, this becomes a rolling scratch average per bowler.
- *
- * PERFORMANCE RULE (must remain true through every phase):
- *   Public pages must NEVER trigger season-wide recalculations at render
- *   time. Everything exported here represents *already-saved* records or
- *   pre-computed summaries. Aggregation runs ONCE at module load; public
- *   route navigation is O(bowlers) lookups against those cached maps.
+ * PERFORMANCE RULE:
+ *   Public pages must NEVER trigger season-wide recalculation on render.
+ *   Aggregation (season + per-week leaderboard caches) runs ONCE at module
+ *   load. Public route navigation is O(1) map lookup against cached data.
  */
 
+import {
+  rollDuckpinGame,
+  scoreGame,
+  stdev,
+  validateGame,
+  type Frame,
+  type GameLinescore,
+  type Roll,
+} from "./duckpin";
+
+export { type Frame, type GameLinescore, type Roll };
 
 export const LEAGUE_NAME = "Pro Summer Singles";
 export const VENUE_NAME = "Mt. Airy Lanes";
@@ -51,40 +54,29 @@ export interface Bowler {
   name: string;
   entryAverage: number;
   handicap: number;
-  /** Season scratch average, pre-computed and stored (3 decimals). */
   scratchAverage: number;
-  /** Season total match points WON (0..7 per match, half-points allowed). */
   points: number;
-  /** Season total match points LOST — equals (7 * matchesPlayed) − points. */
   pointsLost: number;
-  /** Season total game points only (0..6 per match). */
   gamePoints: number;
-  /**
-   * Season total set-point contribution (0, 0.5, or 1 per match).
-   * Retained internally because the set point still contributes to the
-   * 7-point match total, but it is no longer displayed as a separate
-   * standings statistic.
-   */
   setPoints: number;
   scratchPinfall: number;
   handicapPinfall: number;
   highGame: number;
   highSet: number;
-  /** Number of full 3-game sets rolled (== matches played, absent forfeits). */
   matchesPlayed: number;
-  /** Total individual games rolled (== matchesPlayed * 3 in Phase 1). */
   gamesPlayed: number;
-  /** +/- movement in standings since last week. */
+  /**
+   * Actual games rolled by the ROSTER member (subs excluded). Feeds scratch
+   * average and roster-only boards. May be less than gamesPlayed when the
+   * bowler had a sub roll a match on their behalf.
+   */
+  actualGamesRolled: number;
+  actualScratchPinfall: number;
   movement: number;
 }
 
 export const LANE_PAIRS = [
-  "1-2",
-  "3-4",
-  "5-6",
-  "7-8",
-  "9-10",
-  "11-12",
+  "1-2", "3-4", "5-6", "7-8", "9-10", "11-12",
 ] as const;
 export type LanePair = (typeof LANE_PAIRS)[number];
 
@@ -94,89 +86,87 @@ export interface Match {
   id: string;
   week: number;
   lanePair: LanePair;
-  /** Match number within the lane pair (1..3). */
   slot: number;
   status: MatchStatus;
-  /** Scheduled bowler on side A / B (roster assignment). */
   bowlerA: BowlerId;
   bowlerB: BowlerId;
-  /** Populated only when status === "completed". */
   result?: MatchResult;
 }
 
-
-/** Per-game awarded points: 2 (win), 1 (tie), or 0 (loss). */
 export type GameAward = 0 | 1 | 2;
-/** Set point award based on 3-game handicap pinfall total. */
 export type SetAward = 0 | 0.5 | 1;
 
+/** Frame-level linescore for one bowler in one match. */
+export interface BowlerMatchLinescore {
+  scheduledId: BowlerId;
+  /** Roster bowler who rolled, or null for an off-roster sub. */
+  actualId: BowlerId | null;
+  actualName: string;
+  isSub: boolean;
+  entryAverage: number;
+  handicap: number;
+  games: [GameLinescore, GameLinescore, GameLinescore];
+  scratchSet: number;
+  handicapGames: [number, number, number];
+  handicapSet: number;
+  strikes: number;
+  spares: number;
+  opens: number;
+  marks: number;
+  openPinsLeft: number;
+  framesRolled: number;
+}
+
 /**
- * Full two-bowler linescore for a completed match. This is the source of
- * truth — every standings, statistic, and profile total is derived from
- * these fields at module load. See `assertMatchResult` for the invariants
- * enforced on this data.
+ * Full two-bowler linescore for a completed match. The `games*` and
+ * `*Total` fields are DERIVED from `linescoreA/B.games[i].scratchTotal`
+ * and kept for compatibility with existing consumers.
  */
 export interface MatchResult {
-  /** Scheduled (rostered) bowlers, mirroring `Match.bowlerA/B`. */
   scheduledA: BowlerId;
   scheduledB: BowlerId;
-  /** Bowler who actually rolled that night (may differ if a sub filled in). */
-  actualA: BowlerId;
-  actualB: BowlerId;
-  /** Sub flags for quick UI badges. */
+  actualA: BowlerId | null;
+  actualB: BowlerId | null;
+  actualNameA: string;
+  actualNameB: string;
   isSubA: boolean;
   isSubB: boolean;
-  /** Optional short label for the substitute ("sub" for now). */
   subA?: string;
   subB?: string;
-  /** Entry (book) averages used to compute the handicap for this match. */
   entryAverageA: number;
   entryAverageB: number;
-  /** Weekly handicap applied to each game (constant across the 3 games). */
   handicapA: number;
   handicapB: number;
-  /** Scratch (raw) game scores for the three games. */
+  linescoreA: BowlerMatchLinescore;
+  linescoreB: BowlerMatchLinescore;
   gamesA: [number, number, number];
   gamesB: [number, number, number];
-  /** Handicap game scores — gamesX[i] + handicapX per game. */
   handicapGamesA: [number, number, number];
   handicapGamesB: [number, number, number];
-  /** Sum of the three scratch games. */
   scratchTotalA: number;
   scratchTotalB: number;
-  /** Sum of the three handicap games. */
   handicapTotalA: number;
   handicapTotalB: number;
-  /** Awarded points per game for each side (each entry 0, 1, or 2). */
   gameAwardsA: [GameAward, GameAward, GameAward];
   gameAwardsB: [GameAward, GameAward, GameAward];
-  /** Sum of gameAwards (0..6). */
   gamePointsA: number;
   gamePointsB: number;
-  /** Set point award from total handicap pinfall (0, 0.5, or 1). */
   setPointA: SetAward;
   setPointB: SetAward;
-  /** gamePoints + setPoint (0..7, always sums to 7 with opponent). */
   totalPointsA: number;
   totalPointsB: number;
   winner: "A" | "B" | "T";
 }
 
-/**
- * Runtime validator for a linescore. Throws in dev if a match's
- * per-game or per-side numbers don't add up. Kept dependency-free so
- * it runs at module load in every environment.
- */
 export function assertMatchResult(m: Match, r: MatchResult): void {
   const id = m.id;
   const check = (cond: boolean, msg: string) => {
     if (!cond) throw new Error(`Match ${id}: ${msg}`);
   };
-  // Per-game awards must sum to exactly 2 (2+0 for a win, 1+1 for a tie).
   for (let i = 0; i < 3; i++) {
     check(
       r.gameAwardsA[i] + r.gameAwardsB[i] === 2,
-      `game ${i + 1} awards must sum to 2 (got ${r.gameAwardsA[i]}+${r.gameAwardsB[i]})`,
+      `game ${i + 1} awards must sum to 2`,
     );
     check(
       r.handicapGamesA[i] === r.gamesA[i] + r.handicapA,
@@ -186,46 +176,36 @@ export function assertMatchResult(m: Match, r: MatchResult): void {
       r.handicapGamesB[i] === r.gamesB[i] + r.handicapB,
       `handicap game B${i + 1} mismatch`,
     );
+    check(
+      r.linescoreA.games[i].scratchTotal === r.gamesA[i],
+      `frame-derived A${i + 1} total ${r.linescoreA.games[i].scratchTotal} ≠ recorded ${r.gamesA[i]}`,
+    );
+    check(
+      r.linescoreB.games[i].scratchTotal === r.gamesB[i],
+      `frame-derived B${i + 1} total ${r.linescoreB.games[i].scratchTotal} ≠ recorded ${r.gamesB[i]}`,
+    );
   }
   const scratchA = r.gamesA[0] + r.gamesA[1] + r.gamesA[2];
   const scratchB = r.gamesB[0] + r.gamesB[1] + r.gamesB[2];
   check(scratchA === r.scratchTotalA, "scratchTotalA mismatch");
   check(scratchB === r.scratchTotalB, "scratchTotalB mismatch");
-  check(
-    r.handicapTotalA === scratchA + r.handicapA * 3,
-    "handicapTotalA mismatch",
-  );
-  check(
-    r.handicapTotalB === scratchB + r.handicapB * 3,
-    "handicapTotalB mismatch",
-  );
-  check(
-    r.gamePointsA === (r.gameAwardsA as number[]).reduce((s, x) => s + x, 0),
-    "gamePointsA mismatch",
-  );
-  check(
-    r.gamePointsB === (r.gameAwardsB as number[]).reduce((s, x) => s + x, 0),
-    "gamePointsB mismatch",
-  );
+  check(r.handicapTotalA === scratchA + r.handicapA * 3, "handicapTotalA mismatch");
+  check(r.handicapTotalB === scratchB + r.handicapB * 3, "handicapTotalB mismatch");
   check(r.setPointA + r.setPointB === 1, "set points must sum to 1");
-  check(
-    r.totalPointsA === r.gamePointsA + r.setPointA,
-    "totalPointsA mismatch",
-  );
-  check(
-    r.totalPointsB === r.gamePointsB + r.setPointB,
-    "totalPointsB mismatch",
-  );
   check(
     r.totalPointsA + r.totalPointsB === 7,
     `match must distribute exactly 7 points (got ${r.totalPointsA}+${r.totalPointsB})`,
   );
+  // Frame legality
+  for (let i = 0; i < 3; i++) {
+    validateGame(r.linescoreA.games[i], `${id} sideA game ${i + 1}`);
+    validateGame(r.linescoreB.games[i], `${id} sideB game ${i + 1}`);
+  }
 }
-
 
 export interface WeekSummary {
   week: number;
-  date: string; // ISO
+  date: string;
   completed: boolean;
 }
 
@@ -247,6 +227,10 @@ const LAST = [
   "Holt", "Ingle", "Jain",
 ];
 
+const SUB_NAMES = [
+  "Rick M.", "Terry L.", "Alicia P.", "Marco V.", "Dee K.", "Ronnie F.",
+];
+
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -261,10 +245,8 @@ function mulberry32(seed: number) {
 
 const rand = mulberry32(20260615);
 
-// Bowlers start empty on the aggregate fields — they are filled in from the
-// generated match data below so the season totals stay internally consistent.
 export const BOWLERS: Bowler[] = FIRST.map((f, i) => {
-  const entry = 110 + Math.floor(rand() * 55); // 110..164
+  const entry = 110 + Math.floor(rand() * 55);
   const handicap = computeHandicap(entry);
   return {
     id: `b${(i + 1).toString().padStart(2, "0")}`,
@@ -282,6 +264,8 @@ export const BOWLERS: Bowler[] = FIRST.map((f, i) => {
     highSet: 0,
     matchesPlayed: 0,
     gamesPlayed: 0,
+    actualGamesRolled: 0,
+    actualScratchPinfall: 0,
     movement: Math.round((rand() - 0.5) * 6),
   };
 });
@@ -295,7 +279,7 @@ export function getBowler(id: BowlerId): Bowler | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Weeks + matches (11 weeks; 7 completed to give a mid-season snapshot)
+// Weeks + matches
 // ---------------------------------------------------------------------------
 
 const TOTAL_WEEKS = 11;
@@ -308,6 +292,54 @@ export const WEEKS: WeekSummary[] = Array.from({ length: TOTAL_WEEKS }).map(
     completed: i < COMPLETED_WEEKS,
   }),
 );
+
+function buildBowlerLinescore(
+  scheduled: Bowler,
+  isSub: boolean,
+  subName: string | null,
+  r: () => number,
+): BowlerMatchLinescore {
+  // Actual bowler's skill differs when a sub rolls.
+  const actualEntry = isSub
+    ? Math.round(100 + r() * 60)
+    : scheduled.entryAverage;
+  const skill = Math.max(0.1, Math.min(0.95, (actualEntry - 90) / 80));
+  const games: [GameLinescore, GameLinescore, GameLinescore] = [
+    rollDuckpinGame(r, skill),
+    rollDuckpinGame(r, skill),
+    rollDuckpinGame(r, skill),
+  ];
+  const handicap = scheduled.handicap; // handicap tied to SCHEDULED bowler
+  const handicapGames: [number, number, number] = [
+    games[0].scratchTotal + handicap,
+    games[1].scratchTotal + handicap,
+    games[2].scratchTotal + handicap,
+  ];
+  const scratchSet =
+    games[0].scratchTotal + games[1].scratchTotal + games[2].scratchTotal;
+  const strikes = games.reduce((s, g) => s + g.strikes, 0);
+  const spares = games.reduce((s, g) => s + g.spares, 0);
+  const opens = games.reduce((s, g) => s + g.opens, 0);
+  const openPinsLeft = games.reduce((s, g) => s + g.openPinsLeft, 0);
+  return {
+    scheduledId: scheduled.id,
+    actualId: isSub ? null : scheduled.id,
+    actualName: isSub ? `Sub — ${subName}` : scheduled.name,
+    isSub,
+    entryAverage: actualEntry,
+    handicap,
+    games,
+    scratchSet,
+    handicapGames,
+    handicapSet: scratchSet + handicap * 3,
+    strikes,
+    spares,
+    opens,
+    marks: strikes + spares,
+    openPinsLeft,
+    framesRolled: 30,
+  };
+}
 
 function buildWeekMatches(week: number): Match[] {
   const r = mulberry32(1000 + week);
@@ -330,111 +362,63 @@ function buildWeekMatches(week: number): Match[] {
         bowlerB: b.id,
       };
       if (completed) {
-        const rollGame = (bowler: Bowler): number => {
-          // Draw around the entry average with realistic spread; keep in
-          // reasonable duckpin bounds.
-          const base = bowler.entryAverage + (r() * 40 - 20);
-          return Math.max(60, Math.min(210, Math.round(base)));
-        };
-        const gamesA: [number, number, number] = [
-          rollGame(a), rollGame(a), rollGame(a),
-        ];
-        const gamesB: [number, number, number] = [
-          rollGame(b), rollGame(b), rollGame(b),
-        ];
-
-        const gameAwardsA: [GameAward, GameAward, GameAward] = [0, 0, 0];
-        const gameAwardsB: [GameAward, GameAward, GameAward] = [0, 0, 0];
-        let gpA = 0;
-        let gpB = 0;
-        for (let i = 0; i < 3; i++) {
-          const sa = gamesA[i] + a.handicap;
-          const sb = gamesB[i] + b.handicap;
-          if (sa > sb) {
-            gameAwardsA[i] = 2;
-            gameAwardsB[i] = 0;
-            gpA += 2;
-          } else if (sb > sa) {
-            gameAwardsA[i] = 0;
-            gameAwardsB[i] = 2;
-            gpB += 2;
-          } else {
-            gameAwardsA[i] = 1;
-            gameAwardsB[i] = 1;
-            gpA += 1;
-            gpB += 1;
-          }
-        }
-        const scratchTotalA = gamesA[0] + gamesA[1] + gamesA[2];
-        const scratchTotalB = gamesB[0] + gamesB[1] + gamesB[2];
-        const handicapGamesA: [number, number, number] = [
-          gamesA[0] + a.handicap,
-          gamesA[1] + a.handicap,
-          gamesA[2] + a.handicap,
-        ];
-        const handicapGamesB: [number, number, number] = [
-          gamesB[0] + b.handicap,
-          gamesB[1] + b.handicap,
-          gamesB[2] + b.handicap,
-        ];
-        const handicapTotalA = scratchTotalA + a.handicap * 3;
-        const handicapTotalB = scratchTotalB + b.handicap * 3;
-
-        let setPointA: SetAward;
-        let setPointB: SetAward;
-        if (handicapTotalA > handicapTotalB) {
-          setPointA = 1;
-          setPointB = 0;
-        } else if (handicapTotalB > handicapTotalA) {
-          setPointA = 0;
-          setPointB = 1;
-        } else {
-          setPointA = 0.5;
-          setPointB = 0.5;
-        }
-
-        const totalPointsA = gpA + setPointA;
-        const totalPointsB = gpB + setPointB;
         const isSubA = r() < 0.06;
         const isSubB = r() < 0.06;
+        const subNameA = isSubA
+          ? SUB_NAMES[Math.floor(r() * SUB_NAMES.length)]
+          : null;
+        const subNameB = isSubB
+          ? SUB_NAMES[Math.floor(r() * SUB_NAMES.length)]
+          : null;
+        const lsA = buildBowlerLinescore(a, isSubA, subNameA, r);
+        const lsB = buildBowlerLinescore(b, isSubB, subNameB, r);
+
+        const gamesA: [number, number, number] = [
+          lsA.games[0].scratchTotal, lsA.games[1].scratchTotal, lsA.games[2].scratchTotal,
+        ];
+        const gamesB: [number, number, number] = [
+          lsB.games[0].scratchTotal, lsB.games[1].scratchTotal, lsB.games[2].scratchTotal,
+        ];
+        const gameAwardsA: [GameAward, GameAward, GameAward] = [0, 0, 0];
+        const gameAwardsB: [GameAward, GameAward, GameAward] = [0, 0, 0];
+        let gpA = 0, gpB = 0;
+        for (let i = 0; i < 3; i++) {
+          const sa = lsA.handicapGames[i];
+          const sb = lsB.handicapGames[i];
+          if (sa > sb) { gameAwardsA[i] = 2; gpA += 2; }
+          else if (sb > sa) { gameAwardsB[i] = 2; gpB += 2; }
+          else { gameAwardsA[i] = 1; gameAwardsB[i] = 1; gpA += 1; gpB += 1; }
+        }
+        let setPointA: SetAward, setPointB: SetAward;
+        if (lsA.handicapSet > lsB.handicapSet) { setPointA = 1; setPointB = 0; }
+        else if (lsB.handicapSet > lsA.handicapSet) { setPointA = 0; setPointB = 1; }
+        else { setPointA = 0.5; setPointB = 0.5; }
+        const totalPointsA = gpA + setPointA;
+        const totalPointsB = gpB + setPointB;
 
         match.result = {
-          scheduledA: a.id,
-          scheduledB: b.id,
-          // Phase 1: substitutes aren't modeled yet — actual = scheduled
-          // even when the sub flag is set (a real name arrives with the DB).
-          actualA: a.id,
-          actualB: b.id,
-          isSubA,
-          isSubB,
-          subA: isSubA ? "sub" : undefined,
-          subB: isSubB ? "sub" : undefined,
-          entryAverageA: a.entryAverage,
-          entryAverageB: b.entryAverage,
-          handicapA: a.handicap,
-          handicapB: b.handicap,
-          gamesA,
-          gamesB,
-          handicapGamesA,
-          handicapGamesB,
-          scratchTotalA,
-          scratchTotalB,
-          handicapTotalA,
-          handicapTotalB,
-          gameAwardsA,
-          gameAwardsB,
-          gamePointsA: gpA,
-          gamePointsB: gpB,
-          setPointA,
-          setPointB,
-          totalPointsA,
-          totalPointsB,
+          scheduledA: a.id, scheduledB: b.id,
+          actualA: lsA.actualId, actualB: lsB.actualId,
+          actualNameA: lsA.actualName, actualNameB: lsB.actualName,
+          isSubA, isSubB,
+          subA: subNameA ?? undefined, subB: subNameB ?? undefined,
+          entryAverageA: a.entryAverage, entryAverageB: b.entryAverage,
+          handicapA: a.handicap, handicapB: b.handicap,
+          linescoreA: lsA, linescoreB: lsB,
+          gamesA, gamesB,
+          handicapGamesA: lsA.handicapGames,
+          handicapGamesB: lsB.handicapGames,
+          scratchTotalA: lsA.scratchSet,
+          scratchTotalB: lsB.scratchSet,
+          handicapTotalA: lsA.handicapSet,
+          handicapTotalB: lsB.handicapSet,
+          gameAwardsA, gameAwardsB,
+          gamePointsA: gpA, gamePointsB: gpB,
+          setPointA, setPointB,
+          totalPointsA, totalPointsB,
           winner:
-            totalPointsA > totalPointsB
-              ? "A"
-              : totalPointsB > totalPointsA
-                ? "B"
-                : "T",
+            totalPointsA > totalPointsB ? "A"
+            : totalPointsB > totalPointsA ? "B" : "T",
         };
         assertMatchResult(match, match.result);
       }
@@ -449,15 +433,9 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
 );
 
 // ---------------------------------------------------------------------------
-// Aggregate season totals into each bowler (once, at module load).
+// Season aggregation (runs once).
 // ---------------------------------------------------------------------------
 
-/**
- * Season-total aggregation. Runs once at module load. Every field in
- * every `Bowler` — points won, points lost, pinfall, high game/set,
- * matches/games played, scratch average — is derived here from the
- * linescores. There are no hand-entered aggregates.
- */
 (function aggregateSeasonTotals() {
   for (const w of WEEKS) {
     if (!w.completed) continue;
@@ -467,61 +445,69 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
       const a = BOWLERS_BY_ID[m.bowlerA];
       const b = BOWLERS_BY_ID[m.bowlerB];
 
-      const applySide = (
-        bowler: Bowler,
-        games: [number, number, number],
-        gp: number,
-        sp: number,
-        total: number,
-        scratchTotal: number,
-        hdcpTotal: number,
-      ) => {
-        bowler.matchesPlayed += 1;
-        bowler.gamesPlayed += 3;
-        bowler.gamePoints += gp;
-        bowler.setPoints += sp;
-        bowler.points += total;
-        // Each match distributes exactly 7 points; the opponent's share is
-        // this bowler's "points lost" for W-L record purposes.
-        bowler.pointsLost += 7 - total;
-        bowler.scratchPinfall += scratchTotal;
-        bowler.handicapPinfall += hdcpTotal;
-        for (const g of games) {
-          if (g > bowler.highGame) bowler.highGame = g;
-        }
-        if (scratchTotal > bowler.highSet) bowler.highSet = scratchTotal;
-      };
+      // League points + handicap credited to SCHEDULED bowler regardless of sub.
+      a.matchesPlayed += 1; a.gamesPlayed += 3;
+      a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
+      a.points += r.totalPointsA; a.pointsLost += 7 - r.totalPointsA;
+      a.handicapPinfall += r.handicapTotalA;
+      // Scratch pinfall + high game/set: credited to scheduled for display
+      // continuity, but ACTUAL scratch pinfall (roster-only average) tracked
+      // separately below.
+      a.scratchPinfall += r.scratchTotalA;
+      for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
+      if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
 
-      applySide(
-        a, r.gamesA, r.gamePointsA, r.setPointA,
-        r.totalPointsA, r.scratchTotalA, r.handicapTotalA,
-      );
-      applySide(
-        b, r.gamesB, r.gamePointsB, r.setPointB,
-        r.totalPointsB, r.scratchTotalB, r.handicapTotalB,
-      );
+      b.matchesPlayed += 1; b.gamesPlayed += 3;
+      b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
+      b.points += r.totalPointsB; b.pointsLost += 7 - r.totalPointsB;
+      b.handicapPinfall += r.handicapTotalB;
+      b.scratchPinfall += r.scratchTotalB;
+      for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
+      if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
+
+      // Roster-only actual games (subs don't credit here).
+      if (!r.isSubA) {
+        a.actualGamesRolled += 3;
+        a.actualScratchPinfall += r.scratchTotalA;
+      }
+      if (!r.isSubB) {
+        b.actualGamesRolled += 3;
+        b.actualScratchPinfall += r.scratchTotalB;
+      }
     }
   }
   for (const bowler of BOWLERS) {
+    // Scratch average uses ROSTER-ONLY (actual) games; when a bowler never
+    // rolled personally, fall back to entryAverage so display isn't blank.
     bowler.scratchAverage =
-      bowler.gamesPlayed > 0
-        ? Number((bowler.scratchPinfall / bowler.gamesPlayed).toFixed(3))
-        : 0;
-    // Invariant: W + L == 7 * matchesPlayed
+      bowler.actualGamesRolled > 0
+        ? Number(
+            (bowler.actualScratchPinfall / bowler.actualGamesRolled).toFixed(3),
+          )
+        : bowler.entryAverage;
     const expected = 7 * bowler.matchesPlayed;
     if (Math.abs(bowler.points + bowler.pointsLost - expected) > 1e-9) {
       throw new Error(
-        `Bowler ${bowler.id} W+L (${bowler.points}+${bowler.pointsLost}) ≠ 7×matches (${expected})`,
+        `Bowler ${bowler.id} W+L ≠ 7×matches (${bowler.points}+${bowler.pointsLost} vs ${expected})`,
       );
     }
   }
 })();
 
-
-/** Return already-saved matches for a given week. */
 export function getMatchesForWeek(week: number): Match[] {
   return MATCHES_BY_WEEK[week] ?? [];
 }
+
+/** All completed matches, flat. */
+function allCompletedMatches(): Match[] {
+  const out: Match[] = [];
+  for (const w of WEEKS) if (w.completed) out.push(...MATCHES_BY_WEEK[w.week]);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Bowler history + season extras (derived from frames).
+// ---------------------------------------------------------------------------
 
 export interface BowlerHistoryRow {
   week: number;
@@ -543,14 +529,18 @@ export interface BowlerHistoryRow {
   setPoint: SetAward;
   totalPoints: number;
   pointsLost: number;
-  /** Pins over (entry) average for this set: scratchTotal − 3 × entryAverage. */
   poaSet: number;
-  /** Best single-game POA in this set. */
   poaBestGame: number;
   result: "W" | "L" | "T";
+  linescore: BowlerMatchLinescore;
+  opponentLinescore: BowlerMatchLinescore;
+  weekStrikes: number;
+  weekSpares: number;
+  weekOpens: number;
+  weekMarks: number;
+  weekMarkPct: number;
 }
 
-/** Return already-saved match rows for a bowler (history). */
 export function getBowlerHistory(id: BowlerId): BowlerHistoryRow[] {
   const rows: BowlerHistoryRow[] = [];
   const self = getBowler(id);
@@ -575,15 +565,19 @@ export function getBowlerHistory(id: BowlerId): BowlerHistoryRow[] {
       const tp = isA ? res.totalPointsA : res.totalPointsB;
       const awards = isA ? res.gameAwardsA : res.gameAwardsB;
       const isSub = isA ? res.isSubA : res.isSubB;
+      const ls = isA ? res.linescoreA : res.linescoreB;
+      const oppLs = isA ? res.linescoreB : res.linescoreA;
       const poaSet = scratchTotal - 3 * self.entryAverage;
       const poaBest = Math.max(...scores.map((g) => g - self.entryAverage));
+      const wMarks = ls.marks;
+      const wMarkPct = ls.framesRolled > 0 ? (wMarks / ls.framesRolled) * 100 : 0;
       rows.push({
         week: w.week,
         matchId: m.id,
         lanePair: m.lanePair,
         opponent: opp?.name ?? "—",
         opponentId: oppId,
-        actualBowler: self.name,
+        actualBowler: isSub ? ls.actualName : self.name,
         isSub,
         scores,
         handicap: hdcp,
@@ -599,61 +593,435 @@ export function getBowlerHistory(id: BowlerId): BowlerHistoryRow[] {
         pointsLost: 7 - tp,
         poaSet,
         poaBestGame: poaBest,
-        result: res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L",
+        result:
+          res.winner === "T" ? "T"
+          : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L",
+        linescore: ls,
+        opponentLinescore: oppLs,
+        weekStrikes: ls.strikes,
+        weekSpares: ls.spares,
+        weekOpens: ls.opens,
+        weekMarks: wMarks,
+        weekMarkPct: wMarkPct,
       });
     }
   }
   return rows;
 }
 
-/** Season POA/derived summary for a bowler. All from linescores. */
 export interface BowlerSeasonExtras {
   bestGamePOA: number;
   bestSetPOA: number;
   seasonPOA: number;
   lanePairUsage: { lanePair: LanePair; count: number }[];
+  strikes: number;
+  spares: number;
+  opens: number;
+  marks: number;
+  framesRolled: number;
+  markPct: number;
+  strikePct: number;
+  sparePct: number;
+  openPct: number;
+  spareConversionPct: number;
+  pinsLost: number; // avg pins standing on open frames
+  consistency: number; // stdev of scratch game scores
+}
+
+/** Roster-only frame aggregation across a bowler's completed matches. */
+function collectFrameStats(id: BowlerId, weekFilter?: number) {
+  const self = getBowler(id);
+  const empty = {
+    strikes: 0, spares: 0, opens: 0, framesRolled: 0,
+    openPinsLeft: 0, gameScores: [] as number[], scratchPinfall: 0,
+  };
+  if (!self) return empty;
+  const out = { ...empty };
+  for (const w of WEEKS) {
+    if (!w.completed) continue;
+    if (weekFilter != null && w.week !== weekFilter) continue;
+    for (const m of getMatchesForWeek(w.week)) {
+      const res = m.result;
+      if (!res) continue;
+      const isA = m.bowlerA === id;
+      const isB = m.bowlerB === id;
+      if (!isA && !isB) continue;
+      const ls = isA ? res.linescoreA : res.linescoreB;
+      // Roster-only: exclude when a sub rolled for this bowler.
+      if (ls.isSub) continue;
+      out.strikes += ls.strikes;
+      out.spares += ls.spares;
+      out.opens += ls.opens;
+      out.framesRolled += ls.framesRolled;
+      out.openPinsLeft += ls.openPinsLeft;
+      out.scratchPinfall += ls.scratchSet;
+      for (const g of ls.games) out.gameScores.push(g.scratchTotal);
+    }
+  }
+  return out;
 }
 
 export function getBowlerSeasonExtras(id: BowlerId): BowlerSeasonExtras {
   const self = getBowler(id);
   const rows = getBowlerHistory(id);
-  if (!self || rows.length === 0) {
+  if (!self) {
     return {
-      bestGamePOA: 0,
-      bestSetPOA: 0,
-      seasonPOA: 0,
+      bestGamePOA: 0, bestSetPOA: 0, seasonPOA: 0,
       lanePairUsage: LANE_PAIRS.map((lp) => ({ lanePair: lp, count: 0 })),
+      strikes: 0, spares: 0, opens: 0, marks: 0, framesRolled: 0,
+      markPct: 0, strikePct: 0, sparePct: 0, openPct: 0,
+      spareConversionPct: 0, pinsLost: 0, consistency: 0,
     };
   }
-  let bestGame = -Infinity;
-  let bestSet = -Infinity;
+  let bestGame = 0, bestSet = 0;
   const usage = new Map<LanePair, number>(LANE_PAIRS.map((lp) => [lp, 0]));
   for (const r of rows) {
-    if (r.poaBestGame > bestGame) bestGame = r.poaBestGame;
-    if (r.poaSet > bestSet) bestSet = r.poaSet;
+    if (r.poaBestGame > bestGame || bestGame === 0) bestGame = r.poaBestGame;
+    if (r.poaSet > bestSet || bestSet === 0) bestSet = r.poaSet;
     usage.set(r.lanePair, (usage.get(r.lanePair) ?? 0) + 1);
   }
   const seasonPOA =
-    self.gamesPlayed > 0
+    self.actualGamesRolled > 0
       ? Number(
-          (self.scratchPinfall / self.gamesPlayed - self.entryAverage).toFixed(3),
+          (self.actualScratchPinfall / self.actualGamesRolled - self.entryAverage).toFixed(3),
         )
       : 0;
+  const s = collectFrameStats(id);
+  const marks = s.strikes + s.spares;
+  const framesRolled = s.framesRolled;
+  const spareOpp = s.spares + s.opens;
   return {
-    bestGamePOA: bestGame,
-    bestSetPOA: bestSet,
+    bestGamePOA: rows.length ? bestGame : 0,
+    bestSetPOA: rows.length ? bestSet : 0,
     seasonPOA,
     lanePairUsage: LANE_PAIRS.map((lp) => ({
       lanePair: lp,
       count: usage.get(lp) ?? 0,
     })),
+    strikes: s.strikes,
+    spares: s.spares,
+    opens: s.opens,
+    marks,
+    framesRolled,
+    markPct: framesRolled > 0 ? (marks / framesRolled) * 100 : 0,
+    strikePct: framesRolled > 0 ? (s.strikes / framesRolled) * 100 : 0,
+    sparePct: framesRolled > 0 ? (s.spares / framesRolled) * 100 : 0,
+    openPct: framesRolled > 0 ? (s.opens / framesRolled) * 100 : 0,
+    spareConversionPct: spareOpp > 0 ? (s.spares / spareOpp) * 100 : 0,
+    pinsLost: s.opens > 0 ? s.openPinsLeft / s.opens : 0,
+    consistency: stdev(s.gameScores),
   };
 }
 
+// ---------------------------------------------------------------------------
+// Leaderboard cache (season + per-week). Built ONCE at module load.
+// ---------------------------------------------------------------------------
+
+export interface ScratchGameRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  week: number;
+  matchId: string;
+  opponent: string;
+  scratch: number;
+  handicap: number; // scratch + weekly handicap
+}
+export interface ScratchSetRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  week: number;
+  matchId: string;
+  opponent: string;
+  scratchSet: number;
+  handicapSet: number;
+}
+export interface AverageRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  games: number;
+  scratchAverage: number;
+  scratchPinfall: number;
+}
+export interface CreditedRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  week: number;
+  matchId: string;
+  opponent: string;
+  handicapScore: number;
+}
+export interface CreditedSeasonRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  points: number;
+  pointsLost: number;
+  matches: number;
+}
+export interface VolumeRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  games: number;
+  strikes: number;
+  spares: number;
+  opens: number;
+}
+export interface AdvancedRow {
+  bowlerId: BowlerId;
+  bowlerName: string;
+  games: number;
+  frames: number;
+  strikes: number;
+  spares: number;
+  opens: number;
+  marks: number;
+  markPct: number;
+  strikePct: number;
+  sparePct: number;
+  openPct: number;
+  spareConversionPct: number;
+  pinsLost: number;
+  consistency: number;
+}
+
+export interface StandardLeaderboards {
+  scope: "season" | number;
+  scratchHighGame: ScratchGameRow[];
+  scratchHighSeries: ScratchSetRow[];
+  topScratchAverages: AverageRow[];
+  hcpHighGame: ScratchGameRow[];
+  hcpHighSeries: ScratchSetRow[];
+  topTotalPoints: CreditedSeasonRow[];
+  mostStrikes: VolumeRow[];
+  mostSpares: VolumeRow[];
+  fewestOpens: VolumeRow[];
+}
+export interface AdvancedLeaderboards {
+  scope: "season" | number;
+  rows: AdvancedRow[];
+  minGamesForPct: number;
+  consistencyEligible: boolean;
+  minGamesForConsistency: number;
+}
+
+/** Walk every completed match once and emit roster-only + credited rows. */
+function buildLeaderboardsForScope(
+  scope: "season" | number,
+): { standard: StandardLeaderboards; advanced: AdvancedLeaderboards } {
+  const matches: Match[] =
+    scope === "season" ? allCompletedMatches() : getMatchesForWeek(scope).filter((m) => m.result);
+
+  // Roster-only per-game and per-set rows (scratch performance stays with actual bowler).
+  const scratchGames: ScratchGameRow[] = [];
+  const scratchSets: ScratchSetRow[] = [];
+  const hcpGames: ScratchGameRow[] = [];
+  const hcpSets: ScratchSetRow[] = [];
+
+  // Roster-only per-bowler aggregates for averages, volume, advanced.
+  interface Acc {
+    bowlerId: BowlerId;
+    bowlerName: string;
+    games: number;
+    frames: number;
+    strikes: number;
+    spares: number;
+    opens: number;
+    openPinsLeft: number;
+    scratchPinfall: number;
+    gameScores: number[];
+  }
+  const acc = new Map<BowlerId, Acc>();
+  const ensure = (id: BowlerId, name: string): Acc => {
+    let a = acc.get(id);
+    if (!a) {
+      a = {
+        bowlerId: id, bowlerName: name,
+        games: 0, frames: 0, strikes: 0, spares: 0, opens: 0,
+        openPinsLeft: 0, scratchPinfall: 0, gameScores: [],
+      };
+      acc.set(id, a);
+    }
+    return a;
+  };
+
+  // Credited (points/hcp) rows always tie to the SCHEDULED bowler.
+  const creditedGames: ScratchGameRow[] = [];
+  const creditedSets: ScratchSetRow[] = [];
+  const creditedSeason = new Map<BowlerId, CreditedSeasonRow>();
+
+  for (const m of matches) {
+    const r = m.result;
+    if (!r) continue;
+    const schedA = getBowler(m.bowlerA);
+    const schedB = getBowler(m.bowlerB);
+    if (!schedA || !schedB) continue;
+    const oppNameA = schedB.name;
+    const oppNameB = schedA.name;
+
+    for (const side of ["A", "B"] as const) {
+      const isA = side === "A";
+      const sched = isA ? schedA : schedB;
+      const ls = isA ? r.linescoreA : r.linescoreB;
+      const opp = isA ? oppNameA : oppNameB;
+      const scratchTot = isA ? r.scratchTotalA : r.scratchTotalB;
+      const hdcpTot = isA ? r.handicapTotalA : r.handicapTotalB;
+      const hdcpGames = isA ? r.handicapGamesA : r.handicapGamesB;
+      const scratchGamesArr = isA ? r.gamesA : r.gamesB;
+      const totalPts = isA ? r.totalPointsA : r.totalPointsB;
+
+      // CREDITED (to scheduled bowler)
+      for (let i = 0; i < 3; i++) {
+        creditedGames.push({
+          bowlerId: sched.id, bowlerName: sched.name,
+          week: m.week, matchId: m.id, opponent: opp,
+          scratch: scratchGamesArr[i], handicap: hdcpGames[i],
+        });
+      }
+      creditedSets.push({
+        bowlerId: sched.id, bowlerName: sched.name,
+        week: m.week, matchId: m.id, opponent: opp,
+        scratchSet: scratchTot, handicapSet: hdcpTot,
+      });
+      let seasonRow = creditedSeason.get(sched.id);
+      if (!seasonRow) {
+        seasonRow = {
+          bowlerId: sched.id, bowlerName: sched.name,
+          points: 0, pointsLost: 0, matches: 0,
+        };
+        creditedSeason.set(sched.id, seasonRow);
+      }
+      seasonRow.points += totalPts;
+      seasonRow.pointsLost += 7 - totalPts;
+      seasonRow.matches += 1;
+
+      // ROSTER-ONLY (actual bowler only, and only if roster member)
+      if (!ls.isSub && ls.actualId) {
+        const rosterId = ls.actualId;
+        const rosterName = getBowler(rosterId)?.name ?? ls.actualName;
+        for (let i = 0; i < 3; i++) {
+          const g = ls.games[i];
+          scratchGames.push({
+            bowlerId: rosterId, bowlerName: rosterName,
+            week: m.week, matchId: m.id, opponent: opp,
+            scratch: g.scratchTotal,
+            handicap: g.scratchTotal + ls.handicap,
+          });
+          hcpGames.push({
+            bowlerId: rosterId, bowlerName: rosterName,
+            week: m.week, matchId: m.id, opponent: opp,
+            scratch: g.scratchTotal,
+            handicap: g.scratchTotal + ls.handicap,
+          });
+        }
+        scratchSets.push({
+          bowlerId: rosterId, bowlerName: rosterName,
+          week: m.week, matchId: m.id, opponent: opp,
+          scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
+        });
+        hcpSets.push({
+          bowlerId: rosterId, bowlerName: rosterName,
+          week: m.week, matchId: m.id, opponent: opp,
+          scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
+        });
+        const a = ensure(rosterId, rosterName);
+        a.games += 3;
+        a.frames += ls.framesRolled;
+        a.strikes += ls.strikes;
+        a.spares += ls.spares;
+        a.opens += ls.opens;
+        a.openPinsLeft += ls.openPinsLeft;
+        a.scratchPinfall += ls.scratchSet;
+        for (const g of ls.games) a.gameScores.push(g.scratchTotal);
+      }
+    }
+  }
+
+  const topN = <T>(arr: T[], key: (x: T) => number, n: number, asc = false): T[] =>
+    [...arr].sort((x, y) => (asc ? key(x) - key(y) : key(y) - key(x))).slice(0, n);
+
+  const averages: AverageRow[] = [...acc.values()]
+    .filter((a) => a.games >= 3)
+    .map((a) => ({
+      bowlerId: a.bowlerId, bowlerName: a.bowlerName,
+      games: a.games,
+      scratchAverage: Number((a.scratchPinfall / a.games).toFixed(3)),
+      scratchPinfall: a.scratchPinfall,
+    }));
+
+  const volume: VolumeRow[] = [...acc.values()].map((a) => ({
+    bowlerId: a.bowlerId, bowlerName: a.bowlerName,
+    games: a.games,
+    strikes: a.strikes, spares: a.spares, opens: a.opens,
+  }));
+
+  const creditedSeasonRows: CreditedSeasonRow[] = [...creditedSeason.values()];
+
+  const standard: StandardLeaderboards = {
+    scope,
+    scratchHighGame: topN(scratchGames, (x) => x.scratch, 5),
+    scratchHighSeries: topN(scratchSets, (x) => x.scratchSet, 5),
+    topScratchAverages: topN(averages, (x) => x.scratchAverage, 10),
+    hcpHighGame: topN(hcpGames, (x) => x.handicap, 5),
+    hcpHighSeries: topN(hcpSets, (x) => x.handicapSet, 5),
+    topTotalPoints: topN(creditedSeasonRows, (x) => x.points, 10),
+    mostStrikes: topN(volume, (x) => x.strikes, 10),
+    mostSpares: topN(volume, (x) => x.spares, 10),
+    fewestOpens: topN(volume.filter((v) => v.games >= 3), (x) => x.opens, 10, true),
+  };
+
+  // Advanced (roster-only)
+  const MIN_PCT = 3;
+  const MIN_CONSISTENCY_SEASON = 6;
+  const isSeason = scope === "season";
+  const consistencyEligible = isSeason; // week view: skip consistency ranking
+  const rows: AdvancedRow[] = [...acc.values()]
+    .filter((a) => a.games >= MIN_PCT)
+    .map((a) => {
+      const marks = a.strikes + a.spares;
+      const spareOpp = a.spares + a.opens;
+      return {
+        bowlerId: a.bowlerId, bowlerName: a.bowlerName,
+        games: a.games, frames: a.frames,
+        strikes: a.strikes, spares: a.spares, opens: a.opens, marks,
+        markPct: a.frames > 0 ? (marks / a.frames) * 100 : 0,
+        strikePct: a.frames > 0 ? (a.strikes / a.frames) * 100 : 0,
+        sparePct: a.frames > 0 ? (a.spares / a.frames) * 100 : 0,
+        openPct: a.frames > 0 ? (a.opens / a.frames) * 100 : 0,
+        spareConversionPct: spareOpp > 0 ? (a.spares / spareOpp) * 100 : 0,
+        pinsLost: a.opens > 0 ? a.openPinsLeft / a.opens : 0,
+        consistency:
+          consistencyEligible && a.games >= MIN_CONSISTENCY_SEASON
+            ? stdev(a.gameScores)
+            : 0,
+      };
+    });
+
+  const advanced: AdvancedLeaderboards = {
+    scope,
+    rows,
+    minGamesForPct: MIN_PCT,
+    consistencyEligible,
+    minGamesForConsistency: MIN_CONSISTENCY_SEASON,
+  };
+  return { standard, advanced };
+}
+
+const SEASON_BOARDS = buildLeaderboardsForScope("season");
+const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> =
+  Object.fromEntries(
+    WEEKS.filter((w) => w.completed).map((w) => [w.week, buildLeaderboardsForScope(w.week)]),
+  );
+
+export function getStandardLeaderboards(scope: "season" | number): StandardLeaderboards {
+  if (scope === "season") return SEASON_BOARDS.standard;
+  return WEEK_BOARDS[scope]?.standard ?? SEASON_BOARDS.standard;
+}
+export function getAdvancedLeaderboards(scope: "season" | number): AdvancedLeaderboards {
+  if (scope === "season") return SEASON_BOARDS.advanced;
+  return WEEK_BOARDS[scope]?.advanced ?? SEASON_BOARDS.advanced;
+}
 
 // ---------------------------------------------------------------------------
-// Standings — served from a pre-saved snapshot, NOT computed on page load.
-// Official tiebreaker: points DESC, then handicap pinfall DESC.
+// Standings
 // ---------------------------------------------------------------------------
 
 export interface StandingsRow {
@@ -668,21 +1036,19 @@ export function getStandingsSnapshot(): StandingsRow[] {
     return b.handicapPinfall - a.handicapPinfall;
   });
   return sorted.map((b, i) => ({
-    rank: i + 1,
-    bowler: b,
-    movement: b.movement,
+    rank: i + 1, bowler: b, movement: b.movement,
   }));
 }
 
 // ---------------------------------------------------------------------------
-// Lane Data — pre-computed lane-pair summaries.
+// Lane Data
 // ---------------------------------------------------------------------------
 
 export interface LanePairSummary {
   lanePair: LanePair;
   games: number;
   average: number;
-  plusMinusPOA: number; // pins over average
+  plusMinusPOA: number;
 }
 
 export function getSeasonLaneSummaries(): LanePairSummary[] {
@@ -697,34 +1063,24 @@ export function getSeasonLaneSummaries(): LanePairSummary[] {
 export function getWeekLaneSummaries(week: number): LanePairSummary[] {
   const r = mulberry32(500 + week);
   return LANE_PAIRS.map((lp) => ({
-    lanePair: lp,
-    games: 18,
+    lanePair: lp, games: 18,
     average: Number((132 + r() * 12).toFixed(3)),
     plusMinusPOA: Number(((r() - 0.5) * 8).toFixed(2)),
   }));
 }
 
 // ---------------------------------------------------------------------------
-// Elimination — reads already-saved proofs. Never solves on render.
+// Elimination
 // ---------------------------------------------------------------------------
 
 export type EliminationStatus =
-  | "calculating"
-  | "clinched"
-  | "eliminated"
-  | "alive"
-  | "not_proven";
+  | "calculating" | "clinched" | "eliminated" | "alive" | "not_proven";
 
 export interface EliminationRow {
-  bowler: Bowler;
-  status: EliminationStatus;
-  note?: string;
+  bowler: Bowler; status: EliminationStatus; note?: string;
 }
-
 export interface EliminationSnapshot {
-  lastCalculatedAt: string; // ISO timestamp of last admin publish
-  weeksRemaining: number;
-  rows: EliminationRow[];
+  lastCalculatedAt: string; weeksRemaining: number; rows: EliminationRow[];
 }
 
 export function getEliminationSnapshot(): EliminationSnapshot {
@@ -745,30 +1101,20 @@ export function getEliminationSnapshot(): EliminationSnapshot {
   };
 }
 
-/** Format a points value (may be a half-integer) as "5", "4.5", etc. */
+/** Force scoreGame to remain reachable (also used by tests). */
+export { scoreGame };
+
 export function formatPoints(n: number): string {
   return Number.isInteger(n) ? n.toString() : n.toFixed(1);
 }
-
-/** Format a bowler's W-L record, e.g. "31 - 18" or "24.5 - 24.5". */
 export function formatRecord(won: number, lost: number): string {
   return `${formatPoints(won)} - ${formatPoints(lost)}`;
 }
-
-/**
- * Standard games-behind formula applied to points won/lost. Works even if
- * bowlers have completed different numbers of matches.
- *   PB = ((leaderWon - bowlerWon) + (bowlerLost - leaderLost)) / 2
- * The leader returns 0; the caller decides how to display that (usually "—").
- */
 export function computePointsBehind(
   leader: Pick<Bowler, "points" | "pointsLost">,
   bowler: Pick<Bowler, "points" | "pointsLost">,
 ): number {
   const pb =
-    ((leader.points - bowler.points) + (bowler.pointsLost - leader.pointsLost)) /
-    2;
-  // Clamp tiny negatives from floating-point noise.
+    ((leader.points - bowler.points) + (bowler.pointsLost - leader.pointsLost)) / 2;
   return pb < 0 ? 0 : pb;
 }
-
