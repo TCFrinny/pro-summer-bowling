@@ -174,8 +174,9 @@ export function validateGame(g: GameLinescore, ctx: string): void {
     const diff = f.cumulativeScore - prev;
     if (i < 9) {
       if (cls === "open") {
-        check(diff >= 0 && diff <= 9,
-          `frame ${i + 1} open contribution ${diff} outside 0..9`);
+        // Duckpin: three balls per frame, an open frame may total 0..10.
+        check(diff >= 0 && diff <= 10,
+          `frame ${i + 1} open contribution ${diff} outside 0..10`);
       } else if (cls === "spare") {
         check(diff >= 10 && diff <= 20,
           `frame ${i + 1} spare contribution ${diff} outside 10..20`);
@@ -186,8 +187,9 @@ export function validateGame(g: GameLinescore, ctx: string): void {
     } else {
       // frame 10 contribution includes any bonus balls.
       if (cls === "open") {
-        check(diff >= 0 && diff <= 9,
-          `frame 10 open contribution ${diff} outside 0..9`);
+        // Tenth-frame open still gets three balls; 0..10 allowed, no bonus.
+        check(diff >= 0 && diff <= 10,
+          `frame 10 open contribution ${diff} outside 0..10`);
       } else {
         check(diff >= 10 && diff <= 30,
           `frame 10 ${cls} contribution ${diff} outside 10..30`);
@@ -252,7 +254,8 @@ function generateTenth(
 ): { mark: string; contribution: number } {
   const first = pickMarkClass(rand, skill);
   if (first === "open") {
-    return { mark: "-", contribution: pickInRange(0, 9, rand, skill) };
+    // Duckpin open tenth: three balls, may total 0..10 (10-pin open is legal).
+    return { mark: "-", contribution: pickInRange(0, 10, rand, skill) };
   }
   if (first === "spare") {
     // bonus ball on fresh rack: strike → "/X", otherwise "/"
@@ -280,7 +283,7 @@ export function rollMockGame(rand: () => number, skill: number): GameLinescore {
     const cls = pickMarkClass(rand, skill);
     const mark = cls === "strike" ? "X" : cls === "spare" ? "/" : "-";
     let contribution: number;
-    if (cls === "open") contribution = pickInRange(0, 9, rand, skill);
+    if (cls === "open") contribution = pickInRange(0, 10, rand, skill);
     else if (cls === "spare") contribution = pickInRange(10, 20, rand, skill);
     else contribution = pickInRange(10, 30, rand, skill);
     cum += contribution;
