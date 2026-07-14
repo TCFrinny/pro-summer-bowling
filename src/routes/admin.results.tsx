@@ -15,6 +15,7 @@ import {
   getAdminScheduleData,
   saveMatchResult,
 } from "@/lib/schedule-repo.functions";
+import { effectiveHandicapForUi } from "@/lib/substitute-handicap";
 import { SNAPSHOT_QUERY_KEY } from "@/lib/public-snapshot";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
