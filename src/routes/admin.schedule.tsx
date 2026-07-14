@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
-  BOWLERS,
   LANE_PAIRS,
   WEEKS,
   getMatchesForWeek,
@@ -10,6 +9,7 @@ import {
   type LanePair,
   type Match,
 } from "@/lib/mock-data";
+import { selectActiveRoster, useLeagueState } from "@/lib/league-store";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -56,6 +56,8 @@ function loadDraftForWeek(week: number): DraftSlot[] {
 }
 
 function AdminSchedulePage() {
+  const league = useLeagueState();
+  const activeRoster = selectActiveRoster(league);
   const [week, setWeek] = useState<number>(1);
   const [draft, setDraft] = useState<DraftSlot[]>(() => loadDraftForWeek(1));
   const [flash, setFlash] = useState<string | null>(null);
@@ -197,12 +199,14 @@ function AdminSchedulePage() {
                         value={r.bowlerA}
                         onChange={(v) => setSlot(idx, { bowlerA: v })}
                         invalid={Boolean(dupSelf || dupA)}
+                        options={activeRoster}
                       />
                       <span className="text-xs text-muted-foreground">vs</span>
                       <BowlerSelect
                         value={r.bowlerB}
                         onChange={(v) => setSlot(idx, { bowlerB: v })}
                         invalid={Boolean(dupSelf || dupB)}
+                        options={activeRoster}
                       />
                     </div>
                   );
@@ -220,10 +224,12 @@ function BowlerSelect({
   value,
   onChange,
   invalid,
+  options,
 }: {
   value: BowlerId | "";
   onChange: (v: BowlerId | "") => void;
   invalid?: boolean;
+  options: { id: string; name: string }[];
 }) {
   return (
     <Select value={value || undefined} onValueChange={(v) => onChange(v as BowlerId)}>
@@ -231,7 +237,7 @@ function BowlerSelect({
         <SelectValue placeholder="Select bowler…" />
       </SelectTrigger>
       <SelectContent>
-        {BOWLERS.map((b) => (
+        {options.map((b) => (
           <SelectItem key={b.id} value={b.id}>
             {b.name}
           </SelectItem>

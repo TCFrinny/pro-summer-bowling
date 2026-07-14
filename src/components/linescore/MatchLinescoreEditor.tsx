@@ -6,6 +6,7 @@
 
 import { useCallback, useState } from "react";
 import { GameEditor, emptyGameEditorState, type GameEditorState } from "./GameEditor";
+import { buildGameFromInput } from "@/lib/frame-input";
 import type { GameLinescore } from "@/lib/duckpin";
 
 export interface SideEditorState {
@@ -35,9 +36,6 @@ export function computeSideDerived(state: SideEditorState, handicap: number): Si
       g.cumulatives.every((c) => c.trim() !== "");
     if (!complete) { allValid = false; continue; }
     const cums = g.cumulatives.map((c) => Number(c));
-    // Build lazily — reuse the same helper as GameEditor.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { buildGameFromInput } = require("@/lib/frame-input") as typeof import("@/lib/frame-input");
     const r = buildGameFromInput({ marks: g.marks, cumulatives: cums });
     if (!r.game) { allValid = false; continue; }
     built[i] = r.game;
