@@ -5,7 +5,7 @@
  *   2. Re-checks admin role via SECURITY DEFINER RPC current_user_is_admin
  *   3. Ensures the current-season row exists (idempotent)
  *   4. Applies the mutation using the user-scoped Supabase client (RLS)
- *   5. Rebuilds the public snapshot for the current season in the same call
+ *   5. Rebuilds the public snapshot for the current season on success
  *
  * The snapshot rebuild is the ONLY place PublicSnapshot is written, keeping
  * the "public reads never recompute" rule intact.
@@ -13,7 +13,9 @@
 
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Database } from "@/integrations/supabase/types";
 import {
   buildSnapshotFromRows,
   nextRosterIdFrom,
@@ -23,74 +25,196 @@ import {
   validateBowlerNumber,
   isDuplicateActive,
   ROSTER_MAX_ACTIVE,
+  BOWLER_NUMBER_MAX_LEN,
   type RosteredRow,
   type SubRow,
 } from "@/lib/roster-adapter";
 import { computeHandicap } from "@/lib/mock-data";
 
-// -- Shared server helpers ----------------------------------------------
+// ---------------------------------------------------------------------------
+// Typed context
+// ---------------------------------------------------------------------------
 
-type Ctx = { supabase: ReturnType<typeof makeClient>; userId: string };
-// A stand-in type so TS doesn't require pulling in the full Database generic
-// at module scope. Actual client comes from requireSupabaseAuth context.
-declare function makeClient(): {
-  from: (t: string) => any;
-  rpc: (name: string, args?: unknown) => Promise<{ data: unknown; error: { message: string } | null }>;
-};
+type AuthedSupabase = SupabaseClient<Database>;
+type AuthedCtx = { supabase: AuthedSupabase; userId: string };
 
-async function ensureAdmin(context: { supabase: any }) {
+async function ensureAdmin(context: AuthedCtx): Promise<void> {
   const { data, error } = await context.supabase.rpc("current_user_is_admin");
   if (error) throw new Error(`admin check failed: ${error.message}`);
-  if (!data) throw new Error("Forbidden: admin role required");
+  if (data !== true) throw new Error("Forbidden: admin role required");
 }
 
-async function ensureCurrentSeasonId(context: { supabase: any }): Promise<string> {
+async function ensureCurrentSeasonId(context: AuthedCtx): Promise<string> {
   const existing = await context.supabase
     .from("seasons")
     .select("id")
     .eq("is_current", true)
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
-  if (existing.data?.id) return existing.data.id as string;
+  if (existing.data?.id) return existing.data.id;
   const inserted = await context.supabase
     .from("seasons")
     .insert({ label: "2026 Summer", is_current: true })
     .select("id")
     .single();
   if (inserted.error) throw new Error(inserted.error.message);
-  return inserted.data.id as string;
+  return inserted.data.id;
 }
 
-async function loadRosterRows(context: { supabase: any }, seasonId: string): Promise<RosteredRow[]> {
+async function loadRosterRows(context: AuthedCtx, seasonId: string): Promise<RosteredRow[]> {
   const res = await context.supabase
     .from("rostered_bowlers")
     .select("id, name, entry_average, handicap, active, archived, bowler_number, season_id")
     .eq("season_id", seasonId);
   if (res.error) throw new Error(res.error.message);
-  return (res.data ?? []) as RosteredRow[];
+  // Coerce numeric column (comes back as number from PostgREST) to Number for safety.
+  return (res.data ?? []).map((r) => ({
+    ...r,
+    entry_average: Number(r.entry_average),
+  })) as RosteredRow[];
 }
-async function loadSubRows(context: { supabase: any }, seasonId: string): Promise<SubRow[]> {
+async function loadSubRows(context: AuthedCtx, seasonId: string): Promise<SubRow[]> {
   const res = await context.supabase
     .from("substitutes")
     .select("id, name, starting_average, handicap, active, archived, bowler_number, season_id")
     .eq("season_id", seasonId);
   if (res.error) throw new Error(res.error.message);
-  return (res.data ?? []) as SubRow[];
+  return (res.data ?? []).map((r) => ({
+    ...r,
+    starting_average: r.starting_average != null ? Number(r.starting_average) : null,
+  })) as SubRow[];
 }
 
-async function rebuildSnapshot(context: { supabase: any }, seasonId: string): Promise<void> {
+async function rebuildSnapshot(context: AuthedCtx, seasonId: string): Promise<void> {
   const rostered = await loadRosterRows(context, seasonId);
   const snapshot = buildSnapshotFromRows({ rostered });
   const up = await context.supabase
     .from("public_snapshots")
     .upsert(
-      { season_id: seasonId, snapshot: snapshot as unknown as Record<string, unknown> },
+      // The generated Insert type for `snapshot` is `Json`; a PublicSnapshot
+      // is JSON-serializable so the cast is safe and localised here.
+      { season_id: seasonId, snapshot: snapshot as unknown as Database["public"]["Tables"]["public_snapshots"]["Insert"]["snapshot"] },
       { onConflict: "season_id" },
     );
   if (up.error) throw new Error(`snapshot upsert failed: ${up.error.message}`);
 }
 
-// -- READ ---------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Activation & reference-check guards
+// ---------------------------------------------------------------------------
+
+/** Verifies that setting `id`→active would not exceed max active roster
+ *  size nor create a duplicate active name. Pass exceptId=id so the row's
+ *  own current row does not count against itself. */
+function guardRosterActivation(params: {
+  rows: RosteredRow[];
+  name: string;
+  exceptId?: string;
+}): void {
+  const active = params.rows.filter(
+    (r) => r.active && !r.archived && r.id !== params.exceptId,
+  );
+  if (active.length >= ROSTER_MAX_ACTIVE) {
+    throw new Error(
+      `Active roster is full (${ROSTER_MAX_ACTIVE} max). Archive or deactivate another bowler first.`,
+    );
+  }
+  if (isDuplicateActive(params.name, params.rows, params.exceptId)) {
+    throw new Error(
+      `A bowler named "${params.name.trim()}" is already on the active roster.`,
+    );
+  }
+}
+function guardSubActivation(params: {
+  rows: SubRow[];
+  name: string;
+  exceptId?: string;
+}): void {
+  if (isDuplicateActive(params.name, params.rows, params.exceptId)) {
+    throw new Error(
+      `A substitute named "${params.name.trim()}" is already active.`,
+    );
+  }
+}
+
+/** True when any schedule_slot references this roster bowler in either slot. */
+async function isRosterReferenced(
+  context: AuthedCtx,
+  bowlerId: string,
+): Promise<boolean> {
+  const refs = await context.supabase
+    .from("schedule_slots")
+    .select("id", { count: "exact", head: true })
+    .or(`bowler_a_id.eq.${bowlerId},bowler_b_id.eq.${bowlerId}`);
+  if (refs.error) throw new Error(refs.error.message);
+  return (refs.count ?? 0) > 0;
+}
+
+/** True when any match_result's side_a/side_b JSON references this sub id.
+ *  PostgREST JSON `->>` accessor lets us match on the frozen subId key that
+ *  admin/results writes into SideParticipation. */
+async function isSubReferenced(
+  context: AuthedCtx,
+  subId: string,
+): Promise<boolean> {
+  // We use two independent HEAD counts because PostgREST does not support
+  // OR across `->>` filters cleanly with the `or=` grammar in all drivers.
+  const [a, b] = await Promise.all([
+    context.supabase
+      .from("match_results")
+      .select("id", { count: "exact", head: true })
+      .eq("side_a->>subId", subId),
+    context.supabase
+      .from("match_results")
+      .select("id", { count: "exact", head: true })
+      .eq("side_b->>subId", subId),
+  ]);
+  if (a.error) throw new Error(a.error.message);
+  if (b.error) throw new Error(b.error.message);
+  return (a.count ?? 0) + (b.count ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Input schemas
+// ---------------------------------------------------------------------------
+
+const bowlerNumberSchema = z
+  .string({ required_error: "ID Number is required." })
+  .transform((s) => s.trim())
+  .refine((s) => s.length >= 1, { message: "ID Number is required (1–10 characters)." })
+  .refine((s) => s.length <= BOWLER_NUMBER_MAX_LEN, {
+    message: "ID Number must be 1–10 characters.",
+  });
+
+const rosterInput = z.object({
+  name: z.string(),
+  entryAverage: z.number(),
+  bowlerNumber: bowlerNumberSchema,
+  active: z.boolean().optional(),
+});
+const subInput = z.object({
+  name: z.string(),
+  startingAverage: z.number(),
+  bowlerNumber: bowlerNumberSchema,
+  active: z.boolean().optional(),
+});
+
+function assertName(name: string) {
+  const e = validateName(name);
+  if (e) throw new Error(e);
+}
+function assertAverage(n: number) {
+  const e = validateAverage(n);
+  if (e) throw new Error(e);
+}
+function assertBowlerNumber(s: string) {
+  const e = validateBowlerNumber(s);
+  if (e) throw new Error(e);
+}
+
+// ---------------------------------------------------------------------------
+// READ
+// ---------------------------------------------------------------------------
 
 export const listRosterAndSubs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -101,69 +225,31 @@ export const listRosterAndSubs = createServerFn({ method: "GET" })
       loadRosterRows(context, seasonId),
       loadSubRows(context, seasonId),
     ]);
-    // Stable sort by id so the UI ordering is deterministic across renders.
     rostered.sort((a, b) => a.id.localeCompare(b.id));
     subs.sort((a, b) => a.id.localeCompare(b.id));
     return { seasonId, rostered, subs };
   });
 
-// -- Shared input shapes -------------------------------------------------
-
-const rosterInput = z.object({
-  name: z.string(),
-  entryAverage: z.number(),
-  bowlerNumber: z.string().nullable().optional(),
-  active: z.boolean().optional(),
-});
-const subInput = z.object({
-  name: z.string(),
-  startingAverage: z.number(),
-  bowlerNumber: z.string().nullable().optional(),
-  active: z.boolean().optional(),
-});
-
-function normalizeBowlerNumber(value: string | null | undefined): string | null {
-  if (value == null) return null;
-  const t = value.trim();
-  return t.length === 0 ? null : t;
-}
-
-function assertRosterInput(input: z.infer<typeof rosterInput>) {
-  const eName = validateName(input.name);
-  if (eName) throw new Error(eName);
-  const eAvg = validateAverage(input.entryAverage);
-  if (eAvg) throw new Error(eAvg);
-  const eNum = validateBowlerNumber(input.bowlerNumber ?? null);
-  if (eNum) throw new Error(eNum);
-}
-function assertSubInput(input: z.infer<typeof subInput>) {
-  const eName = validateName(input.name);
-  if (eName) throw new Error(eName);
-  const eAvg = validateAverage(input.startingAverage);
-  if (eAvg) throw new Error(eAvg);
-  const eNum = validateBowlerNumber(input.bowlerNumber ?? null);
-  if (eNum) throw new Error(eNum);
-}
-
-// -- ROSTER: create / update / archive / delete --------------------------
+// ---------------------------------------------------------------------------
+// ROSTER: create / update / activate / archive / delete
+// ---------------------------------------------------------------------------
 
 export const addRosterBowler = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => rosterInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
-    assertRosterInput(data);
+    assertName(data.name);
+    assertAverage(data.entryAverage);
+    assertBowlerNumber(data.bowlerNumber);
     const seasonId = await ensureCurrentSeasonId(context);
     const existing = await loadRosterRows(context, seasonId);
-    const activeCount = existing.filter((r) => r.active && !r.archived).length;
-    if ((data.active ?? true) && activeCount >= ROSTER_MAX_ACTIVE) {
-      throw new Error(`Active roster is full (${ROSTER_MAX_ACTIVE} max). Archive a bowler first.`);
-    }
-    if (isDuplicateActive(data.name, existing)) {
-      throw new Error(`A bowler named "${data.name.trim()}" is already on the active roster.`);
+    // New rows default to active — guard both max size and duplicates.
+    if (data.active !== false) {
+      guardRosterActivation({ rows: existing, name: data.name });
     }
     const id = nextRosterIdFrom(existing);
-    const entryAverage = Math.round(data.entryAverage);
+    const entryAverage = data.entryAverage; // decimals preserved
     const ins = await context.supabase.from("rostered_bowlers").insert({
       id,
       season_id: seasonId,
@@ -172,7 +258,7 @@ export const addRosterBowler = createServerFn({ method: "POST" })
       handicap: computeHandicap(entryAverage),
       active: data.active ?? true,
       archived: false,
-      bowler_number: normalizeBowlerNumber(data.bowlerNumber ?? null),
+      bowler_number: data.bowlerNumber,
     });
     if (ins.error) throw new Error(ins.error.message);
     await rebuildSnapshot(context, seasonId);
@@ -186,25 +272,57 @@ export const updateRosterBowler = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
-    assertRosterInput(data);
+    assertName(data.name);
+    assertAverage(data.entryAverage);
+    assertBowlerNumber(data.bowlerNumber);
     const seasonId = await ensureCurrentSeasonId(context);
     const existing = await loadRosterRows(context, seasonId);
-    if (!existing.find((r) => r.id === data.id)) {
-      throw new Error(`Bowler ${data.id} not found in the current season.`);
+    const current = existing.find((r) => r.id === data.id);
+    if (!current) throw new Error(`Bowler ${data.id} not found in the current season.`);
+
+    const willBeActive = data.active ?? current.active;
+    const willBeArchived = current.archived; // update endpoint does not toggle archive
+    if (willBeActive && !willBeArchived) {
+      guardRosterActivation({ rows: existing, name: data.name, exceptId: data.id });
     }
-    if (isDuplicateActive(data.name, existing, data.id)) {
-      throw new Error(`A bowler named "${data.name.trim()}" is already on the active roster.`);
-    }
-    const entryAverage = Math.round(data.entryAverage);
+    const entryAverage = data.entryAverage;
     const upd = await context.supabase
       .from("rostered_bowlers")
       .update({
         name: data.name.trim(),
         entry_average: entryAverage,
         handicap: computeHandicap(entryAverage),
-        bowler_number: normalizeBowlerNumber(data.bowlerNumber ?? null),
-        ...(data.active !== undefined ? { active: data.active } : {}),
+        bowler_number: data.bowlerNumber,
+        active: willBeActive,
       })
+      .eq("id", data.id)
+      .eq("season_id", seasonId);
+    if (upd.error) throw new Error(upd.error.message);
+    await rebuildSnapshot(context, seasonId);
+    return { ok: true };
+  });
+
+/** Dedicated active/inactive toggle. Does NOT touch `archived`. */
+export const setRosterActive = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().min(1), active: z.boolean() }).parse(input),
+  )
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    const seasonId = await ensureCurrentSeasonId(context);
+    const existing = await loadRosterRows(context, seasonId);
+    const current = existing.find((r) => r.id === data.id);
+    if (!current) throw new Error(`Bowler ${data.id} not found.`);
+    if (data.active && !current.archived) {
+      guardRosterActivation({ rows: existing, name: current.name, exceptId: data.id });
+    }
+    if (data.active && current.archived) {
+      throw new Error("Restore from archive first, then activate.");
+    }
+    const upd = await context.supabase
+      .from("rostered_bowlers")
+      .update({ active: data.active })
       .eq("id", data.id)
       .eq("season_id", seasonId);
     if (upd.error) throw new Error(upd.error.message);
@@ -220,14 +338,24 @@ export const setRosterArchived = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureCurrentSeasonId(context);
+    const existing = await loadRosterRows(context, seasonId);
+    const current = existing.find((r) => r.id === data.id);
+    if (!current) throw new Error(`Bowler ${data.id} not found.`);
+
+    // Archive → also deactivate. Restore → stay INACTIVE by default so the
+    // caller must explicitly re-activate (which re-runs max/dup guards).
+    let nextActive = current.active;
+    if (data.archived) nextActive = false;
+    if (!data.archived) nextActive = false;
+
     const upd = await context.supabase
       .from("rostered_bowlers")
-      .update({ archived: data.archived, active: !data.archived })
+      .update({ archived: data.archived, active: nextActive })
       .eq("id", data.id)
       .eq("season_id", seasonId);
     if (upd.error) throw new Error(upd.error.message);
     await rebuildSnapshot(context, seasonId);
-    return { ok: true };
+    return { ok: true, restoredInactive: !data.archived };
   });
 
 export const deleteRosterBowler = createServerFn({ method: "POST" })
@@ -236,14 +364,7 @@ export const deleteRosterBowler = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureCurrentSeasonId(context);
-    // Guard: refuse if any schedule_slot references this bowler. Bowler ids
-    // are globally unique (b01…), so no season filter is required here.
-    const refs = await context.supabase
-      .from("schedule_slots")
-      .select("id", { count: "exact", head: true })
-      .or(`bowler_a_id.eq.${data.id},bowler_b_id.eq.${data.id}`);
-    if (refs.error) throw new Error(refs.error.message);
-    if ((refs.count ?? 0) > 0) {
+    if (await isRosterReferenced(context, data.id)) {
       throw new Error("Cannot delete: this bowler is on the schedule. Archive instead.");
     }
     const del = await context.supabase
@@ -256,21 +377,25 @@ export const deleteRosterBowler = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// -- SUBSTITUTES: create / update / archive / delete ---------------------
+// ---------------------------------------------------------------------------
+// SUBSTITUTES: create / update / activate / archive / delete
+// ---------------------------------------------------------------------------
 
 export const addSubstitute = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => subInput.parse(input))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
-    assertSubInput(data);
+    assertName(data.name);
+    assertAverage(data.startingAverage);
+    assertBowlerNumber(data.bowlerNumber);
     const seasonId = await ensureCurrentSeasonId(context);
     const existing = await loadSubRows(context, seasonId);
-    if (isDuplicateActive(data.name, existing)) {
-      throw new Error(`A substitute named "${data.name.trim()}" is already active.`);
+    if (data.active !== false) {
+      guardSubActivation({ rows: existing, name: data.name });
     }
     const id = nextSubIdFrom(existing);
-    const startingAverage = Math.round(data.startingAverage);
+    const startingAverage = data.startingAverage;
     const ins = await context.supabase.from("substitutes").insert({
       id,
       season_id: seasonId,
@@ -279,12 +404,9 @@ export const addSubstitute = createServerFn({ method: "POST" })
       handicap: computeHandicap(startingAverage),
       active: data.active ?? true,
       archived: false,
-      bowler_number: normalizeBowlerNumber(data.bowlerNumber ?? null),
+      bowler_number: data.bowlerNumber,
     });
     if (ins.error) throw new Error(ins.error.message);
-    // Snapshot rebuild not strictly required for subs (public snapshot
-    // has no sub-only surface at 3A), but keeps upsert timestamps fresh
-    // and future-proofs when subs enter public views.
     await rebuildSnapshot(context, seasonId);
     return { id };
   });
@@ -296,25 +418,54 @@ export const updateSubstitute = createServerFn({ method: "POST" })
   )
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
-    assertSubInput(data);
+    assertName(data.name);
+    assertAverage(data.startingAverage);
+    assertBowlerNumber(data.bowlerNumber);
     const seasonId = await ensureCurrentSeasonId(context);
     const existing = await loadSubRows(context, seasonId);
-    if (!existing.find((r) => r.id === data.id)) {
-      throw new Error(`Substitute ${data.id} not found in the current season.`);
+    const current = existing.find((r) => r.id === data.id);
+    if (!current) throw new Error(`Substitute ${data.id} not found.`);
+    const willBeActive = data.active ?? current.active;
+    if (willBeActive && !current.archived) {
+      guardSubActivation({ rows: existing, name: data.name, exceptId: data.id });
     }
-    if (isDuplicateActive(data.name, existing, data.id)) {
-      throw new Error(`A substitute named "${data.name.trim()}" is already active.`);
-    }
-    const startingAverage = Math.round(data.startingAverage);
+    const startingAverage = data.startingAverage;
     const upd = await context.supabase
       .from("substitutes")
       .update({
         name: data.name.trim(),
         starting_average: startingAverage,
         handicap: computeHandicap(startingAverage),
-        bowler_number: normalizeBowlerNumber(data.bowlerNumber ?? null),
-        ...(data.active !== undefined ? { active: data.active } : {}),
+        bowler_number: data.bowlerNumber,
+        active: willBeActive,
       })
+      .eq("id", data.id)
+      .eq("season_id", seasonId);
+    if (upd.error) throw new Error(upd.error.message);
+    await rebuildSnapshot(context, seasonId);
+    return { ok: true };
+  });
+
+export const setSubstituteActive = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ id: z.string().min(1), active: z.boolean() }).parse(input),
+  )
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    const seasonId = await ensureCurrentSeasonId(context);
+    const existing = await loadSubRows(context, seasonId);
+    const current = existing.find((r) => r.id === data.id);
+    if (!current) throw new Error(`Substitute ${data.id} not found.`);
+    if (data.active && current.archived) {
+      throw new Error("Restore from archive first, then activate.");
+    }
+    if (data.active) {
+      guardSubActivation({ rows: existing, name: current.name, exceptId: data.id });
+    }
+    const upd = await context.supabase
+      .from("substitutes")
+      .update({ active: data.active })
       .eq("id", data.id)
       .eq("season_id", seasonId);
     if (upd.error) throw new Error(upd.error.message);
@@ -330,14 +481,16 @@ export const setSubstituteArchived = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureCurrentSeasonId(context);
+    // Restore lands as INACTIVE so caller must explicitly re-activate.
+    const nextActive = false;
     const upd = await context.supabase
       .from("substitutes")
-      .update({ archived: data.archived, active: !data.archived })
+      .update({ archived: data.archived, active: nextActive })
       .eq("id", data.id)
       .eq("season_id", seasonId);
     if (upd.error) throw new Error(upd.error.message);
     await rebuildSnapshot(context, seasonId);
-    return { ok: true };
+    return { ok: true, restoredInactive: !data.archived };
   });
 
 export const deleteSubstitute = createServerFn({ method: "POST" })
@@ -346,6 +499,11 @@ export const deleteSubstitute = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureCurrentSeasonId(context);
+    if (await isSubReferenced(context, data.id)) {
+      throw new Error(
+        "Cannot delete: this substitute is referenced by a saved match result. Archive instead.",
+      );
+    }
     const del = await context.supabase
       .from("substitutes")
       .delete()
@@ -356,7 +514,9 @@ export const deleteSubstitute = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// -- Manual snapshot rebuild (safety net for admins) ---------------------
+// ---------------------------------------------------------------------------
+// Manual snapshot rebuild (safety net)
+// ---------------------------------------------------------------------------
 
 export const rebuildCurrentSeasonSnapshot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
