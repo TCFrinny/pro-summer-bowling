@@ -64,7 +64,11 @@ async function upsertWeekRow(
   context: Ctx, seasonId: string, weekNumber: number,
   patch: { date?: string | null; published?: boolean; completed?: boolean },
 ): Promise<string> {
-  const clean = __buildWeekPatchForTest(patch);
+  const clean: { date?: string | null; published?: boolean; completed?: boolean } = {};
+  if (patch.date !== undefined) clean.date = patch.date;
+  if (patch.published !== undefined) clean.published = patch.published;
+  if (patch.completed !== undefined) clean.completed = patch.completed;
+
   const found = await context.supabase
     .from("weeks").select("id")
     .eq("season_id", seasonId).eq("week_number", weekNumber).maybeSingle();
@@ -77,18 +81,18 @@ async function upsertWeekRow(
     return found.data.id;
   }
   const ins = await context.supabase.from("weeks")
-    .insert({ season_id: seasonId, week_number: weekNumber, ...(clean as { date?: string | null; published?: boolean; completed?: boolean }) })
+    .insert({ season_id: seasonId, week_number: weekNumber, ...clean })
     .select("id").single();
   if (ins.error) throw new Error(ins.error.message);
   return ins.data.id;
 }
 
-/** Pure helper exposed for deterministic tests. Strips undefined so a
- *  weeks PATCH never touches an unrelated column. */
+/** Pure helper exposed for deterministic tests. Strips undefined keys so a
+ *  weeks PATCH never touches an unrelated column (published/date/completed). */
 export function __buildWeekPatchForTest(patch: {
   date?: string | null; published?: boolean; completed?: boolean;
-}): Record<string, unknown> {
-  const clean: Record<string, unknown> = {};
+}): { date?: string | null; published?: boolean; completed?: boolean } {
+  const clean: { date?: string | null; published?: boolean; completed?: boolean } = {};
   if (patch.date !== undefined) clean.date = patch.date;
   if (patch.published !== undefined) clean.published = patch.published;
   if (patch.completed !== undefined) clean.completed = patch.completed;
