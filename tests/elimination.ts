@@ -314,17 +314,21 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
     "src/routes/elimination.tsx must read the stored snapshot");
 }
 
-// --- 15. No rank/index heuristic remains ------------------------------
+// --- 15. Server rebuild must NOT call the full solver ------------------
+// Cloudflare Workers Free has a 10 ms CPU/request limit. buildSnapshot()
+// runs on every admin mutation; the full schedule-aware solver would blow
+// that budget on the real 36-bowler roster and yield Error 1102. Assert
+// mock-data delegates to the cheap bounds pass only.
 {
   const src = readFileSync("src/lib/mock-data.ts", "utf8");
-  // Ban the historical placeholder patterns (idx-based status assignment).
   expect(!/status:\s*idx\s*<\s*\d+\s*\?\s*"clinched"/.test(src),
     "index-based clinched heuristic must be removed");
-  expect(!/rank\s*<\s*4.*clinched/i.test(src),
-    "rank<4 clinched heuristic must be removed");
-  // Snapshot must delegate to computeElimination.
-  expect(src.includes("computeElimination"),
-    "buildSnapshot must call computeElimination for elimination results");
+  expect(!/from ["']\.\/elimination["']/.test(src),
+    "buildSnapshot must not import the full solver module");
+  expect(!src.includes("computeElimination("),
+    "buildSnapshot must not invoke the full solver");
+  expect(src.includes("computeEliminationBounds"),
+    "buildSnapshot must call computeEliminationBounds");
 }
 
 // --- Snapshot integration sanity: sparse DB does NOT leak clinched ----
@@ -339,6 +343,8 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
     expect(r.status !== "eliminated", `sparse elim leak ${r.bowler.name}`);
   }
   expect(typeof snap.elimination.lastCalculatedAt === "string", "lastCalculatedAt string");
+  expect(snap.elimination.calculationMode === "bounds_only",
+    "server rebuild must produce bounds_only mode");
 }
 
 // eslint-disable-next-line no-console
