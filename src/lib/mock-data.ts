@@ -30,7 +30,7 @@ import {
   type GameLinescore,
   type GameSegments,
 } from "./duckpin";
-import { computeElimination } from "./elimination";
+import { computeEliminationBounds } from "./elimination-bounds";
 
 export {
   classifyFrame,
@@ -765,6 +765,15 @@ export interface EliminationRow {
 }
 export interface EliminationSnapshot {
   lastCalculatedAt: string; weeksRemaining: number; rows: EliminationRow[];
+  /** How this row set was derived. `bounds_only` (cheap, server-side) uses
+   *  only trivial arithmetic on current points and remaining match counts;
+   *  `full` is the schedule-aware solver output run by the admin browser
+   *  and persisted through `saveFullEliminationResult`. */
+  calculationMode?: "bounds_only" | "full";
+  /** PublicSnapshot.builtAt this elimination result was proven against.
+   *  Used as a concurrency token so admin recalculations can't overwrite
+   *  results computed against a stale roster/schedule. */
+  sourceBuiltAt?: number;
 }
 
 /** The single object every public read comes from. */
@@ -1315,9 +1324,12 @@ export function buildSnapshot(input: {
   const weekLanes: Record<number, LanePairSummary[]> = {};
   for (const [wk, map] of Object.entries(weekLaneMaps)) weekLanes[Number(wk)] = laneSummariesFrom(map);
 
-  // 7) Elimination — proof-safe, schedule-aware. Runs here (during snapshot
-  // rebuild) so /elimination reads a static payload with no calculation.
-  const elimination: EliminationSnapshot = computeElimination({
+  // 7) Elimination — bounds-only proof-safe pass. Deliberately does NOT
+  // invoke the full schedule-aware solver (which is O(exponential) in the
+  // worst case and would blow the 10 ms Cloudflare Worker CPU limit on the
+  // real 36-bowler roster). The admin browser runs the full solver in a
+  // Web Worker and persists results via `saveFullEliminationResult`.
+  const elimination: EliminationSnapshot = computeEliminationBounds({
     activeBowlers: publicBowlers,
     weeks,
     matchesByWeek,
