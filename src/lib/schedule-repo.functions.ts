@@ -27,6 +27,7 @@ import {
   buildMatchResultFromDraft,
   rebuildAndSaveSnapshot,
 } from "@/lib/snapshot-builder.server";
+import { resolveEffectiveScoring } from "@/lib/substitute-handicap";
 
 type Sb = SupabaseClient<Database>;
 type Ctx = { supabase: Sb; userId: string };
