@@ -98,17 +98,20 @@ function expect(cond: unknown, msg: string) {
 
 // --- 4. Concrete alive scenario -----------------------------------------
 {
-  // 4 bowlers, 5 remaining weeks, all currently at 0. Should be alive.
-  const bs = [bowler("t", 0, "T"), bowler("x", 0, "X"), bowler("y", 0, "Y"), bowler("z", 0, "Z")];
+  // 5 bowlers (so 4 opponents; final-week +1 repeat allowed → 5 remaining OK),
+  // 4 remaining weeks, all currently at 0. Should be alive.
+  const bs = [
+    bowler("t", 0, "T"), bowler("x", 0, "X"),
+    bowler("y", 0, "Y"), bowler("z", 0, "Z"),
+    bowler("w", 0, "W"),
+  ];
   const weeks: WeekSummary[] = [];
-  for (let i = 1; i <= 5; i++) weeks.push(week(i));
-  const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: {}, totalWeeks: 5 });
+  for (let i = 1; i <= 4; i++) weeks.push(week(i));
+  const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: {}, totalWeeks: 4 });
   const tRow = snap.rows.find((r) => r.bowler.id === "t")!;
-  // Target wins all 5 → 35 pts. Each opponent even-split ceiling = 0 + 7/2 * (5-0) matches * 2? Actually
-  // opponent ceiling = current + 7*(oRem - facesTargetCount). facesTargetCount=0 (no published) → 0 + 7*5 = 35 (units) = 17.5 pts.
-  // 17.5 < 35 → alive.
+  // Target wins all 4 → 28 pts (56 units). Opponent even-split ceiling = 0 + 7*4 = 28 units = 14 pts. 14 < 28 → alive.
   expect(tRow.status === "alive", `alive: got ${tRow.status}, note=${tRow.note}`);
-  expect(tRow.maxFinalPoints === 35, `maxFinalPoints expected 35, got ${tRow.maxFinalPoints}`);
+  expect(tRow.maxFinalPoints === 28, `maxFinalPoints expected 28, got ${tRow.maxFinalPoints}`);
   expect((tRow.bestMargin ?? 0) > 0, `bestMargin should be > 0`);
 }
 
