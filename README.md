@@ -70,7 +70,7 @@ All routes live in `src/routes/`.
 | `index.tsx` | `/` | Home / league landing |
 | `standings.tsx` | `/standings` | Rank, points, pinfall, avg (3 decimals), movement |
 | `schedule.tsx` | `/schedule` | 18 matches across lane pairs 1–2 … 11–12 |
-| `weekly-results.tsx` | `/weekly-results` | Match cards: scratch games, hdcp, GP, SP |
+| `weekly-results.tsx` | `/weekly-results` | Match cards: scratch games, hdcp, per-game points, set point, match total |
 | `bowlers.tsx` | `/bowlers` | Roster + search |
 | `bowlers.$bowlerId.tsx` | `/bowlers/:id` | Bowler profile + weekly history |
 | `statistics.tsx` | `/statistics` | Leaders + sortable tables |
