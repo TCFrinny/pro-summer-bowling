@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import {
   LANE_PAIRS,
   WEEKS,
@@ -120,7 +120,7 @@ function AdminSchedulePage() {
   };
 
   return (
-    <AppShell>
+    <>
       <PageHeader
         title="Admin · Manual Schedule Editor"
         subtitle="Administrators set every week's schedule by hand. Warnings surface duplicates and repeat pairings but never rewrite your choices."
@@ -237,7 +237,7 @@ function AdminSchedulePage() {
           </Card>
         ))}
       </div>
-    </AppShell>
+    </>
   );
 }
 

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,7 +45,7 @@ function AdminBowlersPage() {
   const activeSubCount = state.db.subs.filter((s) => s.active && !s.archived).length;
 
   return (
-    <AppShell>
+    <>
       <PageHeader
         title="Admin · Bowlers & Substitutes"
         subtitle="Mock-only Phase 1. ID Numbers appear on schedules as `Name (ID …)`. Archived people remain in history but are hidden from future scheduling and sub pickers."
@@ -238,7 +238,7 @@ function AdminBowlersPage() {
           </div>
         </>
       )}
-    </AppShell>
+    </>
   );
 }
 
