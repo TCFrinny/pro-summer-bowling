@@ -12,11 +12,13 @@ import {
   type ParticipationStatus,
 } from "@/lib/mock-data";
 import {
-  recordSavedResult,
+  addSubstitute,
+  applyResult,
   selectActiveRoster,
   selectActiveSubs,
   useLeagueState,
 } from "@/lib/league-store";
+
 import {
   SideLinescoreEditor,
   computeSideDerived,
@@ -134,6 +136,10 @@ function AdminResultsPage() {
         errors.push(`Side ${label}: linescore incomplete or invalid`);
       }
     }
+    const anyAbsent = draft.sideA.status === "absent" || draft.sideB.status === "absent";
+    if (anyAbsent && !draft.overrideEnabled) {
+      errors.push("An absent side requires a manual points override with a reason.");
+    }
     if (draft.overrideEnabled) {
       const oa = Number(draft.overrideA);
       const ob = Number(draft.overrideB);
@@ -145,7 +151,9 @@ function AdminResultsPage() {
     return errors;
   }, [draft, derivedA, derivedB]);
 
-  // Frame-derived W-L preview when both sides bowled.
+
+  // Frame-derived W-L preview when both sides bowled. Uses HANDICAP game
+  // scores (not scratch) for the 2-point game awards.
   const previewNormal = useMemo(() => {
     if (
       draft.sideA.status === "absent" ||
@@ -155,8 +163,8 @@ function AdminResultsPage() {
     ) return null;
     let ptsA = 0, ptsB = 0;
     for (let i = 0; i < 3; i++) {
-      const ga = derivedA.games[i]!.scratchTotal;
-      const gb = derivedB.games[i]!.scratchTotal;
+      const ga = (derivedA.games[i]!.scratchTotal) + (a?.handicap ?? 0);
+      const gb = (derivedB.games[i]!.scratchTotal) + (b?.handicap ?? 0);
       if (ga > gb) ptsA += 2;
       else if (gb > ga) ptsB += 2;
       else { ptsA += 1; ptsB += 1; }
@@ -167,7 +175,8 @@ function AdminResultsPage() {
     else if (hsB > hsA) ptsB += 1;
     else { ptsA += 0.5; ptsB += 0.5; }
     return { ptsA, ptsB };
-  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB]);
+  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB, a?.handicap, b?.handicap]);
+
 
   if (!currentMatch) {
     return (
@@ -308,9 +317,42 @@ function AdminResultsPage() {
         <button
           disabled={validation.length > 0}
           onClick={() => {
-            recordSavedResult(currentMatch.id, `Saved by admin at ${new Date().toISOString()}`);
-            setFlash("Result draft saved to local mock store. Public snapshot regeneration is a Phase 2 task.");
+            const buildSideGames = (s: SideDraft, d: typeof derivedA) => {
+              if (s.status === "absent") return undefined;
+              const g = d.games;
+              if (!g[0] || !g[1] || !g[2]) return undefined;
+              return [g[0], g[1], g[2]] as [
+                NonNullable<(typeof g)[number]>, NonNullable<(typeof g)[number]>, NonNullable<(typeof g)[number]>,
+              ];
+            };
+            const outcome = applyResult({
+              matchId: currentMatch.id,
+              sideA: {
+                status: draft.sideA.status,
+                substituteId: draft.sideA.subId || undefined,
+                substituteName: draft.sideA.subName.trim() || undefined,
+                games: buildSideGames(draft.sideA, derivedA),
+              },
+              sideB: {
+                status: draft.sideB.status,
+                substituteId: draft.sideB.subId || undefined,
+                substituteName: draft.sideB.subName.trim() || undefined,
+                games: buildSideGames(draft.sideB, derivedB),
+              },
+              override: draft.overrideEnabled ? {
+                enabled: true,
+                pointsA: Number(draft.overrideA),
+                pointsB: Number(draft.overrideB),
+                reason: draft.overrideReason,
+              } : null,
+            });
+            if (outcome.ok) {
+              setFlash("Result saved. Public standings, weekly results, profiles, and boards now reflect this match.");
+            } else {
+              setFlash("Save failed: " + outcome.errors.join("; "));
+            }
           }}
+
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold",
             validation.length > 0
@@ -388,14 +430,38 @@ function SidePanel({
             </div>
             <div>
               <Label className="text-[10px]">Or type a name</Label>
-              <Input
-                value={side.subName}
-                onChange={(e) => onChange({ subId: "", subName: e.target.value })}
-                placeholder="Walk-on substitute"
-              />
+              <div className="flex gap-1">
+                <Input
+                  value={side.subName}
+                  onChange={(e) => onChange({ subId: "", subName: e.target.value })}
+                  placeholder="Walk-on substitute"
+                />
+                <button
+                  type="button"
+                  disabled={!side.subName.trim()}
+                  onClick={() => {
+                    const nm = side.subName.trim();
+                    if (!nm) return;
+                    try {
+                      const rec = addSubstitute(nm);
+                      onChange({ subId: rec.id, subName: rec.name });
+                    } catch (e) { window.alert((e as Error).message); }
+                  }}
+                  className={cn(
+                    "shrink-0 rounded-md px-2 text-xs font-semibold",
+                    side.subName.trim()
+                      ? "bg-gold text-gold-foreground hover:bg-gold/90"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                  title="Add this person to the substitute pool"
+                >
+                  + Pool
+                </button>
+              </div>
             </div>
           </div>
         )}
+
 
         <SideLinescoreEditor
           label="Linescore"

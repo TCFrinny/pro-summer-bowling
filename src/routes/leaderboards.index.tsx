@@ -11,6 +11,7 @@ import {
   type CreditedSeasonRow,
   type VolumeRow,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/leaderboards/")({
 });
 
 function LeaderboardsPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   const [scope, setScope] = useState<Scope>("season");
   const boards = getStandardLeaderboards(scope);
   const completed = WEEKS.filter((w) => w.completed);

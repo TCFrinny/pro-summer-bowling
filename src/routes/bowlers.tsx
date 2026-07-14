@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { BOWLERS } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/bowlers")({
 });
 
 function BowlersLayout() {
+  useLeagueSnapshot();
   const matches = useMatches();
   const onChild = matches.some((m) => m.routeId === "/bowlers/$bowlerId");
   if (onChild) return <Outlet />;

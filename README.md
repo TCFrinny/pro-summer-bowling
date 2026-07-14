@@ -228,3 +228,38 @@ compute it in a page component.
 bun dev      # dev server
 bun run build
 ```
+
+## Phase 1 Admin Store (v2)
+
+Everything editable — roster, subs, schedules, and completed match linescores
+— lives in a single client-side store (`src/lib/league-store.ts`) persisted
+under `pss.leagueStore.v2`. Every mutation calls `buildSnapshot(db)` once and
+caches the result on `state.snapshot`; every public route reads that snapshot
+through the getters in `src/lib/mock-data.ts` (`getStandingsSnapshot`,
+`getMatchesForWeek`, `getBowlerHistory`, `getStandardLeaderboards`,
+`getAdvancedLeaderboards`, `getSeasonLaneSummaries`, `getEliminationSnapshot`,
+etc.). Public rendering never triggers aggregation — it is a direct O(1) read.
+
+### Result save transaction (`applyResult`)
+
+1. Validates participation, substitute selection, all required linescores,
+   exact mark sets (`X`/`/`/`-` for frames 1-9; `XXX·XX·X/·/X·X·/·-` for
+   frame 10), cumulative totals, and any override (0-7 in 0.5 increments,
+   sum ≤ 7, reason required).
+2. Freezes the scheduled bowler's current entry average and handicap into
+   the saved `MatchResult`.
+3. Uses frame-10 cumulative as each game's scratch score.
+4. Compares **handicap game scores** for the 2-point per-game award and
+   **handicap set totals** for the 1-point set award. A normal match
+   distributes exactly 7 points; an override replaces only the awarded
+   W-L and preserves every derived frame stat.
+5. An **absent** side stores no linescore and requires a valid manual
+   points override.
+6. Substitute linescores are public and named, but are excluded from the
+   scheduled bowler's roster-only scratch/advanced aggregates while the
+   scheduled bowler still receives the W-L points and handicap pinfall.
+7. Rebuilds and persists the public snapshot; all subscribed routes
+   re-render immediately.
+
+Migration: the older note-only `pss.leagueStore.v1` record is discarded on
+first load.

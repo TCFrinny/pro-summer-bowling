@@ -9,7 +9,7 @@ import {
   type LanePair,
   type Match,
 } from "@/lib/mock-data";
-import { selectActiveRoster, useLeagueState } from "@/lib/league-store";
+import { publishWeek, saveScheduleDraft, selectActiveRoster, useLeagueState } from "@/lib/league-store";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -144,18 +144,39 @@ function AdminSchedulePage() {
         </div>
         <div className="ml-auto flex gap-2">
           <button
-            onClick={() => setFlash("Draft saved to local mock state.")}
+            onClick={() => {
+              const slots = draft.filter((r) => r.bowlerA && r.bowlerB).map((r) => ({
+                lanePair: r.lanePair, slot: r.slot,
+                bowlerA: r.bowlerA as BowlerId, bowlerB: r.bowlerB as BowlerId,
+              }));
+              saveScheduleDraft(week, slots);
+              setFlash(`Draft saved (${slots.length}/18 slots) — visible on public Schedule.`);
+            }}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
           >
             <Save className="h-4 w-4" /> Save draft schedule
           </button>
           <button
-            onClick={() => setFlash("Week published (mock). Nothing persisted.")}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+            disabled={warnings.length > 0}
+            onClick={() => {
+              const slots = draft.filter((r) => r.bowlerA && r.bowlerB).map((r) => ({
+                lanePair: r.lanePair, slot: r.slot,
+                bowlerA: r.bowlerA as BowlerId, bowlerB: r.bowlerB as BowlerId,
+              }));
+              publishWeek(week, slots);
+              setFlash(`Week ${week} published (${slots.length} matches).`);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold",
+              warnings.length > 0
+                ? "cursor-not-allowed bg-muted text-muted-foreground"
+                : "bg-primary text-primary-foreground hover:bg-primary/90",
+            )}
           >
             <UploadCloud className="h-4 w-4" /> Publish week
           </button>
         </div>
+
       </div>
 
       {flash && (

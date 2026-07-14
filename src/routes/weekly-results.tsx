@@ -8,6 +8,7 @@ import {
   getMatchesForWeek,
   type Match,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { useState } from "react";
 import {
   Select,
@@ -36,6 +37,7 @@ export const Route = createFileRoute("/weekly-results")({
 });
 
 function WeeklyResultsPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   const completed = WEEKS.filter((w) => w.completed);
   const [week, setWeek] = useState<number>(
     completed[completed.length - 1]?.week ?? 1,

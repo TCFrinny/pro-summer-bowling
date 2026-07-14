@@ -7,6 +7,7 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -112,6 +113,7 @@ const METRICS: MetricDef[] = [
 ];
 
 function StatisticsPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Derive once from linescores — no per-render recomputation across the season.
   const rows: StatRow[] = useMemo(
     () =>

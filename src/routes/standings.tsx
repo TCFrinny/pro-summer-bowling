@@ -8,6 +8,7 @@ import {
   getStandingsSnapshot,
   type Bowler,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { ArrowDown, ArrowUp, Minus, Search, Trophy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -150,6 +151,7 @@ const COLUMNS: {
 ];
 
 function StandingsPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Snapshot is pre-saved — no recomputation here. The official leader (used
   // for Points Behind) is simply the top entry in the pre-sorted snapshot.
   const snapshot = getStandingsSnapshot();

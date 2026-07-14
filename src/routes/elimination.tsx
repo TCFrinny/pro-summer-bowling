@@ -5,6 +5,7 @@ import {
   getEliminationSnapshot,
   type EliminationStatus,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2 } from "lucide-react";
 
@@ -54,6 +55,7 @@ const STATUS: Record<
 };
 
 function EliminationPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Read the last-published snapshot. NEVER run a solver here.
   const snap = getEliminationSnapshot();
 
