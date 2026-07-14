@@ -334,11 +334,16 @@ const gameSchema = z.object({
 
 const sideDraftSchema = z.object({
   status: z.enum(["rostered", "substitute", "absent"]),
+  /** Required when status === "substitute". Free-form substitute names
+   *  are NOT accepted: every sub used in a result must exist in the
+   *  active substitute pool (with a required ID Number). */
   substituteId: z.string().optional(),
-  substituteName: z.string().optional(),
+  /** Optional override of the pool's Starting Average for this specific
+   *  match; falls back to the sub's stored starting_average. */
   substituteStartingAverage: z.number().optional(),
   games: z.array(gameSchema).length(3).optional(),
 });
+
 
 const overrideSchema = z.object({
   enabled: z.literal(true),
@@ -397,56 +402,70 @@ export const saveMatchResult = createServerFn({ method: "POST" })
     ]);
     if (!rosterA || !rosterB) throw new Error("Scheduled bowler(s) missing from roster");
 
-    // Build participation per side
+    // Build participation per side. Substitutes MUST come from the
+    // active substitute pool (referenced by id). This is enforced
+    // server-side so a crafted request cannot bypass the UI: unknown,
+    // inactive, or archived subs are rejected.
     const buildPart = (
       sched: { id: string; name: string },
       sd: z.infer<typeof sideDraftSchema>,
       side: "A" | "B",
-    ): SideParticipation => {
+    ): { part: SideParticipation; subRec: (typeof subs)[number] | null } => {
       if (sd.status === "rostered") {
-        return { scheduledId: sched.id, status: "rostered", actualId: sched.id, actualName: sched.name };
+        return {
+          part: { scheduledId: sched.id, status: "rostered", actualId: sched.id, actualName: sched.name },
+          subRec: null,
+        };
       }
       if (sd.status === "absent") {
-        return { scheduledId: sched.id, status: "absent", actualId: null, actualName: "Absent" };
+        return {
+          part: { scheduledId: sched.id, status: "absent", actualId: null, actualName: "Absent" },
+          subRec: null,
+        };
       }
-      // substitute
-      let subId: string | null = null;
-      let subName: string;
-      if (sd.substituteId) {
-        const rec = subs.find((s) => s.id === sd.substituteId);
-        if (!rec) throw new Error(`Side ${side}: substitute ${sd.substituteId} not found`);
-        subId = rec.id; subName = rec.name;
-      } else if (sd.substituteName && sd.substituteName.trim().length > 0) {
-        subName = sd.substituteName.trim();
-      } else {
-        throw new Error(`Side ${side}: substitute id or name required`);
+      if (!sd.substituteId) {
+        throw new Error(`Side ${side}: substitute must be selected from the pool`);
       }
-      return { scheduledId: sched.id, status: "substitute", actualId: subId, actualName: subName };
+      const rec = subs.find((s) => s.id === sd.substituteId);
+      if (!rec) throw new Error(`Side ${side}: substitute not found in this season's pool`);
+      if (!rec.active || rec.archived) {
+        throw new Error(`Side ${side}: substitute is inactive or archived`);
+      }
+      return {
+        part: {
+          scheduledId: sched.id, status: "substitute",
+          actualId: rec.id, actualName: rec.name,
+        },
+        subRec: rec,
+      };
     };
-    const pA = buildPart({ id: rosterA.id, name: rosterA.name }, data.sideA, "A");
-    const pB = buildPart({ id: rosterB.id, name: rosterB.name }, data.sideB, "B");
+    const partA = buildPart({ id: rosterA.id, name: rosterA.name }, data.sideA, "A");
+    const partB = buildPart({ id: rosterB.id, name: rosterB.name }, data.sideB, "B");
+    const pA = partA.part, pB = partB.part;
 
-    // Effective handicap per side
+    // Effective handicap per side. Substitutes bowl on THEIR OWN
+    // starting-average handicap. Points and handicap pinfall are still
+    // credited to the scheduled bowler by the pure computeMatchResult.
     const resolveSide = (
       sched: { id: string; entry_average: number },
       sd: z.infer<typeof sideDraftSchema>,
-      part: SideParticipation,
+      partInfo: ReturnType<typeof buildPart>,
       side: "A" | "B",
     ) => {
-      if (part.status !== "substitute") {
+      if (partInfo.part.status !== "substitute") {
         return { entry: sched.entry_average, hcp: computeHandicap(sched.entry_average) };
       }
-      let sa = sd.substituteStartingAverage;
-      if (sa == null && sd.substituteId) {
-        sa = subs.find((s) => s.id === sd.substituteId)?.starting_average ?? undefined;
-      }
+      const sa = sd.substituteStartingAverage
+        ?? partInfo.subRec?.starting_average
+        ?? null;
       if (sa == null || !Number.isFinite(sa)) {
         throw new Error(`Side ${side}: substitute Starting Average required`);
       }
       return { entry: sa, hcp: computeHandicap(sa) };
     };
-    const rA = resolveSide(rosterA, data.sideA, pA, "A");
-    const rB = resolveSide(rosterB, data.sideB, pB, "B");
+    const rA = resolveSide(rosterA, data.sideA, partA, "A");
+    const rB = resolveSide(rosterB, data.sideB, partB, "B");
+
 
     // Validate override
     const override: PointsOverride | null = data.override && data.override.enabled ? {
