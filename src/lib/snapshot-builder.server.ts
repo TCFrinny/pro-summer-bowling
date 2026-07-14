@@ -98,10 +98,15 @@ export function assembleWeeksAndMatches(input: {
     .sort((a, b) => a.week_number - b.week_number)
     .map((w) => ({
       week: w.week_number,
-      date: w.date ?? new Date().toISOString(),
+      // Empty string when no date is set on the draft. Do NOT synthesize
+      // `new Date().toISOString()` — the snapshot would then change every
+      // rebuild and public pages would render whatever "today" happens to
+      // be as the week's date.
+      date: w.date ?? "",
       completed: w.completed,
       published: w.published,
     }));
+
 
   const slotsByWeekId = new Map<string, SlotRow[]>();
   for (const s of input.slots) {
@@ -162,26 +167,32 @@ export async function loadAllForSeason(sb: Sb, seasonId: string) {
   return { rostered, weekRows, slots, results };
 }
 
-/** Build the full snapshot: roster + weeks + slots + results. */
+/** Build the full snapshot: roster + weeks + slots + results.
+ *
+ *  Passes EVERY current-season rostered row into the pure builder as
+ *  historical bowlers (so archived / inactive bowlers keep resolving in
+ *  histories, leaderboards, lane data, and opponent name lookups). The
+ *  `activeBowlerIds` set is what filters the public roster and standings. */
 export async function buildFullSnapshot(sb: Sb, seasonId: string): Promise<PublicSnapshot> {
   const { rostered, weekRows, slots, results } = await loadAllForSeason(sb, seasonId);
 
-  // Full roster (including inactive/archived) is passed as Bowlers so
-  // historic results resolve names, but only active/non-archived appear
-  // in standings via the buildSnapshot filter below.
-  const activeRoster = rostered.filter((r) => r.active && !r.archived);
-  const bowlers: Bowler[] = activeRoster.map(rosteredRowToBowler);
-  // Add archived/inactive as zero-stat bowlers so history lookups work
-  // (Bowler.name / entryAverage), without polluting standings — buildSnapshot
-  // uses whatever bowlers array we give it. To keep standings scoped to
-  // ACTIVE roster, we only include active rows.
+  const historicalBowlers: Bowler[] = rostered.map(rosteredRowToBowler);
+  const activeBowlerIds = new Set(
+    rostered.filter((r) => r.active && !r.archived).map((r) => r.id),
+  );
 
   const { weeks, matchesByWeek } = assembleWeeksAndMatches({
     weeks: weekRows, slots, results,
   });
 
-  return buildSnapshot({ bowlers, weeks, matchesByWeek });
+  return buildSnapshot({
+    bowlers: historicalBowlers,
+    weeks,
+    matchesByWeek,
+    activeBowlerIds,
+  });
 }
+
 
 /** Convenience: build + upsert into public_snapshots. */
 export async function rebuildAndSaveSnapshot(sb: Sb, seasonId: string): Promise<void> {
