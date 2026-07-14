@@ -87,7 +87,7 @@ Navigation lives in `src/components/layout/AppShell.tsx` and uses
 exports:
 
 - `BOWLERS` — 36 typed bowlers, deterministic (seeded RNG).
-- `WEEKS` — 10 weeks, 6 completed.
+- `WEEKS` — 11 weeks, 7 completed.
 - `getMatchesForWeek(week)` — 18 matches, 3 per lane pair.
 - `getStandingsSnapshot()` — sorted by points desc, then handicap pinfall desc.
 - `getSeasonLaneSummaries()`, `getWeekLaneSummaries(week)` — POA summaries.
