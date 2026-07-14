@@ -96,9 +96,14 @@ async function fetchCurrentSnapshot(): Promise<PublicSnapshot | null> {
 
 export const snapshotQueryOptions = queryOptions({
   queryKey: SNAPSHOT_QUERY_KEY,
-  queryFn: fetchCurrentSnapshot,
-  // Snapshot is push-invalidated via realtime; keep it fresh in cache
-  // between navigations so re-visiting a public route doesn't refetch.
+  queryFn: async () => {
+    const snap = await fetchCurrentSnapshot();
+    // Install eagerly so loaders / getters running in the same tick (e.g.
+    // the child `bowlers.$bowlerId` loader after the root loader awaits
+    // this promise) see DB data instead of the local seed.
+    installDbSnapshot(snap);
+    return snap;
+  },
   staleTime: 5 * 60_000,
 });
 
