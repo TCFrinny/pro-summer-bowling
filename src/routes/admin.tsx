@@ -18,6 +18,7 @@ type GateState =
   | { kind: "loading" }
   | { kind: "signed-out" }
   | { kind: "not-admin"; email: string | undefined }
+  | { kind: "check-failed"; email: string | undefined }
   | { kind: "admin" };
 
 function AdminLayout() {
