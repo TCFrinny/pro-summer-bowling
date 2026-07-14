@@ -136,18 +136,14 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
       const arith = `(${cum} − ${prev})`;
       const F = frameNumber === 10 ? "Frame 10" : `Frame ${frameNumber}`;
       if (frameNumber <= 9) {
-        if (cls === "open" && (diff < 0 || diff > 9)) {
-          if (diff === 10) {
-            errors.push(
-              `${F} is marked open (${mark}), but it adds 10 pins ${arith}. An open frame must add 0–9. Change the mark to / (spare) or X (strike), or correct the running total.`,
-            );
-          } else if (diff < 0) {
+        if (cls === "open" && (diff < 0 || diff > 10)) {
+          if (diff < 0) {
             errors.push(
               `${F} is marked open (${mark}), but the running total dropped by ${-diff} ${arith}. Running totals must never decrease.`,
             );
           } else {
             errors.push(
-              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open frame must add 0–9. Change the mark or correct the running total.`,
+              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open frame must add 0–10 (a duckpin bowler gets three balls; clearing the rack on the third ball is still an open frame with no bonus). Correct the running total.`,
             );
           }
         } else if (cls === "spare" && (diff < 10 || diff > 20)) {
@@ -160,18 +156,14 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
           );
         }
       } else {
-        if (cls === "open" && (diff < 0 || diff > 9)) {
-          if (diff === 10) {
-            errors.push(
-              `${F} is marked open (${mark}), but it adds 10 pins ${arith}. An open tenth frame must add 0–9. Change the mark or correct the running total.`,
-            );
-          } else if (diff < 0) {
+        if (cls === "open" && (diff < 0 || diff > 10)) {
+          if (diff < 0) {
             errors.push(
               `${F} is marked open (${mark}), but the running total dropped by ${-diff} ${arith}. Running totals must never decrease.`,
             );
           } else {
             errors.push(
-              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open tenth frame must add 0–9.`,
+              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open tenth frame must add 0–10 (three balls, no bonus). Correct the running total.`,
             );
           }
         } else if (cls !== "open" && (diff < 10 || diff > 30)) {
