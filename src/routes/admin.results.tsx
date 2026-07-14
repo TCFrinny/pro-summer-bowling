@@ -302,20 +302,23 @@ function AdminResultsPage() {
           slotId: currentMatch.id,
           sideA: {
             status: draft.sideA.status,
-            substituteId: draft.sideA.subId || undefined,
-            substituteName: draft.sideA.subName.trim() || undefined,
+            // Substitutes MUST be picked from the season pool — the
+            // server rejects a substitute participation with no id.
+            substituteId: draft.sideA.status === "substitute"
+              ? (draft.sideA.subId || undefined) : undefined,
             substituteStartingAverage: draft.sideA.status === "substitute"
               ? subStartAvgOrUndef(draft.sideA.subStartAvg) : undefined,
             games: buildGames(draft.sideA, derivedA) as never,
           },
           sideB: {
             status: draft.sideB.status,
-            substituteId: draft.sideB.subId || undefined,
-            substituteName: draft.sideB.subName.trim() || undefined,
+            substituteId: draft.sideB.status === "substitute"
+              ? (draft.sideB.subId || undefined) : undefined,
             substituteStartingAverage: draft.sideB.status === "substitute"
               ? subStartAvgOrUndef(draft.sideB.subStartAvg) : undefined,
             games: buildGames(draft.sideB, derivedB) as never,
           },
+
           override: draft.overrideEnabled ? {
             enabled: true,
             pointsA: Number(draft.overrideA),
