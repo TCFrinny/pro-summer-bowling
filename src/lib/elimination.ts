@@ -332,10 +332,14 @@ function solveWeeks(
   };
 
   // Prefer pairing the target first, choosing the opponent with the highest
-  // current points (deterministic tiebreak by id ascending).
-  const targetHere = remaining.has(ctx.target) && !slot.fixedForBowler.has(ctx.target);
+  // current points (deterministic tiebreak by id ascending). When target is
+  // null (global feasibility check) skip the target-first branch entirely.
+  const target = ctx.target;
+  const targetHere = target !== null
+    && remaining.has(target)
+    && !slot.fixedForBowler.has(target);
   const rest: BowlerId[] = [];
-  for (const id of remaining) if (id !== ctx.target) rest.push(id);
+  for (const id of remaining) if (id !== target) rest.push(id);
   rest.sort((a, b) => {
     const dc = (ctx.currUnits.get(b) ?? 0) - (ctx.currUnits.get(a) ?? 0);
     if (dc !== 0) return dc;
@@ -377,18 +381,18 @@ function solveWeeks(
     return false;
   };
 
-  if (targetHere) {
+  if (targetHere && target !== null) {
     const candidates = rest.filter((o) => !paired.has(o));
     for (const opp of candidates) {
       if (ctx.budget.remaining-- <= 0) return false;
-      if (!addPair(ctx.target, opp)) continue;
+      if (!addPair(target, opp)) continue;
       if (backtrackRest()) return true;
-      removePair(ctx.target, opp);
+      removePair(target, opp);
     }
     return false;
   }
   // Target has a fixed pair this week (or target isn't in unresolvedActive
-  // this week); just pair the rest.
+  // this week, or no target was specified); just pair the rest.
   return backtrackRest();
 }
 
