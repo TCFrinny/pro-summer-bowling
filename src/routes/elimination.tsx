@@ -124,7 +124,7 @@ function EliminationPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {snap.rows.map((r) => (
+            {orderedRows.map((r) => (
               <tr key={r.bowler.id} className="align-top hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
                 <td className="px-3 py-2 text-right font-display text-base text-gold">
