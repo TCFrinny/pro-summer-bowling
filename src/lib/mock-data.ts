@@ -445,34 +445,32 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
       const a = BOWLERS_BY_ID[m.bowlerA];
       const b = BOWLERS_BY_ID[m.bowlerB];
 
-      // League points + handicap credited to SCHEDULED bowler regardless of sub.
+      // League points and HANDICAP pinfall credited to SCHEDULED bowler.
       a.matchesPlayed += 1; a.gamesPlayed += 3;
       a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
       a.points += r.totalPointsA; a.pointsLost += 7 - r.totalPointsA;
       a.handicapPinfall += r.handicapTotalA;
-      // Scratch pinfall + high game/set: credited to scheduled for display
-      // continuity, but ACTUAL scratch pinfall (roster-only average) tracked
-      // separately below.
-      a.scratchPinfall += r.scratchTotalA;
-      for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
-      if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
 
       b.matchesPlayed += 1; b.gamesPlayed += 3;
       b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
       b.points += r.totalPointsB; b.pointsLost += 7 - r.totalPointsB;
       b.handicapPinfall += r.handicapTotalB;
-      b.scratchPinfall += r.scratchTotalB;
-      for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
-      if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
 
-      // Roster-only actual games (subs don't credit here).
+      // Scratch pinfall / high game / high set / actual games are ROSTER-ONLY —
+      // only games the roster member personally rolled contribute.
       if (!r.isSubA) {
         a.actualGamesRolled += 3;
         a.actualScratchPinfall += r.scratchTotalA;
+        a.scratchPinfall += r.scratchTotalA;
+        for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
+        if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
       }
       if (!r.isSubB) {
         b.actualGamesRolled += 3;
         b.actualScratchPinfall += r.scratchTotalB;
+        b.scratchPinfall += r.scratchTotalB;
+        for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
+        if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
       }
     }
   }
@@ -493,6 +491,7 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
     }
   }
 })();
+
 
 export function getMatchesForWeek(week: number): Match[] {
   return MATCHES_BY_WEEK[week] ?? [];
@@ -813,6 +812,9 @@ function buildLeaderboardsForScope(
   // Roster-only per-game and per-set rows (scratch performance stays with actual bowler).
   const scratchGames: ScratchGameRow[] = [];
   const scratchSets: ScratchSetRow[] = [];
+
+  // Credited per-game and per-set rows — HCP boards credit the SCHEDULED bowler
+  // and use the scratch actually rolled + that bowler's weekly handicap.
   const hcpGames: ScratchGameRow[] = [];
   const hcpSets: ScratchSetRow[] = [];
 
@@ -843,9 +845,7 @@ function buildLeaderboardsForScope(
     return a;
   };
 
-  // Credited (points/hcp) rows always tie to the SCHEDULED bowler.
-  const creditedGames: ScratchGameRow[] = [];
-  const creditedSets: ScratchSetRow[] = [];
+  // Credited season points/matches also tie to the SCHEDULED bowler.
   const creditedSeason = new Map<BowlerId, CreditedSeasonRow>();
 
   for (const m of matches) {
@@ -864,19 +864,20 @@ function buildLeaderboardsForScope(
       const opp = isA ? oppNameA : oppNameB;
       const scratchTot = isA ? r.scratchTotalA : r.scratchTotalB;
       const hdcpTot = isA ? r.handicapTotalA : r.handicapTotalB;
-      const hdcpGames = isA ? r.handicapGamesA : r.handicapGamesB;
+      const hdcpGamesArr = isA ? r.handicapGamesA : r.handicapGamesB;
       const scratchGamesArr = isA ? r.gamesA : r.gamesB;
       const totalPts = isA ? r.totalPointsA : r.totalPointsB;
 
-      // CREDITED (to scheduled bowler)
+      // CREDITED (points/hcp always attributed to the SCHEDULED bowler,
+      // using the scratch actually rolled + that bowler's weekly handicap).
       for (let i = 0; i < 3; i++) {
-        creditedGames.push({
+        hcpGames.push({
           bowlerId: sched.id, bowlerName: sched.name,
           week: m.week, matchId: m.id, opponent: opp,
-          scratch: scratchGamesArr[i], handicap: hdcpGames[i],
+          scratch: scratchGamesArr[i], handicap: hdcpGamesArr[i],
         });
       }
-      creditedSets.push({
+      hcpSets.push({
         bowlerId: sched.id, bowlerName: sched.name,
         week: m.week, matchId: m.id, opponent: opp,
         scratchSet: scratchTot, handicapSet: hdcpTot,
@@ -893,7 +894,8 @@ function buildLeaderboardsForScope(
       seasonRow.pointsLost += 7 - totalPts;
       seasonRow.matches += 1;
 
-      // ROSTER-ONLY (actual bowler only, and only if roster member)
+      // ROSTER-ONLY (actual bowler only, and only if roster member).
+      // Scratch high game/series, averages, strikes/spares/opens, advanced.
       if (!ls.isSub && ls.actualId) {
         const rosterId = ls.actualId;
         const rosterName = getBowler(rosterId)?.name ?? ls.actualName;
@@ -905,19 +907,8 @@ function buildLeaderboardsForScope(
             scratch: g.scratchTotal,
             handicap: g.scratchTotal + ls.handicap,
           });
-          hcpGames.push({
-            bowlerId: rosterId, bowlerName: rosterName,
-            week: m.week, matchId: m.id, opponent: opp,
-            scratch: g.scratchTotal,
-            handicap: g.scratchTotal + ls.handicap,
-          });
         }
         scratchSets.push({
-          bowlerId: rosterId, bowlerName: rosterName,
-          week: m.week, matchId: m.id, opponent: opp,
-          scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
-        });
-        hcpSets.push({
           bowlerId: rosterId, bowlerName: rosterName,
           week: m.week, matchId: m.id, opponent: opp,
           scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
@@ -934,6 +925,7 @@ function buildLeaderboardsForScope(
       }
     }
   }
+
 
   const topN = <T>(arr: T[], key: (x: T) => number, n: number, asc = false): T[] =>
     [...arr].sort((x, y) => (asc ? key(x) - key(y) : key(y) - key(x))).slice(0, n);
@@ -1010,6 +1002,152 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
   Object.fromEntries(
     WEEKS.filter((w) => w.completed).map((w) => [w.week, buildLeaderboardsForScope(w.week)]),
   );
+
+// ---------------------------------------------------------------------------
+// Synthetic substitute validation (dev-time).
+// Injects a fake off-roster sub appearance and asserts the crediting split:
+//   - the sub's SCRATCH game/set are ABSENT from roster-only boards;
+//   - the resulting HCP game/set + league points are PRESENT under the
+//     SCHEDULED bowler in the credited boards.
+// ---------------------------------------------------------------------------
+(function validateSubCrediting() {
+  const scheduled = BOWLERS[0];
+  const opponent = BOWLERS[1];
+  const fakeSubName = "SYNTH SUB — VERIFY";
+  const openFrame = (n: number, cumBase: number): Frame => ({
+    frameNumber: n,
+    rolls: [0, 0, 0] as Roll[],
+    ballDisplay: ["-", "-", "-"],
+    isStrike: false, isSpare: false, isOpen: true,
+    framePinfall: 0, bonus: 0,
+    cumulative: cumBase,
+  });
+  const fakeFrames: Frame[] = Array.from({ length: 10 }).map((_, i) =>
+    openFrame(i + 1, 0),
+  );
+  const fakeGame: GameLinescore = {
+    frames: fakeFrames,
+    scratchTotal: 999, // sky-high scratch — MUST NOT appear on roster-only boards
+    strikes: 0, spares: 0, opens: 10,
+    openPinsLeft: 100, marks: 0,
+  };
+  const subLs: BowlerMatchLinescore = {
+    scheduledId: scheduled.id,
+    actualId: null,
+    actualName: `Sub — ${fakeSubName}`,
+    isSub: true,
+    entryAverage: 100,
+    handicap: scheduled.handicap,
+    games: [fakeGame, fakeGame, fakeGame],
+    scratchSet: 999 * 3,
+    handicapGames: [999 + scheduled.handicap, 999 + scheduled.handicap, 999 + scheduled.handicap],
+    handicapSet: 999 * 3 + scheduled.handicap * 3,
+    strikes: 0, spares: 0, opens: 30,
+    marks: 0, openPinsLeft: 300, framesRolled: 30,
+  };
+  const oppGame: GameLinescore = { ...fakeGame, scratchTotal: 120 };
+
+  const oppLs: BowlerMatchLinescore = {
+    scheduledId: opponent.id, actualId: opponent.id, actualName: opponent.name,
+    isSub: false, entryAverage: opponent.entryAverage, handicap: opponent.handicap,
+    games: [oppGame, oppGame, oppGame],
+    scratchSet: 360,
+    handicapGames: [120 + opponent.handicap, 120 + opponent.handicap, 120 + opponent.handicap],
+    handicapSet: 360 + opponent.handicap * 3,
+    strikes: 0, spares: 0, opens: 30, marks: 0, openPinsLeft: 300, framesRolled: 30,
+  };
+  const synthMatch: Match = {
+    id: "synth-sub-verify", week: 999, lanePair: "1-2", slot: 1, status: "completed",
+    bowlerA: scheduled.id, bowlerB: opponent.id,
+    result: {
+      scheduledA: scheduled.id, scheduledB: opponent.id,
+      actualA: null, actualB: opponent.id,
+      actualNameA: subLs.actualName, actualNameB: opponent.name,
+      isSubA: true, isSubB: false,
+      subA: fakeSubName,
+      entryAverageA: 100, entryAverageB: opponent.entryAverage,
+      handicapA: scheduled.handicap, handicapB: opponent.handicap,
+      linescoreA: subLs, linescoreB: oppLs,
+      gamesA: [999, 999, 999], gamesB: [120, 120, 120],
+      handicapGamesA: subLs.handicapGames, handicapGamesB: oppLs.handicapGames,
+      scratchTotalA: 999 * 3, scratchTotalB: 360,
+      handicapTotalA: subLs.handicapSet, handicapTotalB: oppLs.handicapSet,
+      gameAwardsA: [2, 2, 2], gameAwardsB: [0, 0, 0],
+      gamePointsA: 6, gamePointsB: 0,
+      setPointA: 1, setPointB: 0,
+      totalPointsA: 7, totalPointsB: 0,
+      winner: "A",
+    },
+  };
+
+  const prevWeek = MATCHES_BY_WEEK[999];
+  MATCHES_BY_WEEK[999] = [synthMatch];
+  WEEKS.push({ week: 999, date: new Date(2099, 0, 1).toISOString(), completed: true });
+  try {
+    const probe = buildLeaderboardsForScope(999);
+
+    // Roster-only scratch boards must NOT contain the sub's 999 scratch game/set.
+    const rosterHasSubScratchGame = probe.standard.scratchHighGame.some(
+      (r) => r.matchId === synthMatch.id,
+    );
+    const rosterHasSubScratchSet = probe.standard.scratchHighSeries.some(
+      (r) => r.matchId === synthMatch.id,
+    );
+    if (rosterHasSubScratchGame || rosterHasSubScratchSet) {
+      throw new Error(
+        "Sub crediting bug: sub scratch performance leaked into roster-only scratch boards.",
+      );
+    }
+    const rosterHasSubAdvanced = probe.advanced.rows.some(
+      (r) => r.bowlerId === scheduled.id && r.frames >= 30 && r.opens >= 30,
+    );
+    if (rosterHasSubAdvanced) {
+      throw new Error(
+        "Sub crediting bug: sub frames leaked into scheduled bowler's advanced row.",
+      );
+    }
+
+    // Credited HCP boards MUST list the SCHEDULED bowler with the actual scratch rolled.
+    const hcpGameEntry = probe.standard.hcpHighGame.find(
+      (r) => r.matchId === synthMatch.id && r.bowlerId === scheduled.id,
+    );
+    const hcpSetEntry = probe.standard.hcpHighSeries.find(
+      (r) => r.matchId === synthMatch.id && r.bowlerId === scheduled.id,
+    );
+    if (!hcpGameEntry || !hcpSetEntry) {
+      throw new Error(
+        "Sub crediting bug: credited HCP game/series not attributed to scheduled bowler.",
+      );
+    }
+    const expectedHcpGame = 999 + scheduled.handicap;
+    const expectedHcpSet = 999 * 3 + scheduled.handicap * 3;
+    if (hcpGameEntry.handicap !== expectedHcpGame) {
+      throw new Error(
+        `Sub crediting bug: credited HCP game = ${hcpGameEntry.handicap}, expected ${expectedHcpGame}.`,
+      );
+    }
+    if (hcpSetEntry.handicapSet !== expectedHcpSet) {
+      throw new Error(
+        `Sub crediting bug: credited HCP set = ${hcpSetEntry.handicapSet}, expected ${expectedHcpSet}.`,
+      );
+    }
+    const totalPointsRow = probe.standard.topTotalPoints.find(
+      (r) => r.bowlerId === scheduled.id,
+    );
+    if (!totalPointsRow || totalPointsRow.points < 7) {
+      throw new Error(
+        "Sub crediting bug: league points not credited to scheduled bowler.",
+      );
+    }
+  } finally {
+    // Restore state so no synthetic data affects real pages.
+    if (prevWeek) MATCHES_BY_WEEK[999] = prevWeek;
+    else delete MATCHES_BY_WEEK[999];
+    const idx = WEEKS.findIndex((w) => w.week === 999);
+    if (idx >= 0) WEEKS.splice(idx, 1);
+  }
+})();
+
 
 export function getStandardLeaderboards(scope: "season" | number): StandardLeaderboards {
   if (scope === "season") return SEASON_BOARDS.standard;
