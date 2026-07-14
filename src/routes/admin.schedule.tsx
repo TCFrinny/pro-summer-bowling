@@ -250,7 +250,7 @@ function BowlerSelect({
   value: BowlerId | "";
   onChange: (v: BowlerId | "") => void;
   invalid?: boolean;
-  options: { id: string; name: string }[];
+  options: { id: string; name: string; bowlerNumber?: string }[];
 }) {
   return (
     <Select value={value || undefined} onValueChange={(v) => onChange(v as BowlerId)}>
@@ -260,7 +260,7 @@ function BowlerSelect({
       <SelectContent>
         {options.map((b) => (
           <SelectItem key={b.id} value={b.id}>
-            {b.name}
+            {b.bowlerNumber ? `${b.name} (ID ${b.bowlerNumber})` : b.name}
           </SelectItem>
         ))}
       </SelectContent>
