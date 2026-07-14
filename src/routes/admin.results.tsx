@@ -11,9 +11,17 @@ import {
   type ParticipationStatus,
 } from "@/lib/mock-data";
 import {
+  deleteMatchResult,
   getAdminScheduleData,
   saveMatchResult,
 } from "@/lib/schedule-repo.functions";
+import { SNAPSHOT_QUERY_KEY } from "@/lib/public-snapshot";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
 import {
   SideLinescoreEditor,
   computeSideDerived,
@@ -27,7 +35,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/results")({
@@ -121,6 +129,8 @@ function AdminResultsPage() {
   const qc = useQueryClient();
   const load = useServerFn(getAdminScheduleData);
   const save = useServerFn(saveMatchResult);
+  const del = useServerFn(deleteMatchResult);
+
 
   const query = useQuery({
     queryKey: ["admin", "schedule"],
@@ -336,10 +346,25 @@ function AdminResultsPage() {
     onError: (e: Error) => setFlash("Save failed: " + e.message),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentMatch) throw new Error("No match selected");
+      return del({ data: { slotId: currentMatch.id } });
+    },
+    onSuccess: () => {
+      setFlash("Saved result deleted. Standings and leaderboards updated.");
+      setDraft(emptyDraft());
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+      qc.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
+    },
+    onError: (e: Error) => setFlash("Delete failed: " + e.message),
+  });
+
   const handleReset = () => {
     setDraft(savedResult ? draftFromResult(savedResult) : emptyDraft());
     setFlash(null);
   };
+
 
   if (query.isLoading) {
     return (
@@ -541,6 +566,49 @@ function AdminResultsPage() {
           <RotateCcw className="h-3.5 w-3.5" />
           {isEditingSaved ? "Reset to saved" : "Clear editor"}
         </button>
+        {isEditingSaved && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                data-testid="delete-result"
+                disabled={deleteMutation.isPending}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border-2 px-3 py-2 text-xs font-semibold",
+                  "border-destructive/70 text-destructive hover:bg-destructive/10",
+                  deleteMutation.isPending && "cursor-not-allowed opacity-60",
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleteMutation.isPending ? "Deleting…" : "Delete saved result"}
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent data-testid="delete-result-confirm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete saved result?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove the saved result for{" "}
+                  <span className="font-semibold">
+                    {currentMatch?.bowlerA.name} vs {currentMatch?.bowlerB.name}
+                  </span>{" "}
+                  (Week {currentMatch?.week}, Lanes {currentMatch?.lanePair}, Slot {currentMatch?.slot}).
+                  The scheduled matchup remains; you can re-enter the result later.
+                  Standings, leaderboards, and the public snapshot will be recomputed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  data-testid="delete-result-confirm-btn"
+                  onClick={() => deleteMutation.mutate()}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete result
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
         {flash && (
           <span
             data-testid="save-flash"

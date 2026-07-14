@@ -561,9 +561,41 @@ export const deleteMatchResult = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureSeasonId(context);
+
+    // Look up the result row FIRST so we know which week to recompute the
+    // completed flag on. Idempotent: no row → no-op success.
+    const existing = await context.supabase.from("match_results")
+      .select("schedule_slot_id, week_id")
+      .eq("schedule_slot_id", data.slotId)
+      .eq("season_id", seasonId)
+      .maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    if (!existing.data) return { ok: true, deleted: false };
+
+    const weekId = existing.data.week_id;
+
     const del = await context.supabase.from("match_results")
       .delete().eq("schedule_slot_id", data.slotId);
     if (del.error) throw new Error(del.error.message);
+
+    // Recompute completed from CURRENT slot vs remaining result counts.
+    // Normally false after a delete, unless every remaining slot still
+    // has a result.
+    const wkSlots = await context.supabase.from("schedule_slots")
+      .select("id").eq("week_id", weekId);
+    if (wkSlots.error) throw new Error(wkSlots.error.message);
+    const slotIds = (wkSlots.data ?? []).map((s) => s.id);
+    let completed = false;
+    if (slotIds.length > 0) {
+      const done = await context.supabase.from("match_results")
+        .select("schedule_slot_id", { head: true, count: "exact" }).in("schedule_slot_id", slotIds);
+      if (done.error) throw new Error(done.error.message);
+      completed = (done.count ?? 0) === slotIds.length;
+    }
+    const upd = await context.supabase.from("weeks").update({ completed }).eq("id", weekId);
+    if (upd.error) throw new Error(upd.error.message);
+
     await rebuildAndSaveSnapshot(context.supabase, seasonId);
-    return { ok: true };
+    return { ok: true, deleted: true };
   });
+
