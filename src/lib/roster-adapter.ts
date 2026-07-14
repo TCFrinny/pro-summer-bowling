@@ -201,16 +201,25 @@ export function isDuplicateActive(
   if (snap.bowlersById["b01"]?.entryAverage !== 140) {
     throw new Error("roster-adapter: bowlersById lookup broken");
   }
-  // Archived rows must be filtered out.
-  const withArchived = buildSnapshotFromRows({
+  // Active-only filter: archived AND inactive rows both excluded.
+  const mixed = buildSnapshotFromRows({
     rostered: [
-      { id: "b01", name: "Alice", entry_average: 140, handicap: 16, active: true, archived: false, bowler_number: null, season_id: "s1" },
-      { id: "b99", name: "Zed",   entry_average: 100, handicap: 48, active: false, archived: true, bowler_number: null, season_id: "s1" },
+      { id: "b01", name: "Alice",    entry_average: 140, handicap: 16, active: true,  archived: false, bowler_number: "01", season_id: "s1" },
+      { id: "b02", name: "Inactive", entry_average: 140, handicap: 16, active: false, archived: false, bowler_number: "02", season_id: "s1" },
+      { id: "b99", name: "Zed",      entry_average: 100, handicap: 48, active: false, archived: true,  bowler_number: null, season_id: "s1" },
+      { id: "b98", name: "ArchivedButFlagged", entry_average: 100, handicap: 48, active: true, archived: true, bowler_number: null, season_id: "s1" },
     ],
   });
-  if (withArchived.bowlers.length !== 1 || withArchived.bowlersById["b99"]) {
-    throw new Error("roster-adapter: archived rows must be excluded from snapshot");
+  if (mixed.bowlers.length !== 1) {
+    throw new Error(`roster-adapter: only active,non-archived rows must appear (got ${mixed.bowlers.length})`);
   }
+  if (mixed.bowlersById["b02"] || mixed.bowlersById["b99"] || mixed.bowlersById["b98"]) {
+    throw new Error("roster-adapter: inactive/archived rows must not appear in snapshot");
+  }
+  if (!mixed.bowlersById["b01"]) {
+    throw new Error("roster-adapter: active,non-archived row missing from snapshot");
+  }
+
 
   // ID minting: skip existing.
   const nid = nextRosterIdFrom([{ id: "b01" }, { id: "b02" }, { id: "b04" }]);
