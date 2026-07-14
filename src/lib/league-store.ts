@@ -90,9 +90,10 @@ interface StoreState {
   version: number;
 }
 
-const STORAGE_KEY = "pss.leagueStore.v2";
-const OLD_KEY_V1 = "pss.leagueStore.v1";
-const SCHEMA_VERSION = 2;
+const STORAGE_KEY = "pss.leagueStore.v3";
+const OLD_KEYS_TO_CLEAR = ["pss.leagueStore.v1"];
+const OLD_KEY_V2 = "pss.leagueStore.v2";
+const SCHEMA_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Seeding
@@ -136,11 +137,13 @@ function seedDb(): LeagueDatabase {
   };
 }
 
+let __stateVersion = 0;
 function buildStoreState(db: LeagueDatabase): StoreState {
+  __stateVersion += 1;
   return {
     db,
     snapshot: buildSnapshot({ bowlers: rosterToBowlers(db.rostered), weeks: db.weeks, matchesByWeek: db.matchesByWeek }),
-    version: (state?.version ?? 0) + 1,
+    version: __stateVersion,
   };
 }
 
@@ -162,29 +165,123 @@ function rosterToBowlers(rostered: RosteredBowlerRecord[]): Bowler[] {
 function loadInitialDb(): LeagueDatabase {
   if (typeof window === "undefined") return seedDb();
   try {
-    // Discard the incompatible v1 shape.
-    window.localStorage.removeItem(OLD_KEY_V1);
+    for (const k of OLD_KEYS_TO_CLEAR) window.localStorage.removeItem(k);
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return seedDb();
-    const parsed = JSON.parse(raw) as LeagueDatabase;
-    if (!parsed || parsed.version !== SCHEMA_VERSION) return seedDb();
-    // Structural sanity: matchesByWeek + weeks present.
-    if (!parsed.rostered || !parsed.matchesByWeek || !parsed.weeks) return seedDb();
-    return parsed;
+    if (raw) {
+      const parsed = JSON.parse(raw) as LeagueDatabase;
+      if (parsed && parsed.version === SCHEMA_VERSION && parsed.rostered && parsed.matchesByWeek && parsed.weeks) {
+        return parsed;
+      }
+    }
+    // Try v2 migration.
+    const legacy = window.localStorage.getItem(OLD_KEY_V2);
+    if (legacy) {
+      try {
+        const v2 = JSON.parse(legacy) as unknown;
+        const migrated = migrateV2ToV3(v2);
+        if (migrated) {
+          window.localStorage.removeItem(OLD_KEY_V2);
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          return migrated;
+        }
+      } catch { /* fall through to seed */ }
+      window.localStorage.removeItem(OLD_KEY_V2);
+    }
+    return seedDb();
   } catch {
     return seedDb();
   }
+}
+
+/**
+ * v2 → v3 migration.
+ *
+ * v2 shape did not require `scheduledNameA/B` on every MatchResult. Backfill
+ * frozen scheduled display names from the best historical source:
+ *   1. an already-present `scheduledNameA/B` field
+ *   2. `participationA/B.actualName` when the participant was rostered
+ *   3. the current roster record's name (final fallback)
+ *
+ * Also guarantees that every completed result has frozen `entryAverageA/B`,
+ * `handicapA/B`, `participationA/B`, `linescoreA/B` fields present in the
+ * current MatchResult shape. Malformed results are DROPPED (match reverts
+ * to `scheduled`), so no undefined labels or note-only placeholders leak.
+ */
+export function migrateV2ToV3(raw: unknown): LeagueDatabase | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v2 = raw as Partial<LeagueDatabase> & Record<string, unknown>;
+  if (!v2.rostered || !v2.matchesByWeek || !v2.weeks) return null;
+  const rosterById = new Map<string, RosteredBowlerRecord>(
+    (v2.rostered as RosteredBowlerRecord[]).map((b) => [b.id, b]),
+  );
+  const migratedMatches: Record<number, Match[]> = {};
+  for (const [wkStr, matches] of Object.entries(v2.matchesByWeek as Record<string, Match[]>)) {
+    const wk = Number(wkStr);
+    migratedMatches[wk] = matches.map((m) => {
+      if (!m.result) return { ...m, status: "scheduled" };
+      const r = m.result as MatchResult & Record<string, unknown>;
+      // Note-only or malformed leftover — drop it.
+      const hasLinescoreShape =
+        "linescoreA" in r && "linescoreB" in r &&
+        "participationA" in r && "participationB" in r;
+      if (!hasLinescoreShape) {
+        return { id: m.id, week: m.week, lanePair: m.lanePair, slot: m.slot,
+          status: "scheduled" as const, bowlerA: m.bowlerA, bowlerB: m.bowlerB };
+      }
+      const schedA = rosterById.get(m.bowlerA);
+      const schedB = rosterById.get(m.bowlerB);
+      const nameA = (r.scheduledNameA as string | undefined)
+        ?? (r.participationA?.status === "rostered" ? r.participationA.actualName : undefined)
+        ?? schedA?.name ?? m.bowlerA;
+      const nameB = (r.scheduledNameB as string | undefined)
+        ?? (r.participationB?.status === "rostered" ? r.participationB.actualName : undefined)
+        ?? schedB?.name ?? m.bowlerB;
+      const entryA = (r.entryAverageA as number | undefined) ?? schedA?.entryAverage ?? 0;
+      const entryB = (r.entryAverageB as number | undefined) ?? schedB?.entryAverage ?? 0;
+      const hcpA = (r.handicapA as number | undefined) ?? computeHandicap(entryA);
+      const hcpB = (r.handicapB as number | undefined) ?? computeHandicap(entryB);
+      return {
+        ...m,
+        status: "completed" as const,
+        result: {
+          ...r,
+          scheduledNameA: nameA,
+          scheduledNameB: nameB,
+          entryAverageA: entryA,
+          entryAverageB: entryB,
+          handicapA: hcpA,
+          handicapB: hcpB,
+          pointsOverride: (r.pointsOverride as PointsOverride | null | undefined) ?? null,
+        } as MatchResult,
+      };
+    });
+  }
+  const schedulesByWeek = (v2.schedulesByWeek as Record<number, WeekSchedule>) ?? {};
+  const weeks = (v2.weeks as WeekSummary[]).map((w) => ({
+    ...w,
+    completed: (migratedMatches[w.week] ?? []).length > 0
+      && (migratedMatches[w.week] ?? []).every((m) => m.status === "completed"),
+  }));
+  return {
+    version: SCHEMA_VERSION,
+    rostered: v2.rostered as RosteredBowlerRecord[],
+    subs: (v2.subs as SubstituteRecord[]) ?? [],
+    weeks,
+    matchesByWeek: migratedMatches,
+    schedulesByWeek,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
-let state: StoreState = buildStoreState(loadInitialDb());
+// Install the snapshot bridge FIRST with a lazy getter so any mock-data
+// call during initial buildStoreState resolves without TDZ on `state`.
+let state: StoreState = null as unknown as StoreState;
+_installSnapshotProvider(() => (state ? state.snapshot : ({} as PublicSnapshot)));
+state = buildStoreState(loadInitialDb());
 const listeners = new Set<() => void>();
-
-// Bridge: mock-data getters read the snapshot through this hook.
-_installSnapshotProvider(() => state.snapshot);
 
 function persist() {
   if (typeof window === "undefined") return;
@@ -378,8 +475,12 @@ export interface SideDraft {
   substituteName?: string;
   /** Required when status !== "absent". Three 10-frame games. */
   games?: [GameLinescore, GameLinescore, GameLinescore];
-  /** Optional override — new frozen entry average for a sub or edit. */
-  entryAverageOverride?: number;
+  /**
+   * OPTIONAL informational-only substitute average. Never affects scoring.
+   * Scoring handicap is ALWAYS derived from the scheduled bowler's current
+   * roster entry average at save time.
+   */
+  substituteAverageInfo?: number;
 }
 export interface ResultDraft {
   matchId: string;
@@ -393,7 +494,7 @@ export type ApplyResultOutcome =
 
 export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   const errors: string[] = [];
-  const match = findMatch(draft.matchId);
+  const match = findMatchInDb(state.db, draft.matchId);
   if (!match) return { ok: false, errors: [`Match ${draft.matchId} not found.`] };
   const sched = {
     A: state.db.rostered.find((b) => b.id === match.bowlerA),
@@ -453,10 +554,13 @@ export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   }
   if (errors.length > 0) return { ok: false, errors };
 
-  const entryA = draft.sideA.entryAverageOverride ?? sched.A.entryAverage;
-  const entryB = draft.sideB.entryAverageOverride ?? sched.B.entryAverage;
-  const hcpA = computeHandicap(sched.A.entryAverage);
-  const hcpB = computeHandicap(sched.B.entryAverage);
+  // FROZEN scheduled entry average / handicap. NEVER swap in a substitute's
+  // informational average — scoring handicap is always the scheduled
+  // bowler's current handicap at save time.
+  const entryA = sched.A.entryAverage;
+  const entryB = sched.B.entryAverage;
+  const hcpA = computeHandicap(entryA);
+  const hcpB = computeHandicap(entryB);
 
   const linescoreA = draft.sideA.games ? assembleSideLinescore({
     scheduled: rosteredToBowler(sched.A),
@@ -484,6 +588,8 @@ export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   catch (e) { return { ok: false, errors: [(e as Error).message] }; }
 
   const wk = updatedMatch.week;
+  // REPLACEMENT semantics: map over existing matches so a re-save of the
+  // same matchId overwrites the prior result exactly once (no double-count).
   const nextWeekMatches = (state.db.matchesByWeek[wk] ?? []).map((m) =>
     m.id === updatedMatch.id ? updatedMatch : m);
   const nextWeeks = state.db.weeks.map((w) =>
@@ -507,12 +613,21 @@ function rosteredToBowler(r: RosteredBowlerRecord): Bowler {
   };
 }
 
-function findMatch(matchId: string): Match | undefined {
-  for (const w of Object.values(state.db.matchesByWeek)) {
+function findMatchInDb(db: LeagueDatabase, matchId: string): Match | undefined {
+  for (const w of Object.values(db.matchesByWeek)) {
     const m = w.find((mm) => mm.id === matchId);
     if (m) return m;
   }
   return undefined;
+}
+/** Look up a match anywhere in the current DB by id. */
+export function findMatch(matchId: string): Match | undefined {
+  return findMatchInDb(state.db, matchId);
+}
+/** Convenience: return a saved MatchResult (or undefined) for hydrating
+ *  the /admin/results editor into "edit existing" mode. */
+export function getSavedResult(matchId: string): MatchResult | undefined {
+  return findMatch(matchId)?.result;
 }
 
 // ---------------------------------------------------------------------------
@@ -541,41 +656,183 @@ export function findSubRecord(id: string, s: StoreState = state): SubstituteReco
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic self-tests
+// Deterministic self-tests — 13 required scenarios (Phase 1 v3).
+// Run at module load; a throw aborts the app in dev so regressions are loud.
 // ---------------------------------------------------------------------------
 
 (function selfTest() {
   const db = seedDb();
-  // #1 exact frame notation surfaces — checked in frame-input.ts.
-  // #3 Frame 10 cumulative IS the scratch game.
+  const errors: string[] = [];
+  const check = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+
+  // #1 exact frame notation surfaces — enforced in frame-input.ts;
+  //    round-trip verified below via saved frame marks in seed results.
   const anyResult = db.matchesByWeek[1].find((m) => m.result)?.result;
-  if (!anyResult) throw new Error("store: seed missing week-1 result");
-  if (anyResult.linescoreA) {
-    for (let i = 0; i < 3; i++) {
-      const g = anyResult.linescoreA.games[i];
-      const tenth = g.frames[9].cumulativeScore;
-      if (tenth !== g.scratchTotal)
-        throw new Error(`store: frame 10 cumulative != scratchTotal`);
+  check(!!anyResult, "seed missing week-1 result");
+  if (anyResult?.linescoreA) {
+    const allowed9 = new Set(["X", "/", "-"]);
+    const allowed10 = new Set(["XXX", "XX", "X/", "/X", "X", "/", "-"]);
+    for (const game of anyResult.linescoreA.games) {
+      for (let f = 0; f < 9; f++)
+        check(allowed9.has(game.frames[f].mark), `frame ${f + 1} mark outside allowed set`);
+      check(allowed10.has(game.frames[9].mark), "frame 10 mark outside allowed set");
     }
   }
-  // #4-6 Awards from HCP, sum to 7 on normal.
+  // #2 frame 10 cumulative IS the scratch game total.
+  if (anyResult?.linescoreA) {
+    for (let i = 0; i < 3; i++) {
+      const g = anyResult.linescoreA.games[i];
+      check(g.frames[9].cumulativeScore === g.scratchTotal,
+        `frame 10 cumulative != scratchTotal (game ${i + 1})`);
+    }
+  }
+  // #3-5 normal-match awards: 3×game (2 pts) + set (1 pt) → sum to 7.
   for (const m of db.matchesByWeek[1]) {
-    if (!m.result || m.result.pointsOverride) continue;
+    if (!m.result || m.result.pointsOverride?.enabled) continue;
     const r = m.result;
     if (!r.linescoreA || !r.linescoreB) continue;
     for (let i = 0; i < 3; i++) {
       const sa = r.handicapGamesA[i], sb = r.handicapGamesB[i];
       const aw = r.gameAwardsA[i], bw = r.gameAwardsB[i];
-      if (sa > sb && aw !== 2) throw new Error("store: game award mismatch (A>B)");
-      if (sb > sa && bw !== 2) throw new Error("store: game award mismatch (B>A)");
-      if (sa === sb && (aw !== 1 || bw !== 1)) throw new Error("store: tie awards");
+      if (sa > sb) check(aw === 2 && bw === 0, `game award A>B mismatch`);
+      else if (sb > sa) check(bw === 2 && aw === 0, `game award B>A mismatch`);
+      else check(aw === 1 && bw === 1, `tie award mismatch`);
     }
-    if (r.totalPointsA + r.totalPointsB !== 7)
-      throw new Error("store: match must sum to 7");
+    check(r.totalPointsA + r.totalPointsB === 7, "match must sum to 7");
   }
-  // Handicap formula.
-  if (computeHandicap(140) !== 16)
-    throw new Error("store: computeHandicap(140) expected 16");
-  if (computeHandicap(160) !== 0)
-    throw new Error("store: computeHandicap(160) expected 0");
+  // #6 handicap formula: floor(0.80 * (160 - avg)), clamped ≥ 0.
+  check(computeHandicap(140) === 16, "computeHandicap(140) expected 16");
+  check(computeHandicap(160) === 0, "computeHandicap(160) expected 0");
+  check(computeHandicap(180) === 0, "computeHandicap(180) expected 0 (clamped)");
+  check(computeHandicap(120) === 32, "computeHandicap(120) expected 32");
+
+  // #7 override validator: must be 0..7, 0.5 steps, sum ≤ 7, reason required.
+  check(!validatePointsOverride({ enabled: true, pointsA: 4, pointsB: 4, reason: "x" }).ok,
+    "override sum > 7 must fail");
+  check(!validatePointsOverride({ enabled: true, pointsA: 4.25, pointsB: 2, reason: "x" }).ok,
+    "override non-0.5 step must fail");
+  check(!validatePointsOverride({ enabled: true, pointsA: 4, pointsB: 3, reason: "  " }).ok,
+    "override empty reason must fail");
+  check(validatePointsOverride({ enabled: true, pointsA: 4, pointsB: 3, reason: "OK" }).ok,
+    "override 4+3 with reason must pass");
+
+  // #8 absent side has zero pinfall and no linescore.
+  const absentSeeded = Object.values(db.matchesByWeek)
+    .flat()
+    .find((m) => m.result?.participationA.status === "absent"
+      || m.result?.participationB.status === "absent");
+  if (absentSeeded?.result) {
+    const r = absentSeeded.result;
+    if (r.participationA.status === "absent") {
+      check(r.handicapTotalA === 0 && r.scratchTotalA === 0,
+        "absent A must have zero pinfall");
+      check(r.linescoreA === null, "absent A must have null linescore");
+    }
+    if (r.participationB.status === "absent") {
+      check(r.handicapTotalB === 0 && r.scratchTotalB === 0,
+        "absent B must have zero pinfall");
+      check(r.linescoreB === null, "absent B must have null linescore");
+    }
+  }
+
+  // #9 frozen scheduled names/averages present on every completed result.
+  for (const m of Object.values(db.matchesByWeek).flat()) {
+    if (!m.result) continue;
+    const r = m.result;
+    check(typeof r.scheduledNameA === "string" && r.scheduledNameA.length > 0,
+      `${m.id}: missing scheduledNameA`);
+    check(typeof r.scheduledNameB === "string" && r.scheduledNameB.length > 0,
+      `${m.id}: missing scheduledNameB`);
+    check(typeof r.entryAverageA === "number" && typeof r.entryAverageB === "number",
+      `${m.id}: missing frozen entry averages`);
+    check(typeof r.handicapA === "number" && typeof r.handicapB === "number",
+      `${m.id}: missing frozen handicaps`);
+  }
+
+  // #10 substitute frozen scoring: handicap on the result equals the
+  //     SCHEDULED bowler's handicap at result time (never the sub's).
+  for (const m of Object.values(db.matchesByWeek).flat()) {
+    if (!m.result) continue;
+    const sA = db.rostered.find((b) => b.id === m.bowlerA);
+    const sB = db.rostered.find((b) => b.id === m.bowlerB);
+    if (sA) check(m.result.handicapA === computeHandicap(sA.entryAverage),
+      `${m.id}: side A handicap must be scheduled bowler's handicap`);
+    if (sB) check(m.result.handicapB === computeHandicap(sB.entryAverage),
+      `${m.id}: side B handicap must be scheduled bowler's handicap`);
+  }
+
+  // #11 substitute leakage: sub scratch must NOT be attributed to
+  //     scheduled bowler's roster-only totals. Verified by inspecting
+  //     any seeded sub result: the linescore's actualId differs from the
+  //     scheduled id and `isSubstitute` is true.
+  const subResult = Object.values(db.matchesByWeek).flat()
+    .find((m) => m.result?.participationA.status === "substitute"
+      || m.result?.participationB.status === "substitute");
+  if (subResult?.result) {
+    const r = subResult.result;
+    if (r.participationA.status === "substitute" && r.linescoreA) {
+      check(r.linescoreA.isSub === true, "sub A linescore must be flagged");
+      check(r.linescoreA.actualId !== r.participationA.scheduledId,
+        "sub A actualId must differ from scheduled id");
+    }
+    if (r.participationB.status === "substitute" && r.linescoreB) {
+      check(r.linescoreB.isSub === true, "sub B linescore must be flagged");
+    }
+  }
+
+  // #12 schema version bumped to v3.
+  check(db.version === SCHEMA_VERSION && SCHEMA_VERSION === 3,
+    "schema version must be v3");
+
+  // #13 v2 → v3 migration backfills frozen names / averages and drops
+  //     malformed note-only results.
+  const legacy = {
+    version: 2,
+    rostered: db.rostered,
+    subs: db.subs,
+    weeks: db.weeks,
+    schedulesByWeek: db.schedulesByWeek,
+    matchesByWeek: {
+      99: [
+        // valid v2 shape missing scheduledName fields
+        (() => {
+          const src = db.matchesByWeek[1].find((m) => m.result)!;
+          const clone: Match = JSON.parse(JSON.stringify(src));
+          clone.id = "migtest-A";
+          if (clone.result) {
+            // simulate v2 by stripping frozen names
+            delete (clone.result as unknown as Record<string, unknown>).scheduledNameA;
+            delete (clone.result as unknown as Record<string, unknown>).scheduledNameB;
+          }
+          return clone;
+        })(),
+        // malformed note-only entry that must be dropped
+        {
+          id: "migtest-B", week: 99, lanePair: "1-2", slot: 1,
+          bowlerA: db.rostered[0].id, bowlerB: db.rostered[1].id,
+          status: "completed",
+          result: { note: "legacy note only" } as unknown as MatchResult,
+        } as unknown as Match,
+      ],
+    },
+  };
+  const migrated = migrateV2ToV3(legacy);
+  check(!!migrated, "v2→v3 migration must return a database");
+  if (migrated) {
+    const wk99 = migrated.matchesByWeek[99];
+    const kept = wk99.find((m) => m.id === "migtest-A");
+    const dropped = wk99.find((m) => m.id === "migtest-B");
+    check(!!kept?.result?.scheduledNameA && !!kept?.result?.scheduledNameB,
+      "migration must backfill scheduled names");
+    check(dropped?.status === "scheduled" && !dropped?.result,
+      "migration must drop malformed note-only result to 'scheduled'");
+  }
+
+  if (errors.length > 0) {
+    // Log all so devs see the full picture, then throw a summary.
+    // eslint-disable-next-line no-console
+    console.error("[league-store] self-test failures:\n" + errors.map((e) => "  - " + e).join("\n"));
+    throw new Error(`league-store self-test failed (${errors.length}): ${errors[0]}`);
+  }
 })();
+

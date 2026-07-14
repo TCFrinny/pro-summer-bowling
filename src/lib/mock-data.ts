@@ -769,17 +769,26 @@ export function buildSnapshot(input: {
     if (!a || !b) continue; // scheduled bowler archived+removed from db
     const awarded = getAwardedPoints(r);
 
-    a.matchesPlayed += 1; a.gamesPlayed += 3;
+    // Scheduled participation counts as a matchesPlayed entry (present on
+    // the schedule), but ABSENT sides must NOT accrue games played, handicap
+    // pinfall, or any statistical row. Only bowled sides contribute games.
+    a.matchesPlayed += 1;
+    if (r.participationA.status !== "absent") {
+      a.gamesPlayed += 3;
+      a.handicapPinfall += r.handicapTotalA;
+    }
     a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
     a.points += awarded.pointsA;
     a.pointsLost += awarded.pointsB;
-    a.handicapPinfall += r.handicapTotalA;
 
-    b.matchesPlayed += 1; b.gamesPlayed += 3;
+    b.matchesPlayed += 1;
+    if (r.participationB.status !== "absent") {
+      b.gamesPlayed += 3;
+      b.handicapPinfall += r.handicapTotalB;
+    }
     b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
     b.points += awarded.pointsB;
     b.pointsLost += awarded.pointsA;
-    b.handicapPinfall += r.handicapTotalB;
 
     const lsA = r.linescoreA;
     if (lsA && !lsA.isSub && r.participationA.status !== "absent") {
