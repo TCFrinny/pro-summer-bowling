@@ -566,6 +566,49 @@ function AdminResultsPage() {
           <RotateCcw className="h-3.5 w-3.5" />
           {isEditingSaved ? "Reset to saved" : "Clear editor"}
         </button>
+        {isEditingSaved && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <button
+                data-testid="delete-result"
+                disabled={deleteMutation.isPending}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border-2 px-3 py-2 text-xs font-semibold",
+                  "border-destructive/70 text-destructive hover:bg-destructive/10",
+                  deleteMutation.isPending && "cursor-not-allowed opacity-60",
+                )}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {deleteMutation.isPending ? "Deleting…" : "Delete saved result"}
+              </button>
+            </AlertDialogTrigger>
+            <AlertDialogContent data-testid="delete-result-confirm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete saved result?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently remove the saved result for{" "}
+                  <span className="font-semibold">
+                    {currentMatch?.bowlerA.name} vs {currentMatch?.bowlerB.name}
+                  </span>{" "}
+                  (Week {currentMatch?.week}, Lanes {currentMatch?.lanePair}, Slot {currentMatch?.slot}).
+                  The scheduled matchup remains; you can re-enter the result later.
+                  Standings, leaderboards, and the public snapshot will be recomputed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  data-testid="delete-result-confirm-btn"
+                  onClick={() => deleteMutation.mutate()}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete result
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
         {flash && (
           <span
             data-testid="save-flash"
