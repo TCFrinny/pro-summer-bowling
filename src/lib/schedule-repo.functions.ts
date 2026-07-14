@@ -504,20 +504,27 @@ export const saveMatchResult = createServerFn({ method: "POST" })
     const partB = buildPart({ id: rosterB.id, name: rosterB.name }, data.sideB, "B");
     const pA = partA.part, pB = partB.part;
 
-    // Effective handicap per side. LEAGUE RULE: substitutes use the
-    // SCHEDULED bowler's handicap for match scoring (the substitute's
-    // own starting-average handicap is informational only, kept in the
-    // substitute pool for reference). Points and handicap pinfall are
-    // credited to the scheduled bowler by the pure computeMatchResult.
+    // Effective per-side scoring identity. LEAGUE RULE v6: substitutes
+    // score on the SUBSTITUTE'S own handicap (derived from their Starting
+    // Average — either the per-match override or the pool row's stored
+    // value). Rostered/Absent use the scheduled bowler's handicap.
+    // Points and handicap pinfall are still credited to the scheduled
+    // bowler downstream by computeMatchResult / buildSnapshot.
     const resolveSide = (
-      sched: { id: string; entry_average: number },
-      _sd: z.infer<typeof sideDraftSchema>,
-      _partInfo: ReturnType<typeof buildPart>,
-      _side: "A" | "B",
-    ) => ({
-      entry: sched.entry_average,
-      hcp: computeHandicap(sched.entry_average),
-    });
+      sched: { entry_average: number },
+      sd: z.infer<typeof sideDraftSchema>,
+      partInfo: ReturnType<typeof buildPart>,
+      side: "A" | "B",
+    ) => {
+      const r = resolveEffectiveScoring({
+        status: sd.status,
+        scheduledEntryAverage: sched.entry_average,
+        submittedSubStartingAverage: sd.substituteStartingAverage ?? null,
+        poolSubStartingAverage: partInfo.subRec?.starting_average ?? null,
+      });
+      if (!r.ok) throw new Error(`Side ${side}: ${r.error}`);
+      return { entry: r.value.entry, hcp: r.value.hcp };
+    };
     const rA = resolveSide(rosterA, data.sideA, partA, "A");
     const rB = resolveSide(rosterB, data.sideB, partB, "B");
 
