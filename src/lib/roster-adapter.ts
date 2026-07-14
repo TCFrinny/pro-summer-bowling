@@ -110,12 +110,15 @@ function nextIdWithPrefix(existing: readonly { id: string }[], prefix: string): 
 // -- Validation (server + client share the same rules) ------------------
 
 export const ROSTER_MAX_ACTIVE = 36;
+export const BOWLER_NUMBER_MAX_LEN = 10;
 
+/** ID Number is REQUIRED for every roster bowler and substitute. Returns
+ *  an error message when the value is missing, all-whitespace, or too long.
+ *  Callers must trim before passing. */
 export function validateBowlerNumber(value: string | null | undefined): string | null {
-  if (value == null) return null;
-  const t = value.trim();
-  if (t.length === 0) return null;
-  if (t.length > 10) return "ID Number must be 1–10 characters.";
+  const t = (value ?? "").trim();
+  if (t.length === 0) return "ID Number is required (1–10 characters).";
+  if (t.length > BOWLER_NUMBER_MAX_LEN) return "ID Number must be 1–10 characters.";
   return null;
 }
 export function validateName(value: string): string | null {
@@ -124,6 +127,7 @@ export function validateName(value: string): string | null {
   if (t.length > 80) return "Name is too long.";
   return null;
 }
+/** Accepts 0..300 as a real number (decimals preserved). */
 export function validateAverage(value: number): string | null {
   if (!Number.isFinite(value)) return "Average must be a number.";
   if (value < 0 || value > 300) return "Average must be between 0 and 300.";
@@ -222,4 +226,30 @@ export function isDuplicateActive(
     { id: "b01", name: "Alice", active: false, archived: true },
   ]);
   if (dupArchived) throw new Error("roster-adapter: archived rows must not block reuse");
+
+  // ID Number is REQUIRED — empty / null / whitespace all rejected.
+  if (validateBowlerNumber(null) == null)   throw new Error("roster-adapter: null ID must be rejected");
+  if (validateBowlerNumber("")   == null)   throw new Error("roster-adapter: empty ID must be rejected");
+  if (validateBowlerNumber("   ") == null)  throw new Error("roster-adapter: whitespace ID must be rejected");
+  if (validateBowlerNumber("12345678901") == null)
+    throw new Error("roster-adapter: >10-char ID must be rejected");
+  if (validateBowlerNumber("01001") !== null)
+    throw new Error("roster-adapter: valid ID must pass");
+
+  // Decimal averages accepted.
+  if (validateAverage(140.5) !== null) throw new Error("roster-adapter: decimals must be accepted");
+  if (validateAverage(-1)    == null)  throw new Error("roster-adapter: negative avg must be rejected");
+  if (validateAverage(301)   == null)  throw new Error("roster-adapter: avg > 300 must be rejected");
+
+  // Decimal average round-trips through the adapter without silent rounding.
+  const decBowler = rosteredRowToBowler({
+    id: "b03", name: "Cara", entry_average: 145.75, handicap: 0,
+    active: true, archived: false, bowler_number: "01003", season_id: "s1",
+  });
+  if (decBowler.entryAverage !== 145.75) {
+    throw new Error(`roster-adapter: decimal avg lost (${decBowler.entryAverage})`);
+  }
+  if (decBowler.handicap !== computeHandicap(145.75)) {
+    throw new Error("roster-adapter: handicap must derive from decimal avg via floor");
+  }
 })();
