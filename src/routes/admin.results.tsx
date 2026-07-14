@@ -230,14 +230,15 @@ function AdminResultsPage() {
       ["B", draft.sideB, derivedB],
     ] as const) {
       if (s.status === "substitute") {
-        if (!s.subId && !s.subName.trim()) {
-          errors.push(`Side ${label}: pick a substitute or type a name`);
+        if (!s.subId) {
+          errors.push(`Side ${label}: pick a substitute from the pool (walk-on names are not allowed)`);
         }
         const avg = Number(s.subStartAvg);
         if (!s.subStartAvg.trim() || !Number.isFinite(avg) || avg <= 0 || avg > 300) {
           errors.push(`Side ${label}: substitute Starting Average required (1–300)`);
         }
       }
+
       if (s.status !== "absent" && !d.valid) {
         errors.push(`Side ${label}: linescore incomplete or invalid`);
       }
