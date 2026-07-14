@@ -10,6 +10,13 @@ import "../src/lib/roster-adapter";
 import "./checkpoint-3b-hardening";
 import "./week-patch-preservation";
 import "./absent-scoring";
+import "./elimination";
+import "./frame-input-messages";
+
+
+// eslint-disable-next-line no-console
+console.log("deterministic self-tests passed");
+
 
 
 // eslint-disable-next-line no-console
