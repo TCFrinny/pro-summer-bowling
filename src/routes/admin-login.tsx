@@ -1,9 +1,16 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Lock, Info, ArrowRight } from "lucide-react";
+import { Lock, Loader2, AlertCircle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useSession } from "@/hooks/use-session";
+
+interface AdminLoginSearch {
+  redirect?: string;
+}
 
 export const Route = createFileRoute("/admin-login")({
   head: () => ({
@@ -12,10 +19,49 @@ export const Route = createFileRoute("/admin-login")({
       { name: "robots", content: "noindex" },
     ],
   }),
+  validateSearch: (raw: Record<string, unknown>): AdminLoginSearch => ({
+    redirect: typeof raw.redirect === "string" ? raw.redirect : undefined,
+  }),
   component: AdminLogin,
 });
 
+function safeRedirect(target: string | undefined): string {
+  if (!target) return "/admin/bowlers";
+  // Only allow same-origin absolute paths under /admin.
+  if (target.startsWith("/admin") && !target.startsWith("//")) return target;
+  return "/admin/bowlers";
+}
+
 function AdminLogin() {
+  const { session, loading } = useSession();
+  const search = useSearch({ from: "/admin-login" });
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const target = safeRedirect(search.redirect);
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate({ to: target, replace: true });
+    }
+  }, [loading, session, navigate, target]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setSubmitting(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    navigate({ to: target, replace: true });
+  }
+
   return (
     <AppShell>
       <div className="mx-auto max-w-md">
@@ -29,19 +75,17 @@ function AdminLogin() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form
-              className="space-y-4"
-              onSubmit={(e) => e.preventDefault()}
-              aria-disabled
-            >
+            <form className="space-y-4" onSubmit={onSubmit}>
               <div>
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@mtairylanes.com"
                   autoComplete="username"
-                  disabled
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={submitting}
                 />
               </div>
               <div>
@@ -49,60 +93,31 @@ function AdminLogin() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
                   autoComplete="current-password"
-                  disabled
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={submitting}
                 />
               </div>
+              {error && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
               <button
                 type="submit"
-                disabled
-                className="w-full cursor-not-allowed rounded-md bg-primary/40 px-4 py-2 text-sm font-semibold text-primary-foreground"
+                disabled={submitting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Sign in
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {submitting ? "Signing in…" : "Sign in"}
               </button>
-              <div className="flex items-start gap-2 rounded-md border border-border bg-accent/40 p-3 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold" />
-                <span>
-                  Authentication will be connected after the Lovable Cloud
-                  backend is enabled in Phase 2. Admin editing controls are not
-                  exposed publicly in Phase 1.
-                </span>
-              </div>
-            </form>
-
-            <div className="mt-6 border-t border-border pt-4">
-              <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-                Phase 1 Admin Preview (no auth)
-              </div>
-              <div className="grid gap-2">
-                <Link
-                  to="/admin/bowlers"
-                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
-                >
-                  <span>Bowlers & Substitutes</span>
-                  <ArrowRight className="h-4 w-4 text-gold" />
-                </Link>
-                <Link
-                  to="/admin/schedule"
-                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
-                >
-                  <span>Manual Schedule Editor</span>
-                  <ArrowRight className="h-4 w-4 text-gold" />
-                </Link>
-                <Link
-                  to="/admin/results"
-                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
-                >
-                  <span>Weekly Result Entry (frame-by-frame)</span>
-                  <ArrowRight className="h-4 w-4 text-gold" />
-                </Link>
-              </div>
-              <p className="mt-2 text-[10px] text-muted-foreground">
-                Local-only mock state. Changes are not persisted and no admin
-                data is visible on public routes.
+              <p className="text-center text-[11px] text-muted-foreground">
+                Admin accounts are created by the league owner in Supabase.
               </p>
-            </div>
+            </form>
           </CardContent>
         </Card>
       </div>
