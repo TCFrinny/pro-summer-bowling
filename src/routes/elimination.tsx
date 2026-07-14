@@ -90,7 +90,7 @@ function EliminationPage() {
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-5">
+        <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
           {(Object.keys(STATUS) as EliminationStatus[]).map((s) => (
             <div
               key={s}
