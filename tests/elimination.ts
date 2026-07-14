@@ -236,7 +236,7 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
   const weeks: WeekSummary[] = [week(1, { completed: true }), week(2)];
   const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: matches, totalWeeks: 2 });
   const t = snap.rows.find((r) => r.bowler.id === "t")!;
-  expect(t.status === "alive" || t.status === "tiebreaker_only",
+  expect(t.status === "alive",
     `final-week repeat: got ${t.status}, note=${t.note}`);
   const w2 = t.diagnostics!.witnessPairs!.find((w) => w.week === 2)!;
   expect(hasPair(w2, "t", "x"), "final-week schedule must include T-X repeat");
