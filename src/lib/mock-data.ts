@@ -445,34 +445,32 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
       const a = BOWLERS_BY_ID[m.bowlerA];
       const b = BOWLERS_BY_ID[m.bowlerB];
 
-      // League points + handicap credited to SCHEDULED bowler regardless of sub.
+      // League points and HANDICAP pinfall credited to SCHEDULED bowler.
       a.matchesPlayed += 1; a.gamesPlayed += 3;
       a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
       a.points += r.totalPointsA; a.pointsLost += 7 - r.totalPointsA;
       a.handicapPinfall += r.handicapTotalA;
-      // Scratch pinfall + high game/set: credited to scheduled for display
-      // continuity, but ACTUAL scratch pinfall (roster-only average) tracked
-      // separately below.
-      a.scratchPinfall += r.scratchTotalA;
-      for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
-      if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
 
       b.matchesPlayed += 1; b.gamesPlayed += 3;
       b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
       b.points += r.totalPointsB; b.pointsLost += 7 - r.totalPointsB;
       b.handicapPinfall += r.handicapTotalB;
-      b.scratchPinfall += r.scratchTotalB;
-      for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
-      if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
 
-      // Roster-only actual games (subs don't credit here).
+      // Scratch pinfall / high game / high set / actual games are ROSTER-ONLY —
+      // only games the roster member personally rolled contribute.
       if (!r.isSubA) {
         a.actualGamesRolled += 3;
         a.actualScratchPinfall += r.scratchTotalA;
+        a.scratchPinfall += r.scratchTotalA;
+        for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
+        if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
       }
       if (!r.isSubB) {
         b.actualGamesRolled += 3;
         b.actualScratchPinfall += r.scratchTotalB;
+        b.scratchPinfall += r.scratchTotalB;
+        for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
+        if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
       }
     }
   }
@@ -493,6 +491,7 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
     }
   }
 })();
+
 
 export function getMatchesForWeek(week: number): Match[] {
   return MATCHES_BY_WEEK[week] ?? [];
