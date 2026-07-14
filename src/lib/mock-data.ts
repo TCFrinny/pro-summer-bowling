@@ -1014,22 +1014,22 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
   const scheduled = BOWLERS[0];
   const opponent = BOWLERS[1];
   const fakeSubName = "SYNTH SUB — VERIFY";
+  const openFrame = (n: number, cumBase: number): Frame => ({
+    frameNumber: n,
+    rolls: [0, 0, 0] as Roll[],
+    ballDisplay: ["-", "-", "-"],
+    isStrike: false, isSpare: false, isOpen: true,
+    framePinfall: 0, bonus: 0,
+    cumulative: cumBase,
+  });
+  const fakeFrames: Frame[] = Array.from({ length: 10 }).map((_, i) =>
+    openFrame(i + 1, 0),
+  );
   const fakeGame: GameLinescore = {
-    frames: Array.from({ length: 10 }).map((_, i) => ({
-      frameNumber: i + 1,
-      rolls: [{ pins: 0 }, { pins: 0 }] as Roll[],
-      framePinfall: 0,
-      bonus: 0,
-      cumulativeScore: 0,
-      isStrike: false,
-      isSpare: false,
-      isOpen: true,
-      mark: "-",
-      ballDisplay: ["-", "-"],
-    })) as unknown as Frame[],
+    frames: fakeFrames,
     scratchTotal: 999, // sky-high scratch — MUST NOT appear on roster-only boards
     strikes: 0, spares: 0, opens: 10,
-    openPinsLeft: 100, framesRolled: 10,
+    openPinsLeft: 100, marks: 0,
   };
   const subLs: BowlerMatchLinescore = {
     scheduledId: scheduled.id,
@@ -1046,6 +1046,7 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
     marks: 0, openPinsLeft: 300, framesRolled: 30,
   };
   const oppGame: GameLinescore = { ...fakeGame, scratchTotal: 120 };
+
   const oppLs: BowlerMatchLinescore = {
     scheduledId: opponent.id, actualId: opponent.id, actualName: opponent.name,
     isSub: false, entryAverage: opponent.entryAverage, handicap: opponent.handicap,
