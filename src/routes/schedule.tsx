@@ -89,7 +89,7 @@ function SchedulePage() {
                         {i + 1}.
                       </span>
                       <span className="flex-1 truncate font-medium">
-                        {a?.name}
+                        {a ? formatScheduleName(a.name, m.bowlerNumberA) : "—"}
                       </span>
                       {r ? (
                         <Link
@@ -106,7 +106,7 @@ function SchedulePage() {
                         </span>
                       )}
                       <span className="flex-1 truncate text-right font-medium">
-                        {b?.name}
+                        {b ? formatScheduleName(b.name, m.bowlerNumberB) : "—"}
                       </span>
                     </div>
                   );
