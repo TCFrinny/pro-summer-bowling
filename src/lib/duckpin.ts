@@ -13,8 +13,11 @@
  *                strike, spare, or denominator counts.
  *
  * Pins Lost (no ball data required):
- *   For an open frame, openPinfall = cumulativeScore[i] - cumulativeScore[i-1]
- *   (frame 1 uses cumulativeScore[0] - 0). openPinsStanding = 10 - openPinfall.
+ *   Duckpin bowlers get THREE balls per frame. An OPEN frame is any frame
+ *   without a strike or spare; its pinfall is 0..10 (a 10-pin open occurs
+ *   when the rack is cleared on the third ball — still no bonus).
+ *   openPinfall = cumulativeScore[i] - cumulativeScore[i-1]
+ *   (frame 1 uses cumulativeScore[0] - 0). openPinsStanding = max(0, 10 - openPinfall).
  *   Pins Lost metric = sum(openPinsStanding) / (# open frames).
  */
 
