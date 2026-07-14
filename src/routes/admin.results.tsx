@@ -54,6 +54,9 @@ interface SideDraft {
   subName: string;
   subStartAvg: string;
   linescore: SideEditorState;
+  /** Three numeric scratch scores entered when status === "absent".
+   *  Stored as strings so the input can be cleared. */
+  absentScores: [string, string, string];
 }
 interface Draft {
   sideA: SideDraft;
@@ -69,6 +72,7 @@ function emptySide(): SideDraft {
     status: "rostered",
     subId: "", subName: "", subStartAvg: "",
     linescore: emptySideEditorState(),
+    absentScores: ["", "", ""],
   };
 }
 function emptyDraft(): Draft {
@@ -97,12 +101,16 @@ function draftFromResult(r: MatchResult): Draft {
     const isSub = p.status === "substitute";
     const savedSubStartAvg = isSub
       ? String(isA ? r.entryAverageA : r.entryAverageB) : "";
+    const absentScores: [string, string, string] = p.absentScores
+      ? [String(p.absentScores[0]), String(p.absentScores[1]), String(p.absentScores[2])]
+      : ["", "", ""];
     return {
       status: p.status,
       subId: isSub && p.actualId ? p.actualId : "",
       subName: isSub && !p.actualId ? p.actualName : "",
       subStartAvg: savedSubStartAvg,
       linescore: { games },
+      absentScores,
     };
   };
   return {
@@ -216,13 +224,14 @@ function AdminResultsPage() {
     if (!Number.isFinite(n)) return null;
     return computeHandicap(n);
   };
-
-  const effHandicapA = draft.sideA.status === "substitute"
-    ? (subHandicapFromAvg(draft.sideA.subStartAvg) ?? 0)
-    : (currentMatch ? computeHandicap(currentMatch.bowlerA.entryAverage) : 0);
-  const effHandicapB = draft.sideB.status === "substitute"
-    ? (subHandicapFromAvg(draft.sideB.subStartAvg) ?? 0)
-    : (currentMatch ? computeHandicap(currentMatch.bowlerB.entryAverage) : 0);
+  // LEAGUE RULE: substitutes bowl on the SCHEDULED bowler's handicap.
+  // The sub's own starting-average handicap is informational only.
+  const effHandicapA = currentMatch ? computeHandicap(currentMatch.bowlerA.entryAverage) : 0;
+  const effHandicapB = currentMatch ? computeHandicap(currentMatch.bowlerB.entryAverage) : 0;
+  // Kept for the (removed) previous per-side sub-hcp preview; retained
+  // as a no-op reference so the SidePanel can still show the sub's
+  // informational handicap next to their starting average.
+  void subHandicapFromAvg;
 
   const derivedA = useMemo(
     () => computeSideDerived(draft.sideA.linescore, effHandicapA),
@@ -232,6 +241,22 @@ function AdminResultsPage() {
     () => computeSideDerived(draft.sideB.linescore, effHandicapB),
     [draft.sideB.linescore, effHandicapB],
   );
+
+  const parseAbsentScores = (
+    s: SideDraft,
+  ): { ok: true; scores: [number, number, number] } | { ok: false; error: string } => {
+    const nums: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const raw = s.absentScores[i].trim();
+      if (raw === "") return { ok: false, error: "enter three scratch scores (0–300)" };
+      const n = Number(raw);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 300) {
+        return { ok: false, error: `Game ${i + 1} score must be an integer 0–300` };
+      }
+      nums.push(n);
+    }
+    return { ok: true, scores: [nums[0], nums[1], nums[2]] };
+  };
 
   const validation = useMemo(() => {
     const errors: string[] = [];
@@ -249,7 +274,10 @@ function AdminResultsPage() {
         }
       }
 
-      if (s.status !== "absent" && !d.valid) {
+      if (s.status === "absent") {
+        const parsed = parseAbsentScores(s);
+        if (!parsed.ok) errors.push(`Side ${label}: ${parsed.error}`);
+      } else if (!d.valid) {
         errors.push(`Side ${label}: linescore incomplete or invalid`);
       }
     }
@@ -308,6 +336,12 @@ function AdminResultsPage() {
         const n = Number(raw);
         return Number.isFinite(n) && raw.trim() !== "" ? n : undefined;
       };
+      const buildAbsentScores = (s: SideDraft): [number, number, number] | undefined => {
+        if (s.status !== "absent") return undefined;
+        const parsed = parseAbsentScores(s);
+        if (!parsed.ok) throw new Error(parsed.error);
+        return parsed.scores;
+      };
       return save({
         data: {
           slotId: currentMatch.id,
@@ -320,6 +354,7 @@ function AdminResultsPage() {
             substituteStartingAverage: draft.sideA.status === "substitute"
               ? subStartAvgOrUndef(draft.sideA.subStartAvg) : undefined,
             games: buildGames(draft.sideA, derivedA) as never,
+            absentScores: buildAbsentScores(draft.sideA),
           },
           sideB: {
             status: draft.sideB.status,
@@ -328,6 +363,7 @@ function AdminResultsPage() {
             substituteStartingAverage: draft.sideB.status === "substitute"
               ? subStartAvgOrUndef(draft.sideB.subStartAvg) : undefined,
             games: buildGames(draft.sideB, derivedB) as never,
+            absentScores: buildAbsentScores(draft.sideB),
           },
 
           override: draft.overrideEnabled ? {
@@ -664,7 +700,7 @@ function SidePanel({
   onChange: (patch: Partial<SideDraft>) => void;
   testId?: string;
 }) {
-  const disabled = side.status === "absent";
+  // status === "absent" branches to a numeric-scores editor below.
   return (
     <Card className="bg-card" data-testid={testId}>
       <CardContent className="p-4">
@@ -672,7 +708,14 @@ function SidePanel({
           <span>{label}</span>
           {side.status === "substitute" && (
             <span className="normal-case tracking-normal text-[10px] text-muted-foreground">
-              Scheduled hcp {scheduledHandicap} · Sub hcp <b className="text-foreground">{handicap}</b>
+              Match hcp <b className="text-foreground">{scheduledHandicap}</b>
+              {" "}(scheduled bowler's — league rule)
+            </span>
+          )}
+          {side.status === "absent" && (
+            <span className="normal-case tracking-normal text-[10px] text-muted-foreground">
+              Absent hcp <b className="text-foreground">{scheduledHandicap}</b>
+              {" "}(scheduled bowler's)
             </span>
           )}
         </div>
@@ -728,10 +771,11 @@ function SidePanel({
               </Select>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 Substitutes must be added first via Manage Bowlers (ID Number required). Walk-on names are not allowed.
+                Match handicap always uses the SCHEDULED bowler's handicap — the sub's own is informational only.
               </p>
             </div>
             <div>
-              <Label className="text-[10px]">Starting Average</Label>
+              <Label className="text-[10px]">Starting Average (informational)</Label>
               <Input
                 data-testid={`${testId}-sub-start-avg`}
                 type="number"
@@ -745,20 +789,48 @@ function SidePanel({
           </div>
         )}
 
-        <SideLinescoreEditor
-          label="Linescore"
-          handicap={handicap}
-          disabled={disabled}
-          state={side.linescore}
-          onChange={(next) => onChange({ linescore: next })}
-          testPrefix={testId}
-        />
-
-        {disabled && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            No linescore recorded for an absent side.
-          </p>
+        {side.status === "absent" ? (
+          <div className="rounded-md border border-dashed border-gold/50 bg-gold/5 p-3">
+            <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+              Absent scratch scores — three numeric game scores. Feed handicap totals for match/standings pinfall using the scheduled bowler's handicap. Do NOT count toward any personal statistic.
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i}>
+                  <Label className="text-[10px]">Game {i + 1}</Label>
+                  <Input
+                    data-testid={`${testId}-absent-g${i + 1}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={0} max={300} step={1}
+                    value={side.absentScores[i]}
+                    onChange={(e) => {
+                      const next: [string, string, string] = [
+                        side.absentScores[0], side.absentScores[1], side.absentScores[2],
+                      ];
+                      next[i] = e.target.value.replace(/[^0-9]/g, "");
+                      onChange({ absentScores: next });
+                    }}
+                    placeholder="0"
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              Match handicap per game = <b className="text-foreground">{handicap}</b>. Handicap set = scratch set + {handicap} × 3.
+            </p>
+          </div>
+        ) : (
+          <SideLinescoreEditor
+            label="Linescore"
+            handicap={handicap}
+            disabled={false}
+            state={side.linescore}
+            onChange={(next) => onChange({ linescore: next })}
+            testPrefix={testId}
+          />
         )}
+
       </CardContent>
     </Card>
   );

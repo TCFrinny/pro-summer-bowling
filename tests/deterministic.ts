@@ -9,6 +9,7 @@ import "../src/lib/league-store";
 import "../src/lib/roster-adapter";
 import "./checkpoint-3b-hardening";
 import "./week-patch-preservation";
+import "./absent-scoring";
 
 
 // eslint-disable-next-line no-console

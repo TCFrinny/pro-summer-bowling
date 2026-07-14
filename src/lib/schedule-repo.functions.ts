@@ -381,10 +381,20 @@ const sideDraftSchema = z.object({
    *  are NOT accepted: every sub used in a result must exist in the
    *  active substitute pool (with a required ID Number). */
   substituteId: z.string().optional(),
-  /** Optional override of the pool's Starting Average for this specific
-   *  match; falls back to the sub's stored starting_average. */
+  /** Informational only. Substitutes bowl on the SCHEDULED bowler's
+   *  handicap; this field is stored for record-keeping (and to prefill
+   *  the sub's stored starting average) but is not used in scoring. */
   substituteStartingAverage: z.number().optional(),
   games: z.array(gameSchema).length(3).optional(),
+  /** Required when status === "absent". Three integer scratch scores
+   *  (0–300) that feed match handicap totals using the SCHEDULED bowler's
+   *  handicap. Never counted toward the scheduled bowler's personal
+   *  stats (see mock-data.buildSnapshot). */
+  absentScores: z.tuple([
+    z.number().int().min(0).max(300),
+    z.number().int().min(0).max(300),
+    z.number().int().min(0).max(300),
+  ]).optional(),
 });
 
 
@@ -461,8 +471,15 @@ export const saveMatchResult = createServerFn({ method: "POST" })
         };
       }
       if (sd.status === "absent") {
+        if (!sd.absentScores) {
+          throw new Error(`Side ${side}: absent side requires three scratch game scores`);
+        }
         return {
-          part: { scheduledId: sched.id, status: "absent", actualId: null, actualName: "Absent" },
+          part: {
+            scheduledId: sched.id, status: "absent",
+            actualId: null, actualName: "Absent",
+            absentScores: sd.absentScores,
+          },
           subRec: null,
         };
       }
@@ -486,26 +503,20 @@ export const saveMatchResult = createServerFn({ method: "POST" })
     const partB = buildPart({ id: rosterB.id, name: rosterB.name }, data.sideB, "B");
     const pA = partA.part, pB = partB.part;
 
-    // Effective handicap per side. Substitutes bowl on THEIR OWN
-    // starting-average handicap. Points and handicap pinfall are still
+    // Effective handicap per side. LEAGUE RULE: substitutes use the
+    // SCHEDULED bowler's handicap for match scoring (the substitute's
+    // own starting-average handicap is informational only, kept in the
+    // substitute pool for reference). Points and handicap pinfall are
     // credited to the scheduled bowler by the pure computeMatchResult.
     const resolveSide = (
       sched: { id: string; entry_average: number },
-      sd: z.infer<typeof sideDraftSchema>,
-      partInfo: ReturnType<typeof buildPart>,
-      side: "A" | "B",
-    ) => {
-      if (partInfo.part.status !== "substitute") {
-        return { entry: sched.entry_average, hcp: computeHandicap(sched.entry_average) };
-      }
-      const sa = sd.substituteStartingAverage
-        ?? partInfo.subRec?.starting_average
-        ?? null;
-      if (sa == null || !Number.isFinite(sa)) {
-        throw new Error(`Side ${side}: substitute Starting Average required`);
-      }
-      return { entry: sa, hcp: computeHandicap(sa) };
-    };
+      _sd: z.infer<typeof sideDraftSchema>,
+      _partInfo: ReturnType<typeof buildPart>,
+      _side: "A" | "B",
+    ) => ({
+      entry: sched.entry_average,
+      hcp: computeHandicap(sched.entry_average),
+    });
     const rA = resolveSide(rosterA, data.sideA, partA, "A");
     const rB = resolveSide(rosterB, data.sideB, partB, "B");
 

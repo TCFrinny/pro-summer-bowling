@@ -96,6 +96,12 @@ export interface SideParticipation {
   status: ParticipationStatus;
   actualId: BowlerId | null;
   actualName: string;
+  /** Three scratch game scores entered for an ABSENT side. When present
+   *  they feed match handicap game/set totals and standings handicap
+   *  pinfall using the SCHEDULED bowler's handicap. They MUST NOT flow
+   *  into any personal statistic (average, games bowled, high game/set,
+   *  linescore/mark metrics, advanced stats, lane scratch averages). */
+  absentScores?: [number, number, number];
 }
 
 export interface PointsOverride {
@@ -411,29 +417,41 @@ export function computeMatchResult(input: {
   // An absent side has NO pinfall — scratch/handicap game/set = 0. The
   // side that bowled retains its own valid totals; do not credit the
   // opponent with phantom handicap pinfall just because they showed up.
+  // Absent-with-scores flow: admin enters three numeric scratch scores
+  // for the absent side. Those scores feed handicap game/set totals and
+  // standings handicap pinfall using the SCHEDULED bowler's handicap,
+  // but personal statistics (average, high game/set, mark metrics) are
+  // excluded downstream in the snapshot builder.
+  const absentScoresA = participationA.status === "absent"
+    ? participationA.absentScores : undefined;
+  const absentScoresB = participationB.status === "absent"
+    ? participationB.absentScores : undefined;
+  const hasScoresA = bowledA || !!absentScoresA;
+  const hasScoresB = bowledB || !!absentScoresB;
+
   const gamesA: [number, number, number] = bowledA
     ? [linescoreA!.games[0].scratchTotal, linescoreA!.games[1].scratchTotal, linescoreA!.games[2].scratchTotal]
-    : [0, 0, 0];
+    : (absentScoresA ?? [0, 0, 0]);
   const gamesB: [number, number, number] = bowledB
     ? [linescoreB!.games[0].scratchTotal, linescoreB!.games[1].scratchTotal, linescoreB!.games[2].scratchTotal]
-    : [0, 0, 0];
-  const hcpGamesA: [number, number, number] = bowledA
+    : (absentScoresB ?? [0, 0, 0]);
+  const hcpGamesA: [number, number, number] = hasScoresA
     ? [gamesA[0] + handicapA, gamesA[1] + handicapA, gamesA[2] + handicapA]
     : [0, 0, 0];
-  const hcpGamesB: [number, number, number] = bowledB
+  const hcpGamesB: [number, number, number] = hasScoresB
     ? [gamesB[0] + handicapB, gamesB[1] + handicapB, gamesB[2] + handicapB]
     : [0, 0, 0];
   const scratchA = gamesA[0] + gamesA[1] + gamesA[2];
   const scratchB = gamesB[0] + gamesB[1] + gamesB[2];
-  const hcpTotalA = bowledA ? scratchA + handicapA * 3 : 0;
-  const hcpTotalB = bowledB ? scratchB + handicapB * 3 : 0;
+  const hcpTotalA = hasScoresA ? scratchA + handicapA * 3 : 0;
+  const hcpTotalB = hasScoresB ? scratchB + handicapB * 3 : 0;
 
   const gameAwardsA: [GameAward, GameAward, GameAward] = [0, 0, 0];
   const gameAwardsB: [GameAward, GameAward, GameAward] = [0, 0, 0];
   let gpA = 0, gpB = 0;
   let setPointA: SetAward = 0, setPointB: SetAward = 0;
 
-  if (bowledA && bowledB) {
+  if (hasScoresA && hasScoresB) {
     for (let i = 0; i < 3; i++) {
       const sa = hcpGamesA[i];
       const sb = hcpGamesB[i];
@@ -809,13 +827,16 @@ export function buildSnapshot(input: {
     const awarded = getAwardedPoints(r);
 
     // Scheduled participation counts as a matchesPlayed entry (present on
-    // the schedule), but ABSENT sides must NOT accrue games played, handicap
-    // pinfall, or any statistical row. Only bowled sides contribute games.
+    // the schedule). Absent sides never contribute to gamesPlayed or to
+    // any personal statistic, BUT if the admin entered three absent
+    // scratch scores those scores must feed standings handicap pinfall
+    // (handicapTotalA is already computed with the scheduled handicap by
+    // computeMatchResult; it is 0 when no scores were entered).
     a.matchesPlayed += 1;
     if (r.participationA.status !== "absent") {
       a.gamesPlayed += 3;
-      a.handicapPinfall += r.handicapTotalA;
     }
+    a.handicapPinfall += r.handicapTotalA;
     a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
     a.points += awarded.pointsA;
     a.pointsLost += awarded.pointsB;
@@ -823,8 +844,8 @@ export function buildSnapshot(input: {
     b.matchesPlayed += 1;
     if (r.participationB.status !== "absent") {
       b.gamesPlayed += 3;
-      b.handicapPinfall += r.handicapTotalB;
     }
+    b.handicapPinfall += r.handicapTotalB;
     b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
     b.points += awarded.pointsB;
     b.pointsLost += awarded.pointsA;
@@ -903,14 +924,24 @@ export function buildSnapshot(input: {
           res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L";
 
         if (participation.status === "absent" || !ls) {
-          // Absent history row — visible in profile, no stats/linescore.
+          // Absent history row — visible in profile. Personal linescore
+          // stays null and stats/high-game do not accumulate, but if the
+          // admin entered absent scratch scores we surface them so the
+          // profile and match display can show the values that fed
+          // handicap pinfall / standings.
+          const absentScores = participation.absentScores;
+          const rowScores: [number, number, number] =
+            absentScores ?? [0, 0, 0];
+          const rowScratchTotal = isA ? res.scratchTotalA : res.scratchTotalB;
+          const rowHandicapTotal = isA ? res.handicapTotalA : res.handicapTotalB;
+          const rowHandicapGames = isA ? res.handicapGamesA : res.handicapGamesB;
           history[selfId].push({
             week: w.week, matchId: m.id, lanePair: m.lanePair,
             opponent: oppFrozenName, opponentId: oppId,
             actualBowler: "Absent", isSub: false, absent: true,
-            scores: [0, 0, 0], handicap: hdcp,
-            handicapGames: [0, 0, 0],
-            scratchTotal: 0, handicapTotal: 0,
+            scores: rowScores, handicap: hdcp,
+            handicapGames: rowHandicapGames,
+            scratchTotal: rowScratchTotal, handicapTotal: rowHandicapTotal,
             opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
             opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
             gameAwards: [0, 0, 0], gamePoints: 0, setPoint: 0,
