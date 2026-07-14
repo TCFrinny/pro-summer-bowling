@@ -826,7 +826,6 @@ export function buildSnapshot(input: {
         const self = bowlersById[selfId];
         if (!self) continue;
         const oppId = isA ? m.bowlerB : m.bowlerA;
-        const opp = bowlersById[oppId];
         const scores = isA ? res.gamesA : res.gamesB;
         const scratchTotal = isA ? res.scratchTotalA : res.scratchTotalB;
         const hdcp = isA ? res.handicapA : res.handicapB;
@@ -842,18 +841,50 @@ export function buildSnapshot(input: {
         const ls = isA ? res.linescoreA : res.linescoreB;
         const oppLs = isA ? res.linescoreB : res.linescoreA;
         const participation = isA ? res.participationA : res.participationB;
-        if (!ls || participation.status === "absent") continue;
-        const poaSet = scratchTotal - 3 * self.entryAverage;
-        const poaBest = Math.max(...scores.map((g) => g - self.entryAverage));
+        // FROZEN scheduled entry avg / opponent name — from the result,
+        // not the current roster record. Renaming a bowler or editing
+        // an entry average must NOT rewrite completed history.
+        const selfFrozenAvg = isA ? res.entryAverageA : res.entryAverageB;
+        const oppFrozenName = isA ? res.scheduledNameB : res.scheduledNameA;
+        const resultLetter: "W" | "L" | "T" =
+          res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L";
+
+        if (participation.status === "absent" || !ls) {
+          // Absent history row — visible in profile, no stats/linescore.
+          history[selfId].push({
+            week: w.week, matchId: m.id, lanePair: m.lanePair,
+            opponent: oppFrozenName, opponentId: oppId,
+            actualBowler: "Absent", isSub: false, absent: true,
+            scores: [0, 0, 0], handicap: hdcp,
+            handicapGames: [0, 0, 0],
+            scratchTotal: 0, handicapTotal: 0,
+            opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
+            opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
+            gameAwards: [0, 0, 0], gamePoints: 0, setPoint: 0,
+            totalPoints: tp, pointsLost: lostPts,
+            pointsOverridden: awarded.overridden, overrideReason: awarded.reason,
+            poaSet: 0, poaBestGame: 0,
+            result: resultLetter,
+            linescore: null, opponentLinescore: oppLs,
+            weekStrikes: 0, weekSpares: 0, weekOpens: 0, weekMarks: 0,
+            weekMarkPct: 0, weekStrikePct: 0, weekSpareConversionPct: 0,
+            weekOpenPct: 0, weekPinsLost: 0,
+            weekFirst5: 0, weekLast5: 0, weekBigOpening: 0, weekBigFinish: 0,
+            weekClutchMarks: 0, weekClutchOpportunities: 0, weekClutchPct: 0,
+          });
+          continue;
+        }
+        const poaSet = scratchTotal - 3 * selfFrozenAvg;
+        const poaBest = Math.max(...scores.map((g) => g - selfFrozenAvg));
         const frames = ls.framesRolled;
         const marks = ls.marks;
         const spareOpp = ls.spares + ls.opens;
         const clutchOpp = ls.segments.clutchOpportunities;
         history[selfId].push({
           week: w.week, matchId: m.id, lanePair: m.lanePair,
-          opponent: opp?.name ?? "—", opponentId: oppId,
-          actualBowler: isSub ? ls.actualName : self.name,
-          isSub, scores, handicap: hdcp, handicapGames: hdcpGames,
+          opponent: oppFrozenName, opponentId: oppId,
+          actualBowler: isSub ? ls.actualName : (isA ? res.scheduledNameA : res.scheduledNameB),
+          isSub, absent: false, scores, handicap: hdcp, handicapGames: hdcpGames,
           scratchTotal, handicapTotal: hdcpTotal,
           opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
           opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
@@ -861,7 +892,7 @@ export function buildSnapshot(input: {
           totalPoints: tp, pointsLost: lostPts,
           pointsOverridden: awarded.overridden, overrideReason: awarded.reason,
           poaSet, poaBestGame: poaBest,
-          result: res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L",
+          result: resultLetter,
           linescore: ls, opponentLinescore: oppLs,
           weekStrikes: ls.strikes, weekSpares: ls.spares, weekOpens: ls.opens, weekMarks: marks,
           weekMarkPct: frames > 0 ? (marks / frames) * 100 : 0,
