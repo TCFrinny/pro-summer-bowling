@@ -122,7 +122,3 @@ function main() {
 // Only run when executed directly (not when imported by tests).
 const isDirect = import.meta.url === `file://${process.argv[1]}`;
 if (isDirect) main();
-
-// Only run when executed directly (not when imported by tests).
-const isDirect = import.meta.url === `file://${process.argv[1]}`;
-if (isDirect) main();
