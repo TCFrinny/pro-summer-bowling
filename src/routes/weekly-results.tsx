@@ -3,6 +3,7 @@ import { AppShell, EmptyState, PageHeader } from "@/components/layout/AppShell";
 import {
   WEEKS,
   formatPoints,
+  getAwardedPoints,
   getBowler,
   getMatchesForWeek,
   type Match,
@@ -99,7 +100,7 @@ function MatchCard({ m }: { m: Match }) {
           <span>
             Final{" "}
             <span className="font-display text-sm text-gold">
-              {formatPoints(r.totalPointsA)}–{formatPoints(r.totalPointsB)}
+              {formatPoints(getAwardedPoints(r).pointsA)}–{formatPoints(getAwardedPoints(r).pointsB)}
             </span>
           </span>
         </div>
@@ -126,21 +127,38 @@ function MatchCard({ m }: { m: Match }) {
         </div>
 
         <div className="mt-3 grid gap-2">
-          <ExpandRow
-            label={`View full linescore — ${a.name}`}
-            open={openA}
-            onToggle={() => setOpenA((v) => !v)}
-          >
-            <ThreeGameLinescore linescore={r.linescoreA} />
-          </ExpandRow>
-          <ExpandRow
-            label={`View full linescore — ${b.name}`}
-            open={openB}
-            onToggle={() => setOpenB((v) => !v)}
-          >
-            <ThreeGameLinescore linescore={r.linescoreB} />
-          </ExpandRow>
+          {r.linescoreA ? (
+            <ExpandRow
+              label={`View full linescore — ${a.name}`}
+              open={openA}
+              onToggle={() => setOpenA((v) => !v)}
+            >
+              <ThreeGameLinescore linescore={r.linescoreA} />
+            </ExpandRow>
+          ) : (
+            <AbsentPlaceholder name={a.name} />
+          )}
+          {r.linescoreB ? (
+            <ExpandRow
+              label={`View full linescore — ${b.name}`}
+              open={openB}
+              onToggle={() => setOpenB((v) => !v)}
+            >
+              <ThreeGameLinescore linescore={r.linescoreB} />
+            </ExpandRow>
+          ) : (
+            <AbsentPlaceholder name={b.name} />
+          )}
         </div>
+
+        {r.pointsOverride && (
+          <div className="mt-3 rounded-md border border-gold/40 bg-gold/10 px-3 py-2 text-[11px] leading-snug">
+            <span className="inline-block rounded bg-gold px-1.5 py-0.5 font-display text-[10px] uppercase tracking-widest text-background">
+              Manual points override
+            </span>{" "}
+            <span className="text-muted-foreground">{r.pointsOverride.reason}</span>
+          </div>
+        )}
 
         <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-widest text-muted-foreground">
           <span>2 pts / game win · 1 pt tie · higher hdcp set wins +1</span>
@@ -180,6 +198,14 @@ function ExpandRow({
   );
 }
 
+function AbsentPlaceholder({ name }: { name: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] uppercase tracking-widest text-muted-foreground">
+      {name} — Absent (no linescore)
+    </div>
+  );
+}
+
 function SummaryRow({
   side,
   m,
@@ -191,6 +217,8 @@ function SummaryRow({
 }) {
   const r = m.result!;
   const isA = side === "A";
+  const participation = isA ? r.participationA : r.participationB;
+  const absent = participation.status === "absent";
   const games = isA ? r.gamesA : r.gamesB;
   const awards = isA ? r.gameAwardsA : r.gameAwardsB;
   const hdcp = isA ? r.handicapA : r.handicapB;
@@ -198,7 +226,8 @@ function SummaryRow({
   const hdcpTotal = isA ? r.handicapTotalA : r.handicapTotalB;
   const gp = isA ? r.gamePointsA : r.gamePointsB;
   const sp = isA ? r.setPointA : r.setPointB;
-  const total = isA ? r.totalPointsA : r.totalPointsB;
+  const awarded = getAwardedPoints(r);
+  const total = isA ? awarded.pointsA : awarded.pointsB;
   const isSub = isA ? r.isSubA : r.isSubB;
   const actualName = isA ? r.actualNameA : r.actualNameB;
   const winner = r.winner === side;
@@ -219,6 +248,11 @@ function SummaryRow({
               sub
             </span>
           )}
+          {absent && (
+            <span className="rounded bg-destructive/20 px-1.5 text-[9px] uppercase tracking-widest text-destructive">
+              absent
+            </span>
+          )}
         </div>
         {isSub && (
           <div className="text-[10px] text-muted-foreground">
@@ -226,40 +260,48 @@ function SummaryRow({
           </div>
         )}
       </td>
-      <td className="py-1.5 text-right">{hdcp}</td>
-      {games.map((g, i) => (
-        <td key={i} className="py-1.5 text-right">
-          <div className="font-semibold">{g}</div>
-          <div
+      {absent ? (
+        <td colSpan={6} className="py-1.5 text-center text-[11px] uppercase tracking-widest text-muted-foreground">
+          — Absent —
+        </td>
+      ) : (
+        <>
+          <td className="py-1.5 text-right">{hdcp}</td>
+          {games.map((g, i) => (
+            <td key={i} className="py-1.5 text-right">
+              <div className="font-semibold">{g}</div>
+              <div
+                className={cn(
+                  "mt-0.5 text-[9px] font-semibold uppercase",
+                  awards[i] === 2
+                    ? "text-primary"
+                    : awards[i] === 1
+                      ? "text-gold"
+                      : "text-muted-foreground",
+                )}
+              >
+                +{awards[i]}
+              </div>
+            </td>
+          ))}
+          <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
+          <td
             className={cn(
-              "mt-0.5 text-[9px] font-semibold uppercase",
-              awards[i] === 2
+              "py-1.5 text-right font-semibold",
+              setWinner
                 ? "text-primary"
-                : awards[i] === 1
+                : setTied
                   ? "text-gold"
                   : "text-muted-foreground",
             )}
           >
-            +{awards[i]}
-          </div>
-        </td>
-      ))}
-      <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
-      <td
-        className={cn(
-          "py-1.5 text-right font-semibold",
-          setWinner
-            ? "text-primary"
-            : setTied
-              ? "text-gold"
-              : "text-muted-foreground",
-        )}
-      >
-        {hdcpTotal}
-        <div className="text-[9px] font-normal uppercase text-muted-foreground">
-          set +{formatPoints(sp)}
-        </div>
-      </td>
+            {hdcpTotal}
+            <div className="text-[9px] font-normal uppercase text-muted-foreground">
+              set +{formatPoints(sp)}
+            </div>
+          </td>
+        </>
+      )}
       <td className="py-1.5 text-right">
         <span
           className={cn(
@@ -269,9 +311,11 @@ function SummaryRow({
         >
           {formatPoints(total)}
         </span>
-        <div className="text-[9px] font-normal uppercase text-muted-foreground">
-          {gp} game · {formatPoints(sp)} set
-        </div>
+        {!absent && (
+          <div className="text-[9px] font-normal uppercase text-muted-foreground">
+            {gp} game · {formatPoints(sp)} set
+          </div>
+        )}
       </td>
     </tr>
   );
