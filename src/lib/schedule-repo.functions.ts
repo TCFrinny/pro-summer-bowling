@@ -175,6 +175,16 @@ export const saveWeekSchedule = createServerFn({ method: "POST" })
     await ensureAdmin(context);
     const seasonId = await ensureSeasonId(context);
 
+    // Publishing a week requires a real date (non-empty string). We do
+    // NOT synthesize `today` at snapshot time (see snapshot-builder), so
+    // a published week without a date would render blank on the public
+    // schedule.
+    if (data.publish) {
+      const d = (data.date ?? "").trim();
+      if (!d) throw new Error("Cannot publish week: a valid date is required");
+    }
+
+
     // Validate slots against active roster
     const roster = await loadActiveRoster(context, seasonId);
     const activeById = new Map(
@@ -282,10 +292,18 @@ export const setWeekPublished = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureSeasonId(context);
+    if (data.published) {
+      const wk = await context.supabase.from("weeks")
+        .select("date").eq("season_id", seasonId).eq("week_number", data.weekNumber).maybeSingle();
+      if (wk.error) throw new Error(wk.error.message);
+      const d = (wk.data?.date ?? "").trim();
+      if (!d) throw new Error("Cannot publish week: a valid date is required");
+    }
     await upsertWeekRow(context, seasonId, data.weekNumber, { published: data.published });
     await rebuildAndSaveSnapshot(context.supabase, seasonId);
     return { ok: true };
   });
+
 
 export const deleteWeek = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
