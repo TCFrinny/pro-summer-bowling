@@ -22,7 +22,10 @@ function bowler(id: string, points: number, name?: string): Bowler {
   };
 }
 function week(n: number, opts: Partial<WeekSummary> = {}): WeekSummary {
-  return { week: n, date: "", completed: false, published: true, ...opts };
+  // Default to UNPUBLISHED — tests explicitly opt into publication so we
+  // don't accidentally trip prepare()'s "published week must cover every
+  // active bowler" invariant.
+  return { week: n, date: "", completed: false, published: false, ...opts };
 }
 let mid = 0;
 function completed(w: number, a: string, b: string): Match {
