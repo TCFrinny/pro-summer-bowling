@@ -9,6 +9,7 @@ const NAV = [
   { to: "/standings", label: "Standings" },
   { to: "/schedule", label: "Schedule" },
   { to: "/weekly-results", label: "Weekly Results" },
+  { to: "/leaderboards", label: "Leaderboards" },
   { to: "/bowlers", label: "Bowlers" },
   { to: "/statistics", label: "Statistics" },
   { to: "/lane-data", label: "Lane Data" },

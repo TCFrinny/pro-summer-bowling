@@ -37,6 +37,63 @@ Every matchup distributes **exactly 7 points**:
   matches. Set Points are still awarded as part of the 7-point match
   total but are **not** shown as a separate standings column.
 
+## Source of truth: frame-by-frame duckpin linescores
+
+Every completed match stores full **ball-by-ball / frame-by-frame** linescores
+in `src/lib/duckpin.ts` + `src/lib/mock-data.ts`. Each side is a
+`BowlerMatchLinescore` with three `GameLinescore`s of 10 `Frame`s. Every game
+total, scratch set, handicap total, per-game award, standings, statistic, and
+leaderboard is **derived** from those frames at module load. Nothing is
+hand-entered — high game, high set, strikes/spares/opens/marks, mark %, and
+POA all reconcile with the underlying frame rows.
+
+Duckpin rules encoded (`src/lib/duckpin.ts`): frames 1–9 allow up to three
+balls, strike/spare end the frame early, 10th frame supports the standard
+XXX, XX, X/, /X, X, /, and open combinations with the correct bonus
+deliveries. Strike bonus = next 2 balls; spare bonus = next 1 ball;
+cumulative frame scores are computed from rolls, never typed. Development-
+time validators enforce legal per-ball pin counts, early termination,
+tenth-frame bonus legality, monotonic cumulative scores, matching scratch
+totals, correct handicap sums, and exactly-7-point match distribution.
+
+## Substitutes: roster-only vs credited
+
+- **Scratch** performance, averages, strikes/spares/opens, marks, and all
+  advanced percentages belong to the **actual** bowler who rolled and are
+  **roster-only** — off-roster substitute performances are excluded.
+- **League points** and **handicap pinfall** are **credited** to the
+  **scheduled** (rostered) bowler regardless of who rolled the set.
+- Boards label this distinction ("Scratch roster-only · Points/HCP credited").
+
+## Leaderboards (`/leaderboards`, `/leaderboards/advanced`)
+
+Standard boards (Season or any completed week):
+
+- **Scratch (roster-only)**: High Game top 5, High Series top 5, Top Scratch
+  Averages.
+- **Points / HCP (credited)**: High Game HCP, High Series HCP, Top Total
+  Points.
+- **Volume (roster-only)**: Most Strikes, Most Spares, Fewest Opens (min 3 g).
+
+Advanced boards (roster-only, subs excluded):
+
+- **Mark %** = `(Strikes + Spares) / Frames × 100`
+- **Strike %** = `Strikes / Frames × 100`
+- **Spare Conversion %** = `Spares / (Spares + Opens) × 100`
+- **Open %** = `Opens / Frames × 100` (lower is better)
+- **Pins Lost** = average pins standing on open frames after ball 3 (lower
+  is better)
+- **Consistency** = std. dev. of scratch game scores (lower is better;
+  Season view only, minimum 6 games)
+- **Total Marks**, plus raw strike / spare counts.
+
+Eligibility: percentage boards require ≥ 3 games in the selected scope;
+consistency requires ≥ 6 games and is hidden for single-week views. Frame
+denominators use **regulation frames only** — the tenth-frame bonus balls
+do not inflate the count.
+
+
+
 
 
 

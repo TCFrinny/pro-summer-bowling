@@ -6,9 +6,12 @@ import {
   getBowler,
   getBowlerHistory,
   getBowlerSeasonExtras,
+  type BowlerHistoryRow,
 } from "@/lib/mock-data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChevronLeft } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
 
 export const Route = createFileRoute("/bowlers/$bowlerId")({
   loader: ({ params }) => {
@@ -82,6 +85,10 @@ function BowlerProfile() {
           value={`${bowler.matchesPlayed} / ${bowler.gamesPlayed}`}
         />
         <Stat
+          label="Actual Games (Roster)"
+          value={bowler.actualGamesRolled.toString()}
+        />
+        <Stat
           label="Scratch Pinfall"
           value={bowler.scratchPinfall.toLocaleString()}
         />
@@ -91,100 +98,38 @@ function BowlerProfile() {
         />
         <Stat label="High Game" value={bowler.highGame.toString()} />
         <Stat label="High Set" value={bowler.highSet.toString()} />
+        <Stat label="Strikes" value={extras.strikes.toString()} />
+        <Stat label="Spares" value={extras.spares.toString()} />
+        <Stat label="Opens" value={extras.opens.toString()} />
+        <Stat label="Mark %" value={`${extras.markPct.toFixed(1)}%`} />
         <Stat
-          label="Season POA"
-          value={formatSigned(extras.seasonPOA)}
+          label="Spare Conv. %"
+          value={`${extras.spareConversionPct.toFixed(1)}%`}
         />
-        <Stat
-          label="Best Game POA"
-          value={formatSigned(extras.bestGamePOA)}
-        />
-        <Stat label="Best Set POA" value={formatSigned(extras.bestSetPOA)} />
+        <Stat label="Season POA" value={formatSigned(extras.seasonPOA)} />
       </div>
-
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-card">
           <CardHeader>
             <CardTitle className="font-display text-xl">
-              Weekly history
+              Weekly history · full linescores
             </CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-xs uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-2 text-left">Wk</th>
-                  <th className="px-2 py-2 text-left">Lanes</th>
-                  <th className="px-2 py-2 text-left">Opponent</th>
-                  <th className="px-2 py-2 text-right">Hdcp</th>
-                  <th className="px-2 py-2 text-right">G1</th>
-                  <th className="px-2 py-2 text-right">G2</th>
-                  <th className="px-2 py-2 text-right">G3</th>
-                  <th className="px-2 py-2 text-right">Scr Set</th>
-                  <th className="px-2 py-2 text-right">Hdcp Set</th>
-                  <th className="px-2 py-2 text-right">W - L</th>
-                  <th className="px-2 py-2 text-right">Res</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {history.map((h) => (
-                  <tr key={h.week}>
-                    <td className="px-2 py-1.5">{h.week}</td>
-                    <td className="px-2 py-1.5">{h.lanePair}</td>
-                    <td className="px-2 py-1.5">
-                      {h.opponent}
-                      {h.isSub && (
-                        <span className="ml-1 rounded bg-accent px-1 text-[9px] uppercase tracking-widest text-muted-foreground">
-                          sub
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.handicap}
-                    </td>
-                    {h.scores.map((s, i) => (
-                      <td
-                        key={i}
-                        className="px-2 py-1.5 text-right tabular-nums"
-                        title={`Game point: ${h.gameAwards[i]}`}
-                      >
-                        {s}
-                        <span className="ml-1 text-[10px] text-muted-foreground">
-                          ·{h.gameAwards[i]}
-                        </span>
-                      </td>
-                    ))}
-                    <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
-                      {h.scratchTotal}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.handicapTotal}
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-semibold text-gold tabular-nums">
-                      {formatPoints(h.totalPoints)} - {formatPoints(h.pointsLost)}
-                    </td>
-                    <td className="px-2 py-1.5 text-right text-xs">
-                      {h.result}
-                    </td>
-                  </tr>
-                ))}
-                {history.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={12}
-                      className="py-6 text-center text-muted-foreground"
-                    >
-                      No completed weeks yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <CardContent className="space-y-2">
+            {history.map((h) => (
+              <WeekRow key={h.week} h={h} />
+            ))}
+            {history.length === 0 && (
+              <div className="py-6 text-center text-muted-foreground text-sm">
+                No completed weeks yet.
+              </div>
+            )}
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Each game: 2 pts win / 1 pt tie / 0 loss. Higher 3-game handicap
-              total wins 1 set pt (½ each on a tie). Every match distributes
-              exactly 7 pts, so W - L above is a per-match points record.
+              Roster-only advanced stats (mark %, spare %, opens, pins lost)
+              exclude any weeks when a substitute rolled on your behalf.
+              League points and handicap pinfall are still credited to the
+              scheduled bowler for those weeks.
             </p>
           </CardContent>
         </Card>
@@ -212,6 +157,70 @@ function BowlerProfile() {
         </Card>
       </div>
     </AppShell>
+  );
+}
+
+function WeekRow({ h }: { h: BowlerHistoryRow }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border border-border/60 bg-background/40">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent/40"
+      >
+        <span className="w-10 text-xs font-semibold uppercase text-muted-foreground">
+          Wk {h.week}
+        </span>
+        <span className="w-14 text-xs text-muted-foreground">
+          Lanes {h.lanePair}
+        </span>
+        <span className="flex-1 truncate">
+          vs {h.opponent}
+          {h.isSub && (
+            <span className="ml-2 rounded bg-primary/25 px-1.5 text-[9px] uppercase tracking-widest text-primary">
+              sub — {h.actualBowler}
+            </span>
+          )}
+        </span>
+        <span className="tabular-nums text-xs text-muted-foreground">
+          {h.scores.join(" · ")} = {h.scratchTotal}
+        </span>
+        <span
+          className={
+            "rounded px-2 py-0.5 font-display text-sm text-gold tabular-nums"
+          }
+        >
+          {formatPoints(h.totalPoints)} – {formatPoints(h.pointsLost)}
+        </span>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-border/60 p-3 space-y-4">
+          <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
+            <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
+            <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
+            <span>Opens <span className="text-gold">{h.weekOpens}</span></span>
+            <span>
+              Mark % <span className="text-gold">{h.weekMarkPct.toFixed(1)}%</span>
+            </span>
+            <span>
+              Hdcp set <span className="text-gold">{h.handicapTotal}</span>
+            </span>
+            <span>
+              POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span>
+            </span>
+            <span>
+              Result <span className="text-gold">{h.result}</span>
+            </span>
+          </div>
+          <ThreeGameLinescore linescore={h.linescore} />
+        </div>
+      )}
+    </div>
   );
 }
 
