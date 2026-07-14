@@ -378,15 +378,16 @@ function AdminResultsPage() {
 
       <Card className={cn("mt-4", eitherAbsent && "border-gold/60 bg-gold/5")}>
         <CardContent className="p-4">
-          <label className="flex items-center gap-2 text-sm font-semibold">
+          <div className="flex items-center gap-2 text-sm font-semibold">
             <input
+              id="override-toggle-cb"
               type="checkbox"
               data-testid="override-toggle"
               checked={draft.overrideEnabled}
               onChange={(e) => setDraft((d) => ({ ...d, overrideEnabled: e.target.checked }))}
             />
-            Manual Points Override
-          </label>
+            <label htmlFor="override-toggle-cb">Manual Points Override</label>
+          </div>
           {eitherAbsent && (
             <div className="mt-1 flex items-center gap-1.5 text-[11px] text-gold">
               <AlertTriangle className="h-3.5 w-3.5" />
