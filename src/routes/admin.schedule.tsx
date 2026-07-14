@@ -1,24 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/AppShell";
+import { LANE_PAIRS, TOTAL_WEEKS, type LanePair } from "@/lib/mock-data";
 import {
-  LANE_PAIRS,
-  WEEKS,
-  getMatchesForWeek,
-  type BowlerId,
-  type LanePair,
-  type Match,
-} from "@/lib/mock-data";
-import { publishWeek, saveScheduleDraft, selectActiveRoster, useLeagueState } from "@/lib/league-store";
+  getAdminScheduleData,
+  saveWeekSchedule,
+  setWeekPublished,
+  deleteWeek,
+} from "@/lib/schedule-repo.functions";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, CheckCircle2, Save, UploadCloud } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { AlertTriangle, CheckCircle2, Save, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/schedule")({
@@ -34,47 +31,89 @@ export const Route = createFileRoute("/admin/schedule")({
 interface DraftSlot {
   lanePair: LanePair;
   slot: number;
-  bowlerA: BowlerId | "";
-  bowlerB: BowlerId | "";
+  bowlerA: string;
+  bowlerB: string;
 }
 
-function loadDraftForWeek(week: number): DraftSlot[] {
-  const existing = getMatchesForWeek(week);
+const WEEK_NUMBERS = Array.from({ length: TOTAL_WEEKS }, (_, i) => i + 1);
+
+function emptyDraft(): DraftSlot[] {
   const rows: DraftSlot[] = [];
   for (const lp of LANE_PAIRS) {
     for (let slot = 1; slot <= 3; slot++) {
-      const m = existing.find((x) => x.lanePair === lp && x.slot === slot);
-      rows.push({
-        lanePair: lp,
-        slot,
-        bowlerA: m?.bowlerA ?? "",
-        bowlerB: m?.bowlerB ?? "",
-      });
+      rows.push({ lanePair: lp, slot, bowlerA: "", bowlerB: "" });
     }
   }
   return rows;
 }
 
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 function AdminSchedulePage() {
-  const league = useLeagueState();
-  const activeRoster = selectActiveRoster(league);
+  const qc = useQueryClient();
+  const load = useServerFn(getAdminScheduleData);
+  const saveWk = useServerFn(saveWeekSchedule);
+  const publishWk = useServerFn(setWeekPublished);
+  const delWk = useServerFn(deleteWeek);
+
+  const query = useQuery({
+    queryKey: ["admin", "schedule"],
+    queryFn: () => load(),
+  });
+
   const [week, setWeek] = useState<number>(1);
-  const [draft, setDraft] = useState<DraftSlot[]>(() => loadDraftForWeek(1));
+  const [draft, setDraft] = useState<DraftSlot[]>(() => emptyDraft());
+  const [dateStr, setDateStr] = useState<string>("");
   const [flash, setFlash] = useState<string | null>(null);
+
+  const roster = query.data?.roster ?? [];
+  const activeRoster = useMemo(
+    () => roster.filter((r) => r.active && !r.archived)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [roster],
+  );
+
+  // Hydrate draft when week changes or data loads.
+  useEffect(() => {
+    if (!query.data) return;
+    const wk = query.data.weeks.find((w) => w.week_number === week);
+    const rows = emptyDraft();
+    if (wk) {
+      const wkSlots = query.data.slots.filter((s) => s.week_id === wk.id);
+      for (const s of wkSlots) {
+        const target = rows.find((r) => r.lanePair === s.lane_pair && r.slot === s.slot);
+        if (target) {
+          target.bowlerA = s.bowler_a_id ?? "";
+          target.bowlerB = s.bowler_b_id ?? "";
+        }
+      }
+      setDateStr(wk.date ? wk.date.slice(0, 10) : "");
+    } else {
+      setDateStr("");
+    }
+    setDraft(rows);
+    setFlash(null);
+  }, [week, query.data]);
+
+  const currentWeek = query.data?.weeks.find((w) => w.week_number === week);
 
   const priorPairKeys = useMemo(() => {
     const set = new Set<string>();
-    for (const w of WEEKS) {
-      if (w.week >= week) continue;
-      for (const m of getMatchesForWeek(w.week)) {
-        set.add(pairKey(m.bowlerA, m.bowlerB));
+    if (!query.data) return set;
+    for (const w of query.data.weeks) {
+      if (w.week_number >= week) continue;
+      for (const s of query.data.slots) {
+        if (s.week_id !== w.id) continue;
+        if (s.bowler_a_id && s.bowler_b_id) set.add(pairKey(s.bowler_a_id, s.bowler_b_id));
       }
     }
     return set;
-  }, [week]);
+  }, [query.data, week]);
 
   const usedBowlers = useMemo(() => {
-    const counts = new Map<BowlerId, number>();
+    const counts = new Map<string, number>();
     for (const r of draft) {
       if (r.bowlerA) counts.set(r.bowlerA, (counts.get(r.bowlerA) ?? 0) + 1);
       if (r.bowlerB) counts.set(r.bowlerB, (counts.get(r.bowlerB) ?? 0) + 1);
@@ -82,28 +121,36 @@ function AdminSchedulePage() {
     return counts;
   }, [draft]);
 
+  const filledSlots = useMemo(
+    () => draft.filter((r) => r.bowlerA && r.bowlerB),
+    [draft],
+  );
+
   const warnings = useMemo(() => {
     const w: string[] = [];
     let incomplete = 0;
     for (const r of draft) {
       if (!r.bowlerA || !r.bowlerB) incomplete++;
-      if (r.bowlerA && r.bowlerA === r.bowlerB)
+      if (r.bowlerA && r.bowlerA === r.bowlerB) {
         w.push(`Lanes ${r.lanePair} slot ${r.slot}: bowler cannot face themself`);
+      }
     }
     if (incomplete > 0) w.push(`${incomplete} matchup(s) incomplete`);
     const dupes: string[] = [];
     for (const [id, c] of usedBowlers) {
-      if (c > 1) dupes.push(`${id}×${c}`);
+      if (c > 1) {
+        const name = activeRoster.find((b) => b.id === id)?.name ?? id;
+        dupes.push(`${name}×${c}`);
+      }
     }
     if (dupes.length) w.push(`Duplicate bowlers in week: ${dupes.join(", ")}`);
-    for (const r of draft) {
-      if (!r.bowlerA || !r.bowlerB) continue;
+    for (const r of filledSlots) {
       if (priorPairKeys.has(pairKey(r.bowlerA, r.bowlerB))) {
         w.push(`Lanes ${r.lanePair} slot ${r.slot}: repeat matchup from an earlier week`);
       }
     }
     return w;
-  }, [draft, usedBowlers, priorPairKeys]);
+  }, [draft, filledSlots, usedBowlers, priorPairKeys, activeRoster]);
 
   const setSlot = (idx: number, patch: Partial<DraftSlot>) => {
     setDraft((prev) => {
@@ -113,11 +160,44 @@ function AdminSchedulePage() {
     });
   };
 
-  const changeWeek = (w: number) => {
-    setWeek(w);
-    setDraft(loadDraftForWeek(w));
-    setFlash(null);
-  };
+  const saveMutation = useMutation({
+    mutationFn: (publish: boolean) => saveWk({
+      data: {
+        weekNumber: week,
+        date: dateStr ? new Date(dateStr).toISOString() : null,
+        publish,
+        slots: filledSlots.map((r) => ({
+          lanePair: r.lanePair, slot: r.slot,
+          bowlerA: r.bowlerA, bowlerB: r.bowlerB,
+        })),
+      },
+    }),
+    onSuccess: (_r, publish) => {
+      setFlash(publish
+        ? `Week ${week} published (${filledSlots.length} matches).`
+        : `Draft saved (${filledSlots.length}/18 slots).`);
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+    },
+    onError: (e: Error) => setFlash("Save failed: " + e.message),
+  });
+
+  const publishMutation = useMutation({
+    mutationFn: (published: boolean) => publishWk({ data: { weekNumber: week, published } }),
+    onSuccess: (_r, published) => {
+      setFlash(published ? `Week ${week} published.` : `Week ${week} unpublished.`);
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+    },
+    onError: (e: Error) => setFlash("Publish failed: " + e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => delWk({ data: { weekNumber: week } }),
+    onSuccess: () => {
+      setFlash(`Week ${week} deleted.`);
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+    },
+    onError: (e: Error) => setFlash("Delete failed: " + e.message),
+  });
 
   return (
     <>
@@ -126,63 +206,108 @@ function AdminSchedulePage() {
         subtitle="Administrators set every week's schedule by hand. Warnings surface duplicates and repeat pairings but never rewrite your choices."
       />
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      {query.isLoading && (
+        <div className="mb-4 text-sm text-muted-foreground">Loading roster…</div>
+      )}
+      {query.isError && (
+        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {(query.error as Error).message}
+        </div>
+      )}
+
+      <div className="mb-6 flex flex-wrap items-end gap-3">
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
-            Week
-          </div>
-          <Select value={String(week)} onValueChange={(v) => changeWeek(Number(v))}>
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Week</div>
+          <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {WEEKS.map((w) => (
-                <SelectItem key={w.week} value={String(w.week)}>
-                  Week {w.week}
+              {WEEK_NUMBERS.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  Week {n}{query.data?.weeks.find((w) => w.week_number === n)?.published ? " ✓" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="ml-auto flex gap-2">
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Date</div>
+          <Input
+            type="date"
+            className="w-44"
+            value={dateStr}
+            onChange={(e) => setDateStr(e.target.value)}
+          />
+        </div>
+        {currentWeek && (
+          <div className="text-xs text-muted-foreground">
+            Status:{" "}
+            <span className={cn(
+              "font-semibold",
+              currentWeek.published ? "text-primary" : "text-gold",
+            )}>
+              {currentWeek.published ? "Published" : "Draft"}
+            </span>
+            {currentWeek.completed && " · Completed"}
+          </div>
+        )}
+        <div className="ml-auto flex flex-wrap gap-2">
           <button
-            onClick={() => {
-              const slots = draft.filter((r) => r.bowlerA && r.bowlerB).map((r) => ({
-                lanePair: r.lanePair, slot: r.slot,
-                bowlerA: r.bowlerA as BowlerId, bowlerB: r.bowlerB as BowlerId,
-              }));
-              saveScheduleDraft(week, slots);
-              setFlash(`Draft saved (${slots.length}/18 slots) — visible on public Schedule.`);
-            }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
+            disabled={saveMutation.isPending || activeRoster.length === 0}
+            onClick={() => saveMutation.mutate(false)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
           >
-            <Save className="h-4 w-4" /> Save draft schedule
+            <Save className="h-4 w-4" /> Save draft
           </button>
           <button
-            disabled={warnings.length > 0}
-            onClick={() => {
-              const slots = draft.filter((r) => r.bowlerA && r.bowlerB).map((r) => ({
-                lanePair: r.lanePair, slot: r.slot,
-                bowlerA: r.bowlerA as BowlerId, bowlerB: r.bowlerB as BowlerId,
-              }));
-              publishWeek(week, slots);
-              setFlash(`Week ${week} published (${slots.length} matches).`);
-            }}
+            disabled={warnings.length > 0 || saveMutation.isPending || filledSlots.length === 0}
+            onClick={() => saveMutation.mutate(true)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold",
-              warnings.length > 0
+              warnings.length > 0 || filledSlots.length === 0
                 ? "cursor-not-allowed bg-muted text-muted-foreground"
                 : "bg-primary text-primary-foreground hover:bg-primary/90",
             )}
           >
-            <UploadCloud className="h-4 w-4" /> Publish week
+            <UploadCloud className="h-4 w-4" /> Save & publish
           </button>
+          {currentWeek?.published && (
+            <button
+              disabled={publishMutation.isPending}
+              onClick={() => publishMutation.mutate(false)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-accent/40 disabled:opacity-50"
+            >
+              Unpublish
+            </button>
+          )}
+          {currentWeek && (
+            <button
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (window.confirm(`Delete week ${week}? This removes all draft slots.`)) {
+                  deleteMutation.mutate();
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md border border-destructive/60 bg-destructive/10 px-3 py-2 text-xs text-destructive hover:bg-destructive/20 disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete week
+            </button>
+          )}
         </div>
-
       </div>
 
       {flash && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-accent/40 px-3 py-2 text-xs">
           <CheckCircle2 className="h-4 w-4 text-primary" /> {flash}
         </div>
+      )}
+
+      {activeRoster.length === 0 && !query.isLoading && (
+        <Card className="mb-4 border-gold/40 bg-gold/5">
+          <CardContent className="p-3 text-xs text-muted-foreground">
+            No active roster bowlers yet. Add bowlers on the{" "}
+            <span className="font-semibold">Manage Bowlers</span> page first.
+          </CardContent>
+        </Card>
       )}
 
       {warnings.length > 0 && (
@@ -242,35 +367,25 @@ function AdminSchedulePage() {
 }
 
 function BowlerSelect({
-  value,
-  onChange,
-  invalid,
-  options,
+  value, onChange, invalid, options,
 }: {
-  value: BowlerId | "";
-  onChange: (v: BowlerId | "") => void;
+  value: string;
+  onChange: (v: string) => void;
   invalid?: boolean;
-  options: { id: string; name: string; bowlerNumber?: string }[];
+  options: { id: string; name: string; bowler_number: string | null }[];
 }) {
   return (
-    <Select value={value || undefined} onValueChange={(v) => onChange(v as BowlerId)}>
+    <Select value={value || undefined} onValueChange={(v) => onChange(v)}>
       <SelectTrigger className={cn(invalid && "border-destructive")}>
         <SelectValue placeholder="Select bowler…" />
       </SelectTrigger>
       <SelectContent>
         {options.map((b) => (
           <SelectItem key={b.id} value={b.id}>
-            {b.bowlerNumber ? `${b.name} (ID ${b.bowlerNumber})` : b.name}
+            {b.bowler_number ? `${b.name} (ID ${b.bowler_number})` : b.name}
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
   );
 }
-
-function pairKey(a: BowlerId, b: BowlerId): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
-
-// Silence unused-type warnings if any.
-export type _AdminScheduleMatchRef = Match;

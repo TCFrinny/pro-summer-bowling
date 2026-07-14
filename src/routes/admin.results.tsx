@@ -1,26 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/AppShell";
 import {
-  WEEKS,
+  computeHandicap,
   formatPoints,
-  getBowler,
-  getMatchesForWeek,
   validatePointsOverride,
-  type BowlerId,
-  type Match,
   type MatchResult,
   type ParticipationStatus,
 } from "@/lib/mock-data";
 import {
-  addSubstitute,
-  applyResult,
-  getSavedResult,
-  selectActiveRoster,
-  selectActiveSubs,
-  useLeagueState,
-} from "@/lib/league-store";
-
+  getAdminScheduleData,
+  saveMatchResult,
+} from "@/lib/schedule-repo.functions";
 import {
   SideLinescoreEditor,
   computeSideDerived,
@@ -32,11 +25,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -53,17 +42,11 @@ export const Route = createFileRoute("/admin/results")({
 
 interface SideDraft {
   status: ParticipationStatus;
-  /** Sub id when status="substitute" and picked from pool. Empty string
-   *  means the admin is typing a free-form name in `subName`. */
   subId: string;
   subName: string;
-  /** Sub's own Starting Average (string for input control). Required when
-   *  status === "substitute" — sub's handicap for this match derives from
-   *  it via floor(0.80 * (160 - startingAverage)). */
   subStartAvg: string;
   linescore: SideEditorState;
 }
-
 interface Draft {
   sideA: SideDraft;
   sideB: SideDraft;
@@ -76,30 +59,19 @@ interface Draft {
 function emptySide(): SideDraft {
   return {
     status: "rostered",
-    subId: "",
-    subName: "",
-    subStartAvg: "",
+    subId: "", subName: "", subStartAvg: "",
     linescore: emptySideEditorState(),
   };
 }
 function emptyDraft(): Draft {
   return {
-    sideA: emptySide(),
-    sideB: emptySide(),
-    overrideEnabled: false,
-    overrideA: "0",
-    overrideB: "0",
-    overrideReason: "",
+    sideA: emptySide(), sideB: emptySide(),
+    overrideEnabled: false, overrideA: "0", overrideB: "0", overrideReason: "",
   };
 }
 
-/** Hydrate the admin editor draft from a saved MatchResult. Round-trips
- *  saved frame marks and cumulative totals back into the editor grid so
- *  the admin sees exactly what was previously saved. */
 function draftFromResult(r: MatchResult): Draft {
-  const sideFromResult = (
-    isA: boolean,
-  ): SideDraft => {
+  const sideFromResult = (isA: boolean): SideDraft => {
     const p = isA ? r.participationA : r.participationB;
     const ls = isA ? r.linescoreA : r.linescoreB;
     const games: [GameEditorState, GameEditorState, GameEditorState] = [
@@ -115,12 +87,8 @@ function draftFromResult(r: MatchResult): Draft {
       }
     }
     const isSub = p.status === "substitute";
-    // For a saved sub, `entryAverage*` on the result is already the sub's
-    // Starting Average that was used to score the match. Round-trip it so
-    // re-saving the same match does not change the sub's handicap.
     const savedSubStartAvg = isSub
-      ? String(isA ? r.entryAverageA : r.entryAverageB)
-      : "";
+      ? String(isA ? r.entryAverageA : r.entryAverageB) : "";
     return {
       status: p.status,
       subId: isSub && p.actualId ? p.actualId : "",
@@ -139,39 +107,90 @@ function draftFromResult(r: MatchResult): Draft {
   };
 }
 
+interface ScheduleMatch {
+  id: string; // schedule_slot_id
+  week: number;
+  lanePair: string;
+  slot: number;
+  bowlerA: { id: string; name: string; entryAverage: number };
+  bowlerB: { id: string; name: string; entryAverage: number };
+  result: MatchResult | null;
+}
+
 function AdminResultsPage() {
-  const league = useLeagueState();
-  const activeSubs = selectActiveSubs(league);
-  void selectActiveRoster(league);
+  const qc = useQueryClient();
+  const load = useServerFn(getAdminScheduleData);
+  const save = useServerFn(saveMatchResult);
+
+  const query = useQuery({
+    queryKey: ["admin", "schedule"],
+    queryFn: () => load(),
+  });
 
   const [week, setWeek] = useState(1);
-  const matches = useMemo(() => getMatchesForWeek(week), [week, league.version]);
-  const [matchId, setMatchId] = useState(matches[0]?.id ?? "");
-  const currentMatch = matches.find((m) => m.id === matchId) ?? matches[0];
+  const [matchId, setMatchId] = useState<string>("");
 
-  const savedResult = currentMatch?.result;
+  const rosterById = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; entryAverage: number }>();
+    for (const r of query.data?.roster ?? []) {
+      m.set(r.id, { id: r.id, name: r.name, entryAverage: r.entry_average });
+    }
+    return m;
+  }, [query.data]);
+
+  const weekList = useMemo(
+    () => (query.data?.weeks ?? []).slice().sort((a, b) => a.week_number - b.week_number),
+    [query.data],
+  );
+
+  const matches: ScheduleMatch[] = useMemo(() => {
+    if (!query.data) return [];
+    const wk = weekList.find((w) => w.week_number === week);
+    if (!wk) return [];
+    const slots = query.data.slots.filter((s) => s.week_id === wk.id);
+    const resultBySlot = new Map<string, MatchResult>();
+    for (const r of query.data.results) {
+      if (r.derived) resultBySlot.set(r.schedule_slot_id, r.derived as unknown as MatchResult);
+    }
+    const list: ScheduleMatch[] = [];
+    for (const s of slots) {
+      if (!s.bowler_a_id || !s.bowler_b_id) continue;
+      const ba = rosterById.get(s.bowler_a_id) ?? { id: s.bowler_a_id, name: s.name_a ?? s.bowler_a_id, entryAverage: 0 };
+      const bb = rosterById.get(s.bowler_b_id) ?? { id: s.bowler_b_id, name: s.name_b ?? s.bowler_b_id, entryAverage: 0 };
+      list.push({
+        id: s.id, week: wk.week_number,
+        lanePair: s.lane_pair, slot: s.slot,
+        bowlerA: ba, bowlerB: bb,
+        result: resultBySlot.get(s.id) ?? null,
+      });
+    }
+    list.sort((a, b) => a.lanePair === b.lanePair ? a.slot - b.slot : a.lanePair.localeCompare(b.lanePair));
+    return list;
+  }, [query.data, weekList, week, rosterById]);
+
+  useEffect(() => {
+    if (matches.length === 0) { setMatchId(""); return; }
+    if (!matches.find((m) => m.id === matchId)) setMatchId(matches[0].id);
+  }, [matches, matchId]);
+
+  const currentMatch = matches.find((m) => m.id === matchId);
+  const savedResult = currentMatch?.result ?? null;
   const isEditingSaved = !!savedResult;
 
-  const [draft, setDraft] = useState<Draft>(() =>
-    savedResult ? draftFromResult(savedResult) : emptyDraft(),
-  );
+  const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [flash, setFlash] = useState<string | null>(null);
 
-  // Re-hydrate the draft ONLY when the selected match id changes. Do not
-  // depend on `savedResult` — that reference can churn on any store tick
-  // and would clobber in-progress edits (e.g. toggling the override).
   useEffect(() => {
-    const m = getMatchesForWeek(week).find((mm) => mm.id === matchId);
-    setDraft(m?.result ? draftFromResult(m.result) : emptyDraft());
+    setDraft(savedResult ? draftFromResult(savedResult) : emptyDraft());
     setFlash(null);
-     
-  }, [matchId, week]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchId]);
 
-  const changeWeek = (w: number) => {
-    setWeek(w);
-    const next = getMatchesForWeek(w);
-    setMatchId(next[0]?.id ?? "");
-  };
+  const activeSubs = useMemo(
+    () => (query.data?.subs ?? []).filter((s) => s.active && !s.archived)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [query.data],
+  );
 
   const setSide = (side: "A" | "B", patch: Partial<SideDraft>) => {
     setDraft((d) => ({
@@ -180,25 +199,20 @@ function AdminResultsPage() {
     }));
   };
 
-  const eitherAbsent =
-    draft.sideA.status === "absent" || draft.sideB.status === "absent";
+  const eitherAbsent = draft.sideA.status === "absent" || draft.sideB.status === "absent";
 
-  const a = currentMatch ? getBowler(currentMatch.bowlerA) : undefined;
-  const b = currentMatch ? getBowler(currentMatch.bowlerB) : undefined;
-
-  // Effective handicap per side: rostered/absent → scheduled bowler's;
-  // substitute → derived from the sub's Starting Average.
   const subHandicapFromAvg = (raw: string): number | null => {
     const n = Number(raw);
     if (!Number.isFinite(n)) return null;
-    return Math.floor(0.8 * (160 - n));
+    return computeHandicap(n);
   };
+
   const effHandicapA = draft.sideA.status === "substitute"
     ? (subHandicapFromAvg(draft.sideA.subStartAvg) ?? 0)
-    : (a?.handicap ?? 0);
+    : (currentMatch ? computeHandicap(currentMatch.bowlerA.entryAverage) : 0);
   const effHandicapB = draft.sideB.status === "substitute"
     ? (subHandicapFromAvg(draft.sideB.subStartAvg) ?? 0)
-    : (b?.handicap ?? 0);
+    : (currentMatch ? computeHandicap(currentMatch.bowlerB.entryAverage) : 0);
 
   const derivedA = useMemo(
     () => computeSideDerived(draft.sideA.linescore, effHandicapA),
@@ -228,32 +242,30 @@ function AdminResultsPage() {
         errors.push(`Side ${label}: linescore incomplete or invalid`);
       }
     }
-    const anyAbsent = draft.sideA.status === "absent" || draft.sideB.status === "absent";
-    if (anyAbsent && !draft.overrideEnabled) {
+    if (eitherAbsent && !draft.overrideEnabled) {
       errors.push("An absent side requires a manual points override with a reason.");
     }
     if (draft.overrideEnabled) {
-      const oa = Number(draft.overrideA);
-      const ob = Number(draft.overrideB);
       const check = validatePointsOverride({
-        enabled: true, pointsA: oa, pointsB: ob, reason: draft.overrideReason,
+        enabled: true,
+        pointsA: Number(draft.overrideA),
+        pointsB: Number(draft.overrideB),
+        reason: draft.overrideReason,
       });
       if (!check.ok) errors.push(`Override: ${check.error}`);
     }
     return errors;
-  }, [draft, derivedA, derivedB]);
+  }, [draft, derivedA, derivedB, eitherAbsent]);
 
   const previewNormal = useMemo(() => {
     if (
-      draft.sideA.status === "absent" ||
-      draft.sideB.status === "absent" ||
-      !derivedA.valid || !derivedB.valid ||
+      eitherAbsent || !derivedA.valid || !derivedB.valid ||
       !derivedA.games.every(Boolean) || !derivedB.games.every(Boolean)
     ) return null;
     let ptsA = 0, ptsB = 0;
     for (let i = 0; i < 3; i++) {
-      const ga = (derivedA.games[i]!.scratchTotal) + effHandicapA;
-      const gb = (derivedB.games[i]!.scratchTotal) + effHandicapB;
+      const ga = derivedA.games[i]!.scratchTotal + effHandicapA;
+      const gb = derivedB.games[i]!.scratchTotal + effHandicapB;
       if (ga > gb) ptsA += 2;
       else if (gb > ga) ptsB += 2;
       else { ptsA += 1; ptsB += 1; }
@@ -264,71 +276,108 @@ function AdminResultsPage() {
     else if (hsB > hsA) ptsB += 1;
     else { ptsA += 0.5; ptsB += 0.5; }
     return { ptsA, ptsB };
-  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB, effHandicapA, effHandicapB]);
+  }, [derivedA, derivedB, effHandicapA, effHandicapB, eitherAbsent]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentMatch) throw new Error("No match selected");
+      const buildGames = (s: SideDraft, d: typeof derivedA) => {
+        if (s.status === "absent") return undefined;
+        const g = d.games;
+        if (!g[0] || !g[1] || !g[2]) return undefined;
+        return [g[0], g[1], g[2]].map((game) => ({
+          frames: game.frames.map((f) => ({
+            frameNumber: f.frameNumber,
+            mark: f.mark,
+            cumulativeScore: f.cumulativeScore,
+          })),
+        }));
+      };
+      const subStartAvgOrUndef = (raw: string): number | undefined => {
+        const n = Number(raw);
+        return Number.isFinite(n) && raw.trim() !== "" ? n : undefined;
+      };
+      return save({
+        data: {
+          slotId: currentMatch.id,
+          sideA: {
+            status: draft.sideA.status,
+            substituteId: draft.sideA.subId || undefined,
+            substituteName: draft.sideA.subName.trim() || undefined,
+            substituteStartingAverage: draft.sideA.status === "substitute"
+              ? subStartAvgOrUndef(draft.sideA.subStartAvg) : undefined,
+            games: buildGames(draft.sideA, derivedA) as never,
+          },
+          sideB: {
+            status: draft.sideB.status,
+            substituteId: draft.sideB.subId || undefined,
+            substituteName: draft.sideB.subName.trim() || undefined,
+            substituteStartingAverage: draft.sideB.status === "substitute"
+              ? subStartAvgOrUndef(draft.sideB.subStartAvg) : undefined,
+            games: buildGames(draft.sideB, derivedB) as never,
+          },
+          override: draft.overrideEnabled ? {
+            enabled: true,
+            pointsA: Number(draft.overrideA),
+            pointsB: Number(draft.overrideB),
+            reason: draft.overrideReason,
+          } : null,
+        },
+      });
+    },
+    onSuccess: () => {
+      setFlash("Result saved. Standings and leaderboards updated.");
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+    },
+    onError: (e: Error) => setFlash("Save failed: " + e.message),
+  });
 
   const handleReset = () => {
     setDraft(savedResult ? draftFromResult(savedResult) : emptyDraft());
     setFlash(null);
   };
 
-  const handleSave = () => {
-    const buildSideGames = (s: SideDraft, d: typeof derivedA) => {
-      if (s.status === "absent") return undefined;
-      const g = d.games;
-      if (!g[0] || !g[1] || !g[2]) return undefined;
-      return [g[0], g[1], g[2]] as [
-        NonNullable<(typeof g)[number]>, NonNullable<(typeof g)[number]>, NonNullable<(typeof g)[number]>,
-      ];
-    };
-    if (!currentMatch) return;
-    const subStartAvgOrUndef = (raw: string): number | undefined => {
-      const n = Number(raw);
-      return Number.isFinite(n) && raw.trim() !== "" ? n : undefined;
-    };
-    const outcome = applyResult({
-      matchId: currentMatch.id,
-      sideA: {
-        status: draft.sideA.status,
-        substituteId: draft.sideA.subId || undefined,
-        substituteName: draft.sideA.subName.trim() || undefined,
-        substituteStartingAverage: draft.sideA.status === "substitute"
-          ? subStartAvgOrUndef(draft.sideA.subStartAvg) : undefined,
-        games: buildSideGames(draft.sideA, derivedA),
-      },
-      sideB: {
-        status: draft.sideB.status,
-        substituteId: draft.sideB.subId || undefined,
-        substituteName: draft.sideB.subName.trim() || undefined,
-        substituteStartingAverage: draft.sideB.status === "substitute"
-          ? subStartAvgOrUndef(draft.sideB.subStartAvg) : undefined,
-        games: buildSideGames(draft.sideB, derivedB),
-      },
-      override: draft.overrideEnabled ? {
-        enabled: true,
-        pointsA: Number(draft.overrideA),
-        pointsB: Number(draft.overrideB),
-        reason: draft.overrideReason,
-      } : null,
-    });
-    if (outcome.ok) {
-      // Re-hydrate directly from the freshly saved result so the editor
-      // still shows the saved values (never a blank form after Save).
-      const saved = getSavedResult(outcome.matchId);
-      if (saved) setDraft(draftFromResult(saved));
-      setFlash("Result saved. Standings, weekly results, profiles, and boards now reflect this match.");
-    } else {
-      setFlash("Save failed: " + outcome.errors.join("; "));
-    }
-  };
-
-  if (!currentMatch) {
+  if (query.isLoading) {
     return (
       <>
-        <PageHeader title="Weekly Result Entry" subtitle="Admin · Phase 1 (mock)" />
-        <p className="text-sm text-muted-foreground">No matches scheduled for this week.</p>
+        <PageHeader title="Admin · Weekly Result Entry" subtitle="Loading…" />
       </>
     );
   }
+  if (query.isError) {
+    return (
+      <>
+        <PageHeader title="Admin · Weekly Result Entry" subtitle="Error" />
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          {(query.error as Error).message}
+        </div>
+      </>
+    );
+  }
+  if (weekList.length === 0) {
+    return (
+      <>
+        <PageHeader title="Admin · Weekly Result Entry" subtitle="No schedule yet" />
+        <p className="text-sm text-muted-foreground">
+          Create a week's schedule on the Manual Schedule Editor first.
+        </p>
+      </>
+    );
+  }
+  if (!currentMatch) {
+    return (
+      <>
+        <PageHeader title="Admin · Weekly Result Entry" subtitle={`Week ${week}`} />
+        <WeekPicker weekList={weekList} week={week} setWeek={setWeek} />
+        <p className="mt-4 text-sm text-muted-foreground">
+          No matches scheduled for week {week}.
+        </p>
+      </>
+    );
+  }
+
+  const a = currentMatch.bowlerA;
+  const b = currentMatch.bowlerB;
 
   return (
     <>
@@ -338,29 +387,17 @@ function AdminResultsPage() {
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[160px_1fr]" data-testid="admin-results-toolbar">
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Week</div>
-          <Select value={String(week)} onValueChange={(v) => changeWeek(Number(v))}>
-            <SelectTrigger data-testid="week-select"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {WEEKS.map((w) => (
-                <SelectItem key={w.week} value={String(w.week)}>Week {w.week}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <WeekPicker weekList={weekList} week={week} setWeek={setWeek} />
         <div>
           <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Matchup</div>
           <Select value={matchId} onValueChange={setMatchId}>
             <SelectTrigger data-testid="match-select"><SelectValue /></SelectTrigger>
             <SelectContent>
               {matches.map((m) => {
-                const ba = getBowler(m.bowlerA)?.name ?? m.bowlerA;
-                const bb = getBowler(m.bowlerB)?.name ?? m.bowlerB;
                 const done = m.result ? " ✓" : "";
                 return (
                   <SelectItem key={m.id} value={m.id}>
-                    Lanes {m.lanePair} · Slot {m.slot} — {ba} vs {bb}{done}
+                    Lanes {m.lanePair} · Slot {m.slot} — {m.bowlerA.name} vs {m.bowlerB.name}{done}
                   </SelectItem>
                 );
               })}
@@ -375,30 +412,26 @@ function AdminResultsPage() {
           className="mb-3 flex items-center gap-2 rounded-md border border-gold/50 bg-gold/10 px-3 py-2 text-xs text-gold"
         >
           <PenSquare className="h-4 w-4" />
-          <span className="font-semibold uppercase tracking-widest">
-            Editing saved result
-          </span>
-          <span className="text-muted-foreground">
-            — re-saving replaces the existing match record (no double-count).
-          </span>
+          <span className="font-semibold uppercase tracking-widest">Editing saved result</span>
+          <span className="text-muted-foreground">— re-saving replaces the existing match record.</span>
         </div>
       )}
 
       <div className="grid gap-4 md:grid-cols-2" data-testid="admin-results-sides">
         <SidePanel
           testId="side-A"
-          label={`Side A — ${a?.name ?? currentMatch.bowlerA}`}
+          label={`Side A — ${a.name}`}
           handicap={effHandicapA}
-          scheduledHandicap={a?.handicap ?? 0}
+          scheduledHandicap={computeHandicap(a.entryAverage)}
           side={draft.sideA}
           subs={activeSubs}
           onChange={(patch) => setSide("A", patch)}
         />
         <SidePanel
           testId="side-B"
-          label={`Side B — ${b?.name ?? currentMatch.bowlerB}`}
+          label={`Side B — ${b.name}`}
           handicap={effHandicapB}
-          scheduledHandicap={b?.handicap ?? 0}
+          scheduledHandicap={computeHandicap(b.entryAverage)}
           side={draft.sideB}
           subs={activeSubs}
           onChange={(patch) => setSide("B", patch)}
@@ -462,8 +495,7 @@ function AdminResultsPage() {
             </div>
           )}
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Combined awarded points must be ≤ 7 in 0.5-point increments. Any
-            unawarded remainder is NOT auto-distributed.
+            Combined awarded points must be ≤ 7 in 0.5-point increments.
           </p>
         </CardContent>
       </Card>
@@ -484,16 +516,17 @@ function AdminResultsPage() {
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           data-testid="save-result"
-          disabled={validation.length > 0}
-          onClick={handleSave}
+          disabled={validation.length > 0 || saveMutation.isPending}
+          onClick={() => saveMutation.mutate()}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold",
-            validation.length > 0
+            validation.length > 0 || saveMutation.isPending
               ? "cursor-not-allowed bg-muted text-muted-foreground"
               : "bg-primary text-primary-foreground hover:bg-primary/90",
           )}
         >
-          <Save className="h-4 w-4" /> Save result
+          <Save className="h-4 w-4" />
+          {saveMutation.isPending ? "Saving…" : "Save result"}
         </button>
         <button
           data-testid="reset-editor"
@@ -517,22 +550,45 @@ function AdminResultsPage() {
   );
 }
 
+function WeekPicker({
+  weekList, week, setWeek,
+}: {
+  weekList: { week_number: number; published: boolean }[];
+  week: number;
+  setWeek: (w: number) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-widest text-muted-foreground">Week</div>
+      <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
+        <SelectTrigger data-testid="week-select"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {weekList.map((w) => (
+            <SelectItem key={w.week_number} value={String(w.week_number)}>
+              Week {w.week_number}{w.published ? " ✓" : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+type SubRecord = {
+  id: string; name: string;
+  starting_average: number | null;
+  active: boolean; archived: boolean;
+  bowler_number: string | null;
+};
+
 function SidePanel({
-  label,
-  handicap,
-  scheduledHandicap,
-  side,
-  subs,
-  onChange,
-  testId,
+  label, handicap, scheduledHandicap, side, subs, onChange, testId,
 }: {
   label: string;
-  /** Effective handicap to apply to the linescore (sub's if substitute). */
   handicap: number;
-  /** Scheduled bowler's own handicap; shown for reference on sub rows. */
   scheduledHandicap: number;
   side: SideDraft;
-  subs: import("@/lib/league-store").SubstituteRecord[];
+  subs: SubRecord[];
   onChange: (patch: Partial<SideDraft>) => void;
   testId?: string;
 }) {
@@ -577,12 +633,9 @@ function SidePanel({
                   onChange({
                     subId: v,
                     subName: found?.name ?? side.subName,
-                    // Prefill the sub's saved starting average when present,
-                    // but do NOT clobber a value the admin has already
-                    // typed for this match.
                     subStartAvg: side.subStartAvg
                       ? side.subStartAvg
-                      : (found?.startingAverage != null ? String(found.startingAverage) : ""),
+                      : (found?.starting_average != null ? String(found.starting_average) : ""),
                   });
                 }}
               >
@@ -592,7 +645,7 @@ function SidePanel({
                 <SelectContent>
                   {subs.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.name}{s.startingAverage != null ? ` · avg ${s.startingAverage}` : ""}
+                      {s.name}{s.starting_average != null ? ` · avg ${s.starting_average}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -600,45 +653,22 @@ function SidePanel({
             </div>
             <div>
               <Label className="text-[10px]">Or type a name</Label>
-              <div className="flex gap-1">
-                <Input
-                  data-testid={`${testId}-sub-name`}
-                  value={side.subName}
-                  onChange={(e) => onChange({ subId: "", subName: e.target.value })}
-                  placeholder="Walk-on substitute"
-                />
-                <button
-                  type="button"
-                  disabled={!side.subName.trim() || !side.subStartAvg.trim()}
-                  onClick={() => {
-                    const nm = side.subName.trim();
-                    const avg = Number(side.subStartAvg);
-                    if (!nm || !Number.isFinite(avg)) return;
-                    try {
-                      const rec = addSubstitute(nm, { startingAverage: avg });
-                      onChange({ subId: rec.id, subName: rec.name });
-                    } catch (e) { window.alert((e as Error).message); }
-                  }}
-                  className={cn(
-                    "shrink-0 rounded-md px-2 text-xs font-semibold",
-                    side.subName.trim() && side.subStartAvg.trim()
-                      ? "bg-gold text-gold-foreground hover:bg-gold/90"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                  title="Add this person to the substitute pool (needs Starting Average)"
-                >
-                  + Pool
-                </button>
-              </div>
+              <Input
+                data-testid={`${testId}-sub-name`}
+                value={side.subName}
+                onChange={(e) => onChange({ subId: "", subName: e.target.value })}
+                placeholder="Walk-on substitute"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Add subs with ID numbers via Manage Bowlers.
+              </p>
             </div>
             <div>
               <Label className="text-[10px]">Starting Average</Label>
               <Input
                 data-testid={`${testId}-sub-start-avg`}
                 type="number"
-                min={1}
-                max={300}
-                step={1}
+                min={1} max={300} step={1}
                 value={side.subStartAvg}
                 onChange={(e) => onChange({ subStartAvg: e.target.value })}
                 placeholder="e.g. 138"
@@ -646,7 +676,6 @@ function SidePanel({
             </div>
           </div>
         )}
-
 
         <SideLinescoreEditor
           label="Linescore"
@@ -668,15 +697,9 @@ function SidePanel({
 }
 
 function NumberInput({
-  label,
-  value,
-  onChange,
-  testId,
+  label, value, onChange, testId,
 }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  testId?: string;
+  label: string; value: string; onChange: (v: string) => void; testId?: string;
 }) {
   return (
     <div>
@@ -684,15 +707,10 @@ function NumberInput({
       <Input
         data-testid={testId}
         type="number"
-        min={0}
-        max={7}
-        step={0.5}
+        min={0} max={7} step={0.5}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
     </div>
   );
 }
-
-// Ensure symbol imports referenced.
-export type _AdminResultsMatchRef = Match | BowlerId;

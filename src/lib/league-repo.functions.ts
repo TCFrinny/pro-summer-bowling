@@ -17,7 +17,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
 import {
-  buildSnapshotFromRows,
   nextRosterIdFrom,
   nextSubIdFrom,
   validateName,
@@ -30,6 +29,8 @@ import {
   type SubRow,
 } from "@/lib/roster-adapter";
 import { computeHandicap } from "@/lib/mock-data";
+import { rebuildAndSaveSnapshot } from "@/lib/snapshot-builder.server";
+
 
 // ---------------------------------------------------------------------------
 // Typed context
@@ -86,18 +87,9 @@ async function loadSubRows(context: AuthedCtx, seasonId: string): Promise<SubRow
 }
 
 async function rebuildSnapshot(context: AuthedCtx, seasonId: string): Promise<void> {
-  const rostered = await loadRosterRows(context, seasonId);
-  const snapshot = buildSnapshotFromRows({ rostered });
-  const up = await context.supabase
-    .from("public_snapshots")
-    .upsert(
-      // The generated Insert type for `snapshot` is `Json`; a PublicSnapshot
-      // is JSON-serializable so the cast is safe and localised here.
-      { season_id: seasonId, snapshot: snapshot as unknown as Database["public"]["Tables"]["public_snapshots"]["Insert"]["snapshot"] },
-      { onConflict: "season_id" },
-    );
-  if (up.error) throw new Error(`snapshot upsert failed: ${up.error.message}`);
+  await rebuildAndSaveSnapshot(context.supabase, seasonId);
 }
+
 
 // ---------------------------------------------------------------------------
 // Activation & reference-check guards
