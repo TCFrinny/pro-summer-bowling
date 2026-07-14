@@ -370,6 +370,9 @@ export function assembleSideLinescore(input: {
 export function computeMatchResult(input: {
   scheduledA: Bowler;
   scheduledB: Bowler;
+  /** FROZEN scheduled display names at save time. */
+  scheduledNameA: string;
+  scheduledNameB: string;
   participationA: SideParticipation;
   participationB: SideParticipation;
   entryAverageA: number;
@@ -381,26 +384,34 @@ export function computeMatchResult(input: {
   pointsOverride: PointsOverride | null;
 }): MatchResult {
   const {
-    scheduledA, scheduledB, participationA, participationB,
+    scheduledA, scheduledB, scheduledNameA, scheduledNameB,
+    participationA, participationB,
     entryAverageA, entryAverageB, handicapA, handicapB,
     linescoreA, linescoreB, pointsOverride,
   } = input;
 
-  const gamesA: [number, number, number] = linescoreA
-    ? [linescoreA.games[0].scratchTotal, linescoreA.games[1].scratchTotal, linescoreA.games[2].scratchTotal]
-    : [0, 0, 0];
-  const gamesB: [number, number, number] = linescoreB
-    ? [linescoreB.games[0].scratchTotal, linescoreB.games[1].scratchTotal, linescoreB.games[2].scratchTotal]
-    : [0, 0, 0];
-  const hcpGamesA: [number, number, number] = [gamesA[0] + handicapA, gamesA[1] + handicapA, gamesA[2] + handicapA];
-  const hcpGamesB: [number, number, number] = [gamesB[0] + handicapB, gamesB[1] + handicapB, gamesB[2] + handicapB];
-  const scratchA = gamesA[0] + gamesA[1] + gamesA[2];
-  const scratchB = gamesB[0] + gamesB[1] + gamesB[2];
-  const hcpTotalA = scratchA + handicapA * 3;
-  const hcpTotalB = scratchB + handicapB * 3;
-
   const bowledA = participationA.status !== "absent" && linescoreA != null;
   const bowledB = participationB.status !== "absent" && linescoreB != null;
+
+  // An absent side has NO pinfall — scratch/handicap game/set = 0. The
+  // side that bowled retains its own valid totals; do not credit the
+  // opponent with phantom handicap pinfall just because they showed up.
+  const gamesA: [number, number, number] = bowledA
+    ? [linescoreA!.games[0].scratchTotal, linescoreA!.games[1].scratchTotal, linescoreA!.games[2].scratchTotal]
+    : [0, 0, 0];
+  const gamesB: [number, number, number] = bowledB
+    ? [linescoreB!.games[0].scratchTotal, linescoreB!.games[1].scratchTotal, linescoreB!.games[2].scratchTotal]
+    : [0, 0, 0];
+  const hcpGamesA: [number, number, number] = bowledA
+    ? [gamesA[0] + handicapA, gamesA[1] + handicapA, gamesA[2] + handicapA]
+    : [0, 0, 0];
+  const hcpGamesB: [number, number, number] = bowledB
+    ? [gamesB[0] + handicapB, gamesB[1] + handicapB, gamesB[2] + handicapB]
+    : [0, 0, 0];
+  const scratchA = gamesA[0] + gamesA[1] + gamesA[2];
+  const scratchB = gamesB[0] + gamesB[1] + gamesB[2];
+  const hcpTotalA = bowledA ? scratchA + handicapA * 3 : 0;
+  const hcpTotalB = bowledB ? scratchB + handicapB * 3 : 0;
 
   const gameAwardsA: [GameAward, GameAward, GameAward] = [0, 0, 0];
   const gameAwardsB: [GameAward, GameAward, GameAward] = [0, 0, 0];
@@ -419,17 +430,16 @@ export function computeMatchResult(input: {
     else if (hcpTotalB > hcpTotalA) { setPointA = 0; setPointB = 1; }
     else { setPointA = 0.5; setPointB = 0.5; }
   }
-  // Frame-derived totals (before any override).
   const totalPointsA = gpA + setPointA;
   const totalPointsB = gpB + setPointB;
   const finalA = pointsOverride?.enabled ? pointsOverride.pointsA : totalPointsA;
   const finalB = pointsOverride?.enabled ? pointsOverride.pointsB : totalPointsB;
-
   const winner: "A" | "B" | "T" =
     finalA > finalB ? "A" : finalB > finalA ? "B" : "T";
 
   return {
     scheduledA: scheduledA.id, scheduledB: scheduledB.id,
+    scheduledNameA, scheduledNameB,
     actualA: participationA.actualId, actualB: participationB.actualId,
     actualNameA: participationA.actualName, actualNameB: participationB.actualName,
     isSubA: participationA.status === "substitute",
