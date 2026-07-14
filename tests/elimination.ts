@@ -165,13 +165,17 @@ function expect(cond: unknown, msg: string) {
 
 // --- 6. Published next opponent surfaced --------------------------------
 {
-  const bs = [bowler("t", 0, "T"), bowler("x", 0, "X"), bowler("y", 0, "Y"), bowler("z", 0, "Z")];
-  const weeks: WeekSummary[] = [week(1), week(2), week(3), week(4), week(5)];
+  const bs = [
+    bowler("t", 0, "T"), bowler("x", 0, "X"),
+    bowler("y", 0, "Y"), bowler("z", 0, "Z"),
+    bowler("w", 0, "W"),
+  ];
+  const weeks: WeekSummary[] = [week(1), week(2), week(3), week(4)];
   const matches: Record<number, Match[]> = {
     2: [{ id: "m1", week: 2, lanePair: "1-2", slot: 0, status: "scheduled", bowlerA: "t", bowlerB: "y" }],
     1: [{ id: "m0", week: 1, lanePair: "1-2", slot: 0, status: "scheduled", bowlerA: "t", bowlerB: "x" }],
   };
-  const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: matches, totalWeeks: 5 });
+  const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: matches, totalWeeks: 4 });
   const tRow = snap.rows.find((r) => r.bowler.id === "t")!;
   expect(tRow.nextOpponent === "X", `nextOpponent should be X (earliest week), got ${tRow.nextOpponent}`);
 }
