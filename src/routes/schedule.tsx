@@ -1,8 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   LANE_PAIRS,
   WEEKS,
+  formatPoints,
   getBowler,
   getMatchesForWeek,
 } from "@/lib/mock-data";
@@ -75,6 +76,7 @@ function SchedulePage() {
                 {rows.map((m, i) => {
                   const a = getBowler(m.bowlerA);
                   const b = getBowler(m.bowlerB);
+                  const r = m.result;
                   return (
                     <div
                       key={m.id}
@@ -86,9 +88,20 @@ function SchedulePage() {
                       <span className="flex-1 truncate font-medium">
                         {a?.name}
                       </span>
-                      <span className="px-2 text-xs uppercase tracking-widest text-muted-foreground">
-                        vs
-                      </span>
+                      {r ? (
+                        <Link
+                          to="/weekly-results"
+                          className="rounded bg-accent px-2 py-0.5 font-display text-xs text-gold tabular-nums hover:bg-primary/20"
+                          title="View full linescore"
+                        >
+                          {formatPoints(r.totalPointsA)}–
+                          {formatPoints(r.totalPointsB)}
+                        </Link>
+                      ) : (
+                        <span className="px-2 text-xs uppercase tracking-widest text-muted-foreground">
+                          vs
+                        </span>
+                      )}
                       <span className="flex-1 truncate text-right font-medium">
                         {b?.name}
                       </span>

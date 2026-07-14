@@ -40,6 +40,34 @@ Every matchup distributes **exactly 7 points**:
 
 
 
+### Linescores are the source of truth
+
+Every completed match stores a full two-bowler **linescore**:
+scheduled + actual bowler per side, sub flag, entry average, handicap,
+three scratch games, three handicap games, scratch and handicap 3-game
+totals, per-game point awards, set point, and final match points. A
+runtime validator (`assertMatchResult`) enforces that:
+
+- each game's awarded points sum to exactly 2 (2+0 or 1+1),
+- handicap games equal `scratch + weekly handicap`,
+- scratch and handicap totals match their game sums,
+- set-point awards sum to exactly 1,
+- and both sides always total exactly 7 match points.
+
+All season aggregates on every page — standings, W-L, PB, statistics,
+leaderboards, POA, bowler profiles — are derived **once at module load**
+from those linescores. Bowlers carry no hand-entered aggregates that
+could drift from the underlying games. Additional invariants:
+
+- `W + L == 7 × matchesPlayed` per bowler (asserted at aggregation time),
+- `scratchAverage == scratchPinfall / gamesPlayed`, displayed to 3 decimals,
+- `highSet` = highest scratch 3-game total across all rows.
+
+**POA baseline (Phase 1)**: pins-over-average uses each bowler's
+**entry average** as the baseline. `poaSet = scratchTotal − 3 × entry`,
+`poaBestGame = max(game − entry)`. When the database lands this becomes
+a rolling scratch average per bowler.
+
 ### The performance rule (do not violate)
 
 > **Public page navigation must never trigger expensive season-wide
@@ -53,13 +81,13 @@ Concretely, in Phase 1:
   elimination proofs.
 - The Elimination page renders a *saved* snapshot with a
   `lastCalculatedAt` timestamp — it does not run a solver on load.
-- Standings, statistics, and lane data are read from
-  pre-computed helpers in `src/lib/mock-data.ts` that mimic the shape of
-  the future database reads.
+- Standings, statistics, lane data, and bowler profiles read
+  pre-computed helpers in `src/lib/mock-data.ts`. Aggregation runs
+  once at module load, not per navigation.
 
-When the database is enabled in Phase 2, the swap is one file: replace the
-helpers in `src/lib/mock-data.ts` with reads against database tables /
-materialized views. Route and component code should not need to change.
+When the database is enabled in Phase 2, admin result entry writes
+linescores; public pages continue to read stored summaries derived
+from them.
 
 ## Stack
 
@@ -80,12 +108,12 @@ All routes live in `src/routes/`.
 | ---- | --- | ------- |
 | `__root.tsx` | — | Head/meta, providers, error + 404 boundaries |
 | `index.tsx` | `/` | Home / league landing |
-| `standings.tsx` | `/standings` | Rank, points, pinfall, avg (3 decimals), movement |
-| `schedule.tsx` | `/schedule` | 18 matches across lane pairs 1–2 … 11–12 |
-| `weekly-results.tsx` | `/weekly-results` | Match cards: scratch games, hdcp, per-game points, set point, match total |
+| `standings.tsx` | `/standings` | Rank, Record (W - L), PB, pinfall, avg, high game/set, movement |
+| `schedule.tsx` | `/schedule` | 18 matches across lane pairs 1–2 … 11–12, with linked finals for completed weeks |
+| `weekly-results.tsx` | `/weekly-results` | Full linescore per match: G1/G2/G3 with awarded points, hdcp totals, match points |
 | `bowlers.tsx` | `/bowlers` | Roster + search |
-| `bowlers.$bowlerId.tsx` | `/bowlers/:id` | Bowler profile + weekly history |
-| `statistics.tsx` | `/statistics` | Leaders + sortable tables |
+| `bowlers.$bowlerId.tsx` | `/bowlers/:id` | Bowler profile + full game log + lane-pair usage + POA |
+| `statistics.tsx` | `/statistics` | Leaders + sortable POA/points/pinfall tables |
 | `lane-data.tsx` | `/lane-data` | Season + weekly lane-pair summaries (POA) |
 | `elimination.tsx` | `/elimination` | Saved elimination proofs + timestamp |
 | `admin-login.tsx` | `/admin-login` | Login shell (disabled until Phase 2) |
@@ -100,15 +128,19 @@ exports:
 
 - `BOWLERS` — 36 typed bowlers, deterministic (seeded RNG).
 - `WEEKS` — 11 weeks, 7 completed.
-- `getMatchesForWeek(week)` — 18 matches, 3 per lane pair.
-- `getStandingsSnapshot()` — sorted by points desc, then handicap pinfall desc.
+- `getMatchesForWeek(week)` — 18 matches, 3 per lane pair, with full linescores for completed weeks.
+- `assertMatchResult(match, result)` — runtime invariant checker for every completed linescore.
+- `getStandingsSnapshot()` — sorted by points DESC, then handicap pinfall DESC.
+- `computePointsBehind(leader, bowler)` — games-behind formula on W/L.
 - `getSeasonLaneSummaries()`, `getWeekLaneSummaries(week)` — POA summaries.
 - `getEliminationSnapshot()` — saved proof set + `lastCalculatedAt`.
-- `getBowlerHistory(id)` — per-bowler weekly rows.
+- `getBowlerHistory(id)` — per-bowler weekly rows (full linescore + POA per week).
+- `getBowlerSeasonExtras(id)` — POA and lane-pair usage from linescores.
 
 Every helper returns *already-computed* values. If Phase 2 needs new
 derived data, compute it in an admin job and store the result — do not
 compute it in a page component.
+
 
 ## Brand
 
