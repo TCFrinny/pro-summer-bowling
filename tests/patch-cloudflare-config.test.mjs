@@ -4,11 +4,12 @@
  * input is rejected, and the correct config path is selected
  * (.output preferred over dist).
  */
-import { patchWranglerConfig, resolveConfigPath } from "../scripts/patch-cloudflare-config.mjs";
+import { patchWranglerConfig, resolveConfigPath, PINNED_WORKER_NAME } from "../scripts/patch-cloudflare-config.mjs";
 import { resolve } from "node:path";
 
+const AUTO_NAME = "tcfrinny-pro-summer-bowling";
 const sample = {
-  name: "tanstack-start-ts",
+  name: AUTO_NAME,
   main: "index.mjs",
   compatibility_date: "2026-07-14",
   compatibility_flags: ["nodejs_compat"],
@@ -22,15 +23,22 @@ const patched = patchWranglerConfig(JSON.stringify(sample));
 if (patched.keep_vars !== true) {
   throw new Error("patch did not set keep_vars: true");
 }
+if (patched.name !== "pro-summer-bowling") {
+  throw new Error(`patch did not pin name to 'pro-summer-bowling', got '${patched.name}'`);
+}
+if (PINNED_WORKER_NAME !== "pro-summer-bowling") {
+  throw new Error("PINNED_WORKER_NAME export drifted");
+}
 for (const [k, v] of Object.entries(sample)) {
+  if (k === "name") continue; // intentionally overwritten
   if (JSON.stringify(patched[k]) !== JSON.stringify(v)) {
     throw new Error(`field '${k}' was mutated or dropped`);
   }
 }
 
-// Idempotent: running again yields the same result.
+// Idempotent: running again yields the same result (name stays pinned).
 const twice = patchWranglerConfig(JSON.stringify(patched));
-if (twice.keep_vars !== true || JSON.stringify(twice) !== JSON.stringify(patched)) {
+if (twice.keep_vars !== true || twice.name !== "pro-summer-bowling" || JSON.stringify(twice) !== JSON.stringify(patched)) {
   throw new Error("patch is not idempotent");
 }
 

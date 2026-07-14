@@ -25,6 +25,8 @@ const CANDIDATE_PATHS = [
   "dist/server/wrangler.json",
 ];
 
+export const PINNED_WORKER_NAME = "pro-summer-bowling";
+
 export function patchWranglerConfig(source) {
   let parsed;
   try {
@@ -37,16 +39,20 @@ export function patchWranglerConfig(source) {
   }
   const before = { ...parsed };
   parsed.keep_vars = true;
+  parsed.name = PINNED_WORKER_NAME;
   // Preservation check: every original key must still be present with the same value
-  // (except keep_vars, which we intentionally set).
+  // except the two we intentionally mutate (keep_vars, name).
   for (const [k, v] of Object.entries(before)) {
-    if (k === "keep_vars") continue;
+    if (k === "keep_vars" || k === "name") continue;
     if (JSON.stringify(parsed[k]) !== JSON.stringify(v)) {
       throw new Error(`patch dropped or mutated field '${k}'`);
     }
   }
   if (parsed.keep_vars !== true) {
     throw new Error("patch verification failed: keep_vars is not true");
+  }
+  if (parsed.name !== PINNED_WORKER_NAME) {
+    throw new Error(`patch verification failed: name is not '${PINNED_WORKER_NAME}'`);
   }
   return parsed;
 }
@@ -101,10 +107,16 @@ function main() {
   writeFileSync(configPath, JSON.stringify(patched, null, 2) + "\n");
   const verify = JSON.parse(readFileSync(configPath, "utf8"));
   if (verify.keep_vars !== true) {
-    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed at ${configPath}`);
+    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed (keep_vars) at ${configPath}`);
     process.exit(1);
   }
-  console.log(`[patch-cloudflare-config] keep_vars: true confirmed in ${configPath}`);
+  if (verify.name !== PINNED_WORKER_NAME) {
+    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed (name != '${PINNED_WORKER_NAME}') at ${configPath}`);
+    process.exit(1);
+  }
+  console.log(`[patch-cloudflare-config] patched ${configPath}`);
+  console.log(`[patch-cloudflare-config]   keep_vars: true confirmed`);
+  console.log(`[patch-cloudflare-config]   name: "${PINNED_WORKER_NAME}" confirmed`);
 }
 
 // Only run when executed directly (not when imported by tests).

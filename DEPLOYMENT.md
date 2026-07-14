@@ -158,3 +158,22 @@ to Cloudflare → Worker → Settings → Variables and re-add any missing
 text variables (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and any others
 listed in the "Environment variables" section above). Future deploys will
 then keep them intact.
+
+## Pinning the Worker `name` to `pro-summer-bowling`
+
+The same post-build patch also rewrites the top-level `name` field of the
+generated Wrangler config to exactly `pro-summer-bowling`. Nitro derives
+the Worker name from the build environment (recent Cloudflare Workers
+Builds runs produced auto-generated names like
+`tcfrinny-pro-summer-bowling` from the repository slug), and Wrangler
+treats `name` as the Worker's identity. If the generated name drifts,
+`wrangler deploy` creates a **second Worker** at a different URL
+(for example `tcfrinny-pro-summer-bowling.mt-airy-lanes.workers.dev`)
+instead of updating the live `pro-summer-bowling` Worker. Pinning the
+name in the patch step guarantees every deploy targets the same Worker
+regardless of Nitro upgrades, repo renames, or account-derived defaults.
+The patcher verifies both `keep_vars === true` and
+`name === "pro-summer-bowling"` after writing, and the deterministic
+self-test starts from a differently auto-generated name and asserts it
+gets rewritten while all unrelated fields are preserved.
+
