@@ -38,11 +38,18 @@ export interface Bowler {
   handicap: number;
   /** Season scratch average, pre-computed and stored (3 decimals). */
   scratchAverage: number;
-  /** Season total match points (0..7 per match, half-points allowed). */
+  /** Season total match points WON (0..7 per match, half-points allowed). */
   points: number;
+  /** Season total match points LOST — equals (7 * matchesPlayed) − points. */
+  pointsLost: number;
   /** Season total game points only (0..6 per match, half-points allowed). */
   gamePoints: number;
-  /** Season total set points only (0, 0.5, or 1 per match). */
+  /**
+   * Season total set-point contribution (0, 0.5, or 1 per match).
+   * Retained internally because the set point still contributes to the
+   * 7-point match total, but it is no longer displayed as a separate
+   * standings statistic.
+   */
   setPoints: number;
   scratchPinfall: number;
   handicapPinfall: number;
@@ -152,6 +159,7 @@ export const BOWLERS: Bowler[] = FIRST.map((f, i) => {
     handicap,
     scratchAverage: 0,
     points: 0,
+    pointsLost: 0,
     gamePoints: 0,
     setPoints: 0,
     scratchPinfall: 0,
@@ -322,6 +330,9 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
         bowler.gamePoints += gp;
         bowler.setPoints += sp;
         bowler.points += total;
+        // Each match distributes exactly 7 points; the opponent's share is
+        // this bowler's "points lost" for W-L record purposes.
+        bowler.pointsLost += 7 - total;
         bowler.scratchPinfall += games.reduce((s, x) => s + x, 0);
         bowler.handicapPinfall += hdcpTotal;
         for (const g of games) {
@@ -501,3 +512,26 @@ export function getEliminationSnapshot(): EliminationSnapshot {
 export function formatPoints(n: number): string {
   return Number.isInteger(n) ? n.toString() : n.toFixed(1);
 }
+
+/** Format a bowler's W-L record, e.g. "31 - 18" or "24.5 - 24.5". */
+export function formatRecord(won: number, lost: number): string {
+  return `${formatPoints(won)} - ${formatPoints(lost)}`;
+}
+
+/**
+ * Standard games-behind formula applied to points won/lost. Works even if
+ * bowlers have completed different numbers of matches.
+ *   PB = ((leaderWon - bowlerWon) + (bowlerLost - leaderLost)) / 2
+ * The leader returns 0; the caller decides how to display that (usually "—").
+ */
+export function computePointsBehind(
+  leader: Pick<Bowler, "points" | "pointsLost">,
+  bowler: Pick<Bowler, "points" | "pointsLost">,
+): number {
+  const pb =
+    ((leader.points - bowler.points) + (bowler.pointsLost - leader.pointsLost)) /
+    2;
+  // Clamp tiny negatives from floating-point noise.
+  return pb < 0 ? 0 : pb;
+}
+

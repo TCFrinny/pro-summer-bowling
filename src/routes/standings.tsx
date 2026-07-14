@@ -2,7 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   BOWLERS,
+  computePointsBehind,
   formatPoints,
+  formatRecord,
   getStandingsSnapshot,
   type Bowler,
 } from "@/lib/mock-data";
@@ -49,8 +51,9 @@ function Movement({ n }: { n: number }) {
 type SortKey =
   | "rank"
   | "points"
+  | "record"
+  | "pointsBehind"
   | "gamePoints"
-  | "setPoints"
   | "scratchPinfall"
   | "handicapPinfall"
   | "scratchAverage"
@@ -63,6 +66,8 @@ interface StandingsDisplayRow {
   officialRank: number;
   bowler: Bowler;
   movement: number;
+  pointsBehind: number;
+  isLeader: boolean;
 }
 
 const COLUMNS: {
@@ -86,20 +91,33 @@ const COLUMNS: {
     ),
   },
   {
+    key: "record",
+    label: "Record (W - L)",
+    short: "W - L",
+    align: "right",
+    numeric: true,
+    render: (r) => formatRecord(r.bowler.points, r.bowler.pointsLost),
+  },
+  {
+    key: "pointsBehind",
+    label: "Points Behind",
+    short: "PB",
+    align: "right",
+    numeric: true,
+    render: (r) =>
+      r.isLeader ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        formatPoints(r.pointsBehind)
+      ),
+  },
+  {
     key: "gamePoints",
     label: "Game Points",
     short: "GP",
     align: "right",
     numeric: true,
     render: (r) => formatPoints(r.bowler.gamePoints),
-  },
-  {
-    key: "setPoints",
-    label: "Set Points",
-    short: "SP",
-    align: "right",
-    numeric: true,
-    render: (r) => formatPoints(r.bowler.setPoints),
   },
   {
     key: "scratchPinfall",
@@ -150,10 +168,19 @@ const COLUMNS: {
 ];
 
 function StandingsPage() {
-  // Snapshot is pre-saved — no recomputation here.
-  const officialRows: StandingsDisplayRow[] = getStandingsSnapshot().map(
-    (r) => ({ officialRank: r.rank, bowler: r.bowler, movement: r.movement }),
-  );
+  // Snapshot is pre-saved — no recomputation here. The official leader (used
+  // for Points Behind) is simply the top entry in the pre-sorted snapshot.
+  const snapshot = getStandingsSnapshot();
+  const leaderBowler = snapshot[0]?.bowler;
+  const officialRows: StandingsDisplayRow[] = snapshot.map((r) => ({
+    officialRank: r.rank,
+    bowler: r.bowler,
+    movement: r.movement,
+    pointsBehind: leaderBowler
+      ? computePointsBehind(leaderBowler, r.bowler)
+      : 0,
+    isLeader: leaderBowler ? r.bowler.id === leaderBowler.id : false,
+  }));
 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("rank");
@@ -175,6 +202,8 @@ function StandingsPage() {
     rows.sort((a, b) => {
       if (sort === "name") return mul * a.bowler.name.localeCompare(b.bowler.name);
       if (sort === "movement") return mul * (a.movement - b.movement);
+      if (sort === "pointsBehind") return mul * (a.pointsBehind - b.pointsBehind);
+      if (sort === "record") return mul * (a.bowler.points - b.bowler.points);
       const av = a.bowler[sort as keyof Bowler] as number;
       const bv = b.bowler[sort as keyof Bowler] as number;
       return mul * (av - bv);
@@ -200,7 +229,7 @@ function StandingsPage() {
       setDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSort(key);
-      setDir(key === "name" ? "asc" : "desc");
+      setDir(key === "name" || key === "pointsBehind" ? "asc" : "desc");
     }
   }
 
@@ -216,7 +245,11 @@ function StandingsPage() {
           label="Current leader"
           bowlerId={leader?.bowler.id}
           headline={leader?.bowler.name ?? "—"}
-          sub={`${formatPoints(leader?.bowler.points ?? 0)} pts`}
+          sub={
+            leader
+              ? `${formatRecord(leader.bowler.points, leader.bowler.pointsLost)} · ${formatPoints(leader.bowler.points)} pts`
+              : ""
+          }
         />
         <SummaryCard
           label="Top scratch average"
@@ -403,8 +436,15 @@ function StandingsPage() {
               </span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-[11px] tabular-nums">
+              <MobileCell
+                label="W - L"
+                value={formatRecord(r.bowler.points, r.bowler.pointsLost)}
+              />
+              <MobileCell
+                label="PB"
+                value={r.isLeader ? "—" : formatPoints(r.pointsBehind)}
+              />
               <MobileCell label="GP" value={formatPoints(r.bowler.gamePoints)} />
-              <MobileCell label="SP" value={formatPoints(r.bowler.setPoints)} />
               <MobileCell label="Avg" value={r.bowler.scratchAverage.toFixed(3)} />
               <MobileCell
                 label="Scr Pins"
@@ -413,10 +453,6 @@ function StandingsPage() {
               <MobileCell
                 label="Hdcp Pins"
                 value={r.bowler.handicapPinfall.toLocaleString()}
-              />
-              <MobileCell
-                label="HG / HS"
-                value={`${r.bowler.highGame} / ${r.bowler.highSet}`}
               />
             </div>
             <div className="mt-2 flex justify-end text-xs">
@@ -444,6 +480,15 @@ function StandingsPage() {
             <strong> 1 point</strong> for the higher 3-game total handicap
             pinfall (0.5 each on a tie). A bowler's match total can be 0, 0.5,
             1, 1.5 … up to 7.
+          </p>
+          <p className="mt-2 text-xs">
+            <strong>Record (W - L)</strong> counts league points won and lost
+            across completed matches; each match distributes exactly 7 points,
+            so a bowler's losses equal 7 minus points earned.{" "}
+            <strong>Points Behind (PB)</strong> uses the standard games-behind
+            formula on points won/lost:{" "}
+            <code>((leaderW − W) + (L − leaderL)) / 2</code>. The leader shows
+            “—”.
           </p>
           <p className="mt-2 text-xs">
             Handicap = <code>floor(0.80 × (160 − entry average))</code>, minimum
