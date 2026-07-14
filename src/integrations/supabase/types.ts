@@ -391,6 +391,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      substitute_referenced: { Args: { _sub_id: string }; Returns: boolean }
       week_published: { Args: { _week_id: string }; Returns: boolean }
     }
     Enums: {
