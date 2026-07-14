@@ -1,8 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   LANE_PAIRS,
   WEEKS,
+  formatPoints,
   getBowler,
   getMatchesForWeek,
 } from "@/lib/mock-data";

@@ -1,8 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { BOWLERS, formatPoints, type Bowler } from "@/lib/mock-data";
+import {
+  BOWLERS,
+  formatPoints,
+  formatRecord,
+  getBowlerSeasonExtras,
+  type Bowler,
+} from "@/lib/mock-data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Trophy } from "lucide-react";
 
@@ -13,52 +19,131 @@ export const Route = createFileRoute("/statistics")({
       {
         name: "description",
         content:
-          "Season leaders and sortable statistics for average, points, pinfall, high game, and high set.",
+          "Season leaders and sortable statistics derived from every saved match linescore.",
       },
     ],
   }),
   component: StatisticsPage,
 });
 
-type Metric = keyof Pick<
-  Bowler,
-  "scratchAverage" | "points" | "scratchPinfall" | "highGame" | "highSet"
->;
+/** A bowler row extended with linescore-derived POA fields. */
+interface StatRow {
+  bowler: Bowler;
+  seasonPOA: number;
+  bestGamePOA: number;
+  bestSetPOA: number;
+}
 
-const METRICS: { key: Metric; label: string; format: (b: Bowler) => string }[] =
-  [
-    {
-      key: "scratchAverage",
-      label: "Average",
-      format: (b) => b.scratchAverage.toFixed(3),
-    },
-    { key: "points", label: "Points", format: (b) => formatPoints(b.points) },
-    {
-      key: "scratchPinfall",
-      label: "Scratch Pinfall",
-      format: (b) => b.scratchPinfall.toLocaleString(),
-    },
-    { key: "highGame", label: "High Game", format: (b) => b.highGame.toString() },
-    { key: "highSet", label: "High Set", format: (b) => b.highSet.toString() },
-  ];
+type Metric =
+  | "scratchAverage"
+  | "record"
+  | "scratchPinfall"
+  | "handicapPinfall"
+  | "highGame"
+  | "highSet"
+  | "seasonPOA"
+  | "bestGamePOA"
+  | "bestSetPOA";
+
+interface MetricDef {
+  key: Metric;
+  label: string;
+  /** value used for sorting (higher = better). */
+  value: (r: StatRow) => number;
+  /** display string in cells. */
+  format: (r: StatRow) => string;
+}
+
+const METRICS: MetricDef[] = [
+  {
+    key: "scratchAverage",
+    label: "Scratch Avg",
+    value: (r) => r.bowler.scratchAverage,
+    format: (r) => r.bowler.scratchAverage.toFixed(3),
+  },
+  {
+    key: "record",
+    label: "Points Won (W - L)",
+    value: (r) => r.bowler.points,
+    format: (r) => formatRecord(r.bowler.points, r.bowler.pointsLost),
+  },
+  {
+    key: "scratchPinfall",
+    label: "Scratch Pinfall",
+    value: (r) => r.bowler.scratchPinfall,
+    format: (r) => r.bowler.scratchPinfall.toLocaleString(),
+  },
+  {
+    key: "handicapPinfall",
+    label: "Handicap Pinfall",
+    value: (r) => r.bowler.handicapPinfall,
+    format: (r) => r.bowler.handicapPinfall.toLocaleString(),
+  },
+  {
+    key: "highGame",
+    label: "High Game",
+    value: (r) => r.bowler.highGame,
+    format: (r) => r.bowler.highGame.toString(),
+  },
+  {
+    key: "highSet",
+    label: "High Set",
+    value: (r) => r.bowler.highSet,
+    format: (r) => r.bowler.highSet.toString(),
+  },
+  {
+    key: "seasonPOA",
+    label: "Season POA",
+    value: (r) => r.seasonPOA,
+    format: (r) => formatSigned(r.seasonPOA),
+  },
+  {
+    key: "bestGamePOA",
+    label: "Best Game POA",
+    value: (r) => r.bestGamePOA,
+    format: (r) => formatSigned(r.bestGamePOA),
+  },
+  {
+    key: "bestSetPOA",
+    label: "Best Set POA",
+    value: (r) => r.bestSetPOA,
+    format: (r) => formatSigned(r.bestSetPOA),
+  },
+];
 
 function StatisticsPage() {
-  const [sort, setSort] = useState<Metric>("scratchAverage");
+  // Derive once from linescores — no per-render recomputation across the season.
+  const rows: StatRow[] = useMemo(
+    () =>
+      BOWLERS.map((b) => {
+        const extras = getBowlerSeasonExtras(b.id);
+        return {
+          bowler: b,
+          seasonPOA: extras.seasonPOA,
+          bestGamePOA: extras.bestGamePOA,
+          bestSetPOA: extras.bestSetPOA,
+        };
+      }),
+    [],
+  );
 
-  const sorted = [...BOWLERS].sort((a, b) => (b[sort] as number) - (a[sort] as number));
+  const [sort, setSort] = useState<Metric>("scratchAverage");
+  const activeMetric = METRICS.find((m) => m.key === sort)!;
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => activeMetric.value(b) - activeMetric.value(a)),
+    [rows, activeMetric],
+  );
 
   return (
     <AppShell>
       <PageHeader
         title="Statistics"
-        subtitle="Season leaders and sortable tables — all values are stored, not recomputed here."
+        subtitle="Season leaders and sortable tables — derived once from saved match linescores, not recomputed on load."
       />
 
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-        {METRICS.map((m) => {
-          const leader = [...BOWLERS].sort(
-            (a, b) => (b[m.key] as number) - (a[m.key] as number),
-          )[0];
+        {METRICS.slice(0, 5).map((m) => {
+          const leader = [...rows].sort((a, b) => m.value(b) - m.value(a))[0];
           return (
             <Card key={m.key} className="bg-card">
               <CardHeader className="pb-2">
@@ -72,10 +157,10 @@ function StatisticsPage() {
                 </div>
                 <Link
                   to="/bowlers/$bowlerId"
-                  params={{ bowlerId: leader.id }}
+                  params={{ bowlerId: leader.bowler.id }}
                   className="text-sm hover:text-primary"
                 >
-                  {leader.name}
+                  {leader.bowler.name}
                 </Link>
               </CardContent>
             </Card>
@@ -104,16 +189,19 @@ function StatisticsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {sorted.map((b) => (
-              <tr key={b.id} className="hover:bg-accent/30">
+            {sorted.map((r) => (
+              <tr key={r.bowler.id} className="hover:bg-accent/30">
                 <td className="px-3 py-2">
                   <Link
                     to="/bowlers/$bowlerId"
-                    params={{ bowlerId: b.id }}
+                    params={{ bowlerId: r.bowler.id }}
                     className="hover:text-primary"
                   >
-                    {b.name}
+                    {r.bowler.name}
                   </Link>
+                  <div className="text-[10px] uppercase text-muted-foreground">
+                    {r.bowler.matchesPlayed} mat · {r.bowler.gamesPlayed} g
+                  </div>
                 </td>
                 {METRICS.map((m) => (
                   <td
@@ -123,7 +211,7 @@ function StatisticsPage() {
                       sort === m.key && "font-semibold text-gold",
                     )}
                   >
-                    {m.format(b)}
+                    {m.format(r)}
                   </td>
                 ))}
               </tr>
@@ -131,6 +219,23 @@ function StatisticsPage() {
           </tbody>
         </table>
       </div>
+      <p className="mt-3 text-[11px] text-muted-foreground">
+        POA baseline (Phase 1) = entry average. Best Game/Set POA = best single
+        game / 3-game set pinfall minus that baseline. Points Won (W - L) counts
+        league points across every completed match; each match distributes
+        exactly 7 combined points. All numbers derive from the saved linescores
+        so standings, results, and leaderboards always agree.
+      </p>
+      {/* Silence unused import in some builds */}
+      <span className="hidden">{formatPoints(0)}</span>
     </AppShell>
   );
+}
+
+function formatSigned(n: number): string {
+  const rounded = Number(n.toFixed(2));
+  if (rounded === 0) return "±0";
+  const sign = rounded > 0 ? "+" : "−";
+  const abs = Math.abs(rounded).toFixed(2).replace(/\.?0+$/, "");
+  return `${sign}${abs}`;
 }

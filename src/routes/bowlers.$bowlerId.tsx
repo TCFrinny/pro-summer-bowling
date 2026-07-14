@@ -1,11 +1,11 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
-  LANE_PAIRS,
   formatPoints,
+  formatRecord,
   getBowler,
   getBowlerHistory,
-  type LanePair,
+  getBowlerSeasonExtras,
 } from "@/lib/mock-data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronLeft } from "lucide-react";
@@ -51,11 +51,8 @@ export const Route = createFileRoute("/bowlers/$bowlerId")({
 function BowlerProfile() {
   const { bowler } = Route.useLoaderData();
   const history = getBowlerHistory(bowler.id);
-
-  const lanePairCounts: Record<LanePair, number> = Object.fromEntries(
-    LANE_PAIRS.map((lp) => [lp, 0]),
-  ) as Record<LanePair, number>;
-  history.forEach((h) => (lanePairCounts[h.lanePair] += 1));
+  const extras = getBowlerSeasonExtras(bowler.id);
+  const maxUsage = Math.max(1, ...extras.lanePairUsage.map((u) => u.count));
 
   return (
     <AppShell>
@@ -75,9 +72,15 @@ function BowlerProfile() {
           value={bowler.scratchAverage.toFixed(3)}
           accent
         />
-        <Stat label="Total Points" value={formatPoints(bowler.points)} accent />
-        <Stat label="Game Points" value={formatPoints(bowler.gamePoints)} />
-        <Stat label="Set Points" value={formatPoints(bowler.setPoints)} />
+        <Stat
+          label="Record (W - L)"
+          value={formatRecord(bowler.points, bowler.pointsLost)}
+          accent
+        />
+        <Stat
+          label="Matches / Games"
+          value={`${bowler.matchesPlayed} / ${bowler.gamesPlayed}`}
+        />
         <Stat
           label="Scratch Pinfall"
           value={bowler.scratchPinfall.toLocaleString()}
@@ -88,7 +91,17 @@ function BowlerProfile() {
         />
         <Stat label="High Game" value={bowler.highGame.toString()} />
         <Stat label="High Set" value={bowler.highSet.toString()} />
+        <Stat
+          label="Season POA"
+          value={formatSigned(extras.seasonPOA)}
+        />
+        <Stat
+          label="Best Game POA"
+          value={formatSigned(extras.bestGamePOA)}
+        />
+        <Stat label="Best Set POA" value={formatSigned(extras.bestSetPOA)} />
       </div>
+
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-card">
@@ -104,13 +117,14 @@ function BowlerProfile() {
                   <th className="px-2 py-2 text-left">Wk</th>
                   <th className="px-2 py-2 text-left">Lanes</th>
                   <th className="px-2 py-2 text-left">Opponent</th>
+                  <th className="px-2 py-2 text-right">Hdcp</th>
                   <th className="px-2 py-2 text-right">G1</th>
                   <th className="px-2 py-2 text-right">G2</th>
                   <th className="px-2 py-2 text-right">G3</th>
-                  <th className="px-2 py-2 text-right">Hdcp</th>
-                  <th className="px-2 py-2 text-right">GP</th>
-                  <th className="px-2 py-2 text-right">SP</th>
-                  <th className="px-2 py-2 text-right">Total</th>
+                  <th className="px-2 py-2 text-right">Scr Set</th>
+                  <th className="px-2 py-2 text-right">Hdcp Set</th>
+                  <th className="px-2 py-2 text-right">W - L</th>
+                  <th className="px-2 py-2 text-right">Res</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -118,7 +132,17 @@ function BowlerProfile() {
                   <tr key={h.week}>
                     <td className="px-2 py-1.5">{h.week}</td>
                     <td className="px-2 py-1.5">{h.lanePair}</td>
-                    <td className="px-2 py-1.5">{h.opponent}</td>
+                    <td className="px-2 py-1.5">
+                      {h.opponent}
+                      {h.isSub && (
+                        <span className="ml-1 rounded bg-accent px-1 text-[9px] uppercase tracking-widest text-muted-foreground">
+                          sub
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {h.handicap}
+                    </td>
                     {h.scores.map((s, i) => (
                       <td
                         key={i}
@@ -131,24 +155,24 @@ function BowlerProfile() {
                         </span>
                       </td>
                     ))}
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.handicap}
+                    <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
+                      {h.scratchTotal}
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums">
-                      {formatPoints(h.gamePoints)}
+                      {h.handicapTotal}
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {formatPoints(h.setPoint)}
+                    <td className="px-2 py-1.5 text-right font-semibold text-gold tabular-nums">
+                      {formatPoints(h.totalPoints)} - {formatPoints(h.pointsLost)}
                     </td>
-                    <td className="px-2 py-1.5 text-right font-semibold text-gold">
-                      {formatPoints(h.totalPoints)}
+                    <td className="px-2 py-1.5 text-right text-xs">
+                      {h.result}
                     </td>
                   </tr>
                 ))}
                 {history.length === 0 && (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={12}
                       className="py-6 text-center text-muted-foreground"
                     >
                       No completed weeks yet.
@@ -158,9 +182,9 @@ function BowlerProfile() {
               </tbody>
             </table>
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Scoring: each game 2 pts (win) / 1 pt (tie) / 0 pts (loss), plus a
-              1-pt set point for the higher 3-game handicap pinfall (0.5 each on
-              a tie). 7 total points per matchup.
+              Each game: 2 pts win / 1 pt tie / 0 loss. Higher 3-game handicap
+              total wins 1 set pt (½ each on a tie). Every match distributes
+              exactly 7 pts, so W - L above is a per-match points record.
             </p>
           </CardContent>
         </Card>
@@ -170,24 +194,20 @@ function BowlerProfile() {
             <CardTitle className="font-display text-xl">Lane-pair use</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {LANE_PAIRS.map((lp) => {
-              const n = lanePairCounts[lp];
-              const max = Math.max(1, ...Object.values(lanePairCounts));
-              return (
-                <div key={lp}>
-                  <div className="flex justify-between text-xs">
-                    <span>Lanes {lp}</span>
-                    <span className="text-muted-foreground">{n}</span>
-                  </div>
-                  <div className="mt-1 h-2 overflow-hidden rounded bg-accent">
-                    <div
-                      className="h-full bg-primary"
-                      style={{ width: `${(n / max) * 100}%` }}
-                    />
-                  </div>
+            {extras.lanePairUsage.map(({ lanePair, count }) => (
+              <div key={lanePair}>
+                <div className="flex justify-between text-xs">
+                  <span>Lanes {lanePair}</span>
+                  <span className="text-muted-foreground">{count}</span>
                 </div>
-              );
-            })}
+                <div className="mt-1 h-2 overflow-hidden rounded bg-accent">
+                  <div
+                    className="h-full bg-primary"
+                    style={{ width: `${(count / maxUsage) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
@@ -216,4 +236,11 @@ function Stat({
       </div>
     </div>
   );
+}
+
+function formatSigned(n: number): string {
+  const rounded = Number(n.toFixed(2));
+  if (rounded === 0) return "±0";
+  const sign = rounded > 0 ? "+" : "−";
+  return `${sign}${Math.abs(rounded).toFixed(2).replace(/\.?0+$/, "")}`;
 }

@@ -50,10 +50,8 @@ function Movement({ n }: { n: number }) {
 
 type SortKey =
   | "rank"
-  | "points"
   | "record"
   | "pointsBehind"
-  | "gamePoints"
   | "scratchPinfall"
   | "handicapPinfall"
   | "scratchAverage"
@@ -79,24 +77,16 @@ const COLUMNS: {
   render: (row: StandingsDisplayRow) => React.ReactNode;
 }[] = [
   {
-    key: "points",
-    label: "Total Points",
-    short: "Pts",
-    align: "right",
-    numeric: true,
-    render: (r) => (
-      <span className="font-display text-base text-gold">
-        {formatPoints(r.bowler.points)}
-      </span>
-    ),
-  },
-  {
     key: "record",
     label: "Record (W - L)",
     short: "W - L",
     align: "right",
     numeric: true,
-    render: (r) => formatRecord(r.bowler.points, r.bowler.pointsLost),
+    render: (r) => (
+      <span className="font-display text-base text-gold">
+        {formatRecord(r.bowler.points, r.bowler.pointsLost)}
+      </span>
+    ),
   },
   {
     key: "pointsBehind",
@@ -110,14 +100,6 @@ const COLUMNS: {
       ) : (
         formatPoints(r.pointsBehind)
       ),
-  },
-  {
-    key: "gamePoints",
-    label: "Game Points",
-    short: "GP",
-    align: "right",
-    numeric: true,
-    render: (r) => formatPoints(r.bowler.gamePoints),
   },
   {
     key: "scratchPinfall",
@@ -247,7 +229,7 @@ function StandingsPage() {
           headline={leader?.bowler.name ?? "—"}
           sub={
             leader
-              ? `${formatRecord(leader.bowler.points, leader.bowler.pointsLost)} · ${formatPoints(leader.bowler.points)} pts`
+              ? formatRecord(leader.bowler.points, leader.bowler.pointsLost)
               : ""
           }
         />
@@ -431,20 +413,15 @@ function StandingsPage() {
                   {r.bowler.name}
                 </Link>
               </div>
-              <span className="font-display text-xl text-gold">
-                {formatPoints(r.bowler.points)}
+              <span className="font-display text-lg text-gold tabular-nums">
+                {formatRecord(r.bowler.points, r.bowler.pointsLost)}
               </span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-[11px] tabular-nums">
               <MobileCell
-                label="W - L"
-                value={formatRecord(r.bowler.points, r.bowler.pointsLost)}
-              />
-              <MobileCell
                 label="PB"
                 value={r.isLeader ? "—" : formatPoints(r.pointsBehind)}
               />
-              <MobileCell label="GP" value={formatPoints(r.bowler.gamePoints)} />
               <MobileCell label="Avg" value={r.bowler.scratchAverage.toFixed(3)} />
               <MobileCell
                 label="Scr Pins"

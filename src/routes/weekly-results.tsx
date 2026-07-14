@@ -7,7 +7,7 @@ import {
   getMatchesForWeek,
   type GameAward,
   type Match,
-  type SetAward,
+  type MatchResult,
 } from "@/lib/mock-data";
 import { useState } from "react";
 import {
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/weekly-results")({
       {
         name: "description",
         content:
-          "Match cards for the Pro Summer Singles duckpin league: per-game points, set points, and total points on the 7-point system.",
+          "Full match linescores for the Pro Summer Singles duckpin league: per-game scores, handicap totals, and 7-point match points.",
       },
     ],
   }),
@@ -46,7 +46,7 @@ function WeeklyResultsPage() {
     <AppShell>
       <PageHeader
         title="Weekly Results"
-        subtitle="Each card is a saved match on the 7-point system (2+2+2 games + 1 set). Nothing is recomputed here."
+        subtitle="Saved linescores are the source of truth for every score, W-L point, and average shown on the site."
       >
         <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
           <SelectTrigger className="w-40">
@@ -68,7 +68,7 @@ function WeeklyResultsPage() {
           description="Once the admin saves scores, the match cards appear here."
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 xl:grid-cols-2">
           {matches.map((m) => (
             <MatchCard key={m.id} m={m} />
           ))}
@@ -82,153 +82,148 @@ function MatchCard({ m }: { m: Match }) {
   const a = getBowler(m.bowlerA)!;
   const b = getBowler(m.bowlerB)!;
   const r = m.result!;
-  const aWin = r.winner === "A";
-  const bWin = r.winner === "B";
 
   return (
     <Card className="bg-card">
       <CardContent className="p-4">
-        <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-widest text-muted-foreground">
+        <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-widest text-muted-foreground">
           <span>Lanes {m.lanePair}</span>
           <span>Week {m.week}</span>
+          <span>
+            Final{" "}
+            <span className="font-display text-sm text-gold">
+              {formatPoints(r.totalPointsA)}–{formatPoints(r.totalPointsB)}
+            </span>
+          </span>
         </div>
 
-        <Side
-          name={a.name}
-          sub={r.subA}
-          games={r.gamesA}
-          hdcp={r.handicapA}
-          awards={r.gameAwardsA}
-          gp={r.gamePointsA}
-          sp={r.setPointA}
-          hdcpTotal={r.handicapTotalA}
-          total={r.totalPointsA}
-          winner={aWin}
-        />
-        <div className="my-2 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-          <span className="h-px flex-1 bg-border" />
-          <span>
-            Final {formatPoints(r.totalPointsA)}–{formatPoints(r.totalPointsB)}
-          </span>
-          <span className="h-px flex-1 bg-border" />
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs tabular-nums sm:text-sm">
+            <thead className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              <tr>
+                <th className="pb-1.5 text-left">Bowler</th>
+                <th className="pb-1.5 text-right">Hdcp</th>
+                <th className="pb-1.5 text-right">G1</th>
+                <th className="pb-1.5 text-right">G2</th>
+                <th className="pb-1.5 text-right">G3</th>
+                <th className="pb-1.5 text-right">Scr</th>
+                <th className="pb-1.5 text-right">Hdcp Tot</th>
+                <th className="pb-1.5 text-right">Pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              <SideRow side="A" m={m} r={r} name={a.name} />
+              <SideRow side="B" m={m} r={r} name={b.name} />
+            </tbody>
+          </table>
         </div>
-        <Side
-          name={b.name}
-          sub={r.subB}
-          games={r.gamesB}
-          hdcp={r.handicapB}
-          awards={r.gameAwardsB}
-          gp={r.gamePointsB}
-          sp={r.setPointB}
-          hdcpTotal={r.handicapTotalB}
-          total={r.totalPointsB}
-          winner={bWin}
-        />
+
+        <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-muted-foreground">
+          <span>Game pts &amp; set pt shown below each score</span>
+          <span>
+            Set: higher hdcp total wins 1 pt (½ each on a tie)
+          </span>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function Side({
+function SideRow({
+  side,
+  m,
+  r,
   name,
-  sub,
-  games,
-  hdcp,
-  awards,
-  gp,
-  sp,
-  hdcpTotal,
-  total,
-  winner,
 }: {
+  side: "A" | "B";
+  m: Match;
+  r: MatchResult;
   name: string;
-  sub?: string;
-  games: [number, number, number];
-  hdcp: number;
-  awards: [GameAward, GameAward, GameAward];
-  gp: number;
-  sp: SetAward;
-  hdcpTotal: number;
-  total: number;
-  winner: boolean;
 }) {
+  const isA = side === "A";
+  const games = isA ? r.gamesA : r.gamesB;
+  const awards = isA ? r.gameAwardsA : r.gameAwardsB;
+  const hdcp = isA ? r.handicapA : r.handicapB;
+  const scratchTotal = isA ? r.scratchTotalA : r.scratchTotalB;
+  const hdcpTotal = isA ? r.handicapTotalA : r.handicapTotalB;
+  const gp = isA ? r.gamePointsA : r.gamePointsB;
+  const sp = isA ? r.setPointA : r.setPointB;
+  const total = isA ? r.totalPointsA : r.totalPointsB;
+  const isSub = isA ? r.isSubA : r.isSubB;
+  const winner = r.winner === side;
+  const setWinner = sp === 1;
+  const setTied = sp === 0.5;
+  void m;
+
   return (
-    <div
-      className={cn(
-        "rounded-md p-2",
-        winner && "bg-primary/10 ring-1 ring-primary/40",
-      )}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 font-medium">
-          {winner && <Crown className="h-4 w-4 text-gold" />}
-          <span>{name}</span>
-          {sub && (
-            <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
-              sub
-            </span>
-          )}
-        </div>
-        <span className="font-display text-lg text-gold">
-          {formatPoints(total)}
-        </span>
-      </div>
-      <div className="mt-1.5 grid grid-cols-6 gap-1 text-center text-xs tabular-nums">
+    <>
+      <tr className={cn(winner && "bg-primary/10")}>
+        <td className="py-1.5 pr-2">
+          <div className="flex items-center gap-1.5 font-medium">
+            {winner && <Crown className="h-3.5 w-3.5 text-gold" />}
+            <span>{name}</span>
+            {isSub && (
+              <span className="rounded bg-accent px-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">
+                sub
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="py-1.5 text-right">{hdcp}</td>
         {games.map((g, i) => (
-          <div
-            key={i}
+          <td key={i} className="py-1.5 text-right">
+            <GameCell game={g} award={awards[i]} />
+          </td>
+        ))}
+        <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
+        <td
+          className={cn(
+            "py-1.5 text-right font-semibold",
+            setWinner
+              ? "text-primary"
+              : setTied
+                ? "text-gold"
+                : "text-muted-foreground",
+          )}
+        >
+          {hdcpTotal}
+          <div className="text-[9px] font-normal uppercase text-muted-foreground">
+            set +{formatPoints(sp)}
+          </div>
+        </td>
+        <td className="py-1.5 text-right">
+          <span
             className={cn(
-              "rounded py-1",
-              awards[i] === 2
-                ? "bg-primary/25 ring-1 ring-primary/40"
-                : awards[i] === 1
-                  ? "bg-gold/25"
-                  : "bg-accent/60",
+              "inline-block rounded px-1.5 font-display text-sm",
+              winner ? "bg-gold text-background" : "text-gold",
             )}
           >
-            <div className="text-[10px] uppercase text-muted-foreground">
-              G{i + 1}
-            </div>
-            <div className="font-semibold">{g}</div>
-            <div className="text-[10px] font-semibold text-gold">
-              +{awards[i]}
-            </div>
+            {formatPoints(total)}
+          </span>
+          <div className="text-[9px] font-normal uppercase text-muted-foreground">
+            {gp} game · {formatPoints(sp)} set
           </div>
-        ))}
-        <div className="rounded bg-accent/60 py-1">
-          <div className="text-[10px] uppercase text-muted-foreground">Hdcp</div>
-          <div className="font-semibold">{hdcp}</div>
-        </div>
-        <div
-          className={cn(
-            "rounded py-1",
-            sp === 1
-              ? "bg-primary/25 ring-1 ring-primary/40"
-              : sp === 0.5
-                ? "bg-gold/25"
-                : "bg-accent/60",
-          )}
-          title={`Handicap total ${hdcpTotal}`}
-        >
-          <div className="text-[10px] uppercase text-muted-foreground">
-            Set
-          </div>
-          <div className="font-semibold">{hdcpTotal}</div>
-          <div className="text-[10px] font-semibold text-gold">
-            +{formatPoints(sp)}
-          </div>
-        </div>
-        <div className="rounded bg-primary/25 py-1 ring-1 ring-primary/40">
-          <div className="text-[10px] uppercase text-muted-foreground">
-            GP · SP
-          </div>
-          <div className="font-semibold">
-            {gp}·{formatPoints(sp)}
-          </div>
-          <div className="text-[10px] font-semibold text-gold">
-            ={formatPoints(total)}
-          </div>
-        </div>
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function GameCell({ game, award }: { game: number; award: GameAward }) {
+  return (
+    <div>
+      <div className="font-semibold">{game}</div>
+      <div
+        className={cn(
+          "mt-0.5 text-[9px] font-semibold uppercase",
+          award === 2
+            ? "text-primary"
+            : award === 1
+              ? "text-gold"
+              : "text-muted-foreground",
+        )}
+      >
+        +{award}
       </div>
     </div>
   );
