@@ -133,7 +133,7 @@ function AdminResultsPage() {
   if (!currentMatch) {
     return (
       <AppShell>
-        <PageHeader title="Weekly Result Entry" eyebrow="Admin · Phase 1 (mock)" />
+        <PageHeader title="Weekly Result Entry" subtitle="Admin · Phase 1 (mock)" />
         <p className="text-sm text-muted-foreground">No matches scheduled for this week.</p>
       </AppShell>
     );
@@ -145,9 +145,9 @@ function AdminResultsPage() {
   return (
     <AppShell>
       <PageHeader
-        eyebrow="Admin · Phase 1 (mock)"
+        subtitle="Admin · Phase 1 (mock)"
         title="Weekly Result Entry"
-        description="Enter participation, scratch totals, and any manual W-L override for each scheduled matchup."
+        subtitle="Enter participation, scratch totals, and any manual W-L override for each scheduled matchup."
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[160px_1fr]">
