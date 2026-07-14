@@ -20,11 +20,11 @@ import {
   TENTH_MARK_SET,
   classifyFrame,
   isValidRegulationMark,
-  isValidTenthMark,
   summarizeGame,
   type FrameLinescore,
   type GameLinescore,
 } from "./duckpin";
+
 
 export interface ParsedFrame {
   mark: string;
