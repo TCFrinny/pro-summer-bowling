@@ -7,7 +7,7 @@ import {
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale } from "lucide-react";
 
 export const Route = createFileRoute("/elimination")({
   head: () => ({
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/elimination")({
       {
         name: "description",
         content:
-          "Saved elimination proofs: clinched, alive, eliminated, and not proven within limit.",
+          "Saved elimination proofs: clinched, alive, eliminated, tiebreaker only, and not proven within limit.",
       },
     ],
   }),
@@ -46,6 +46,11 @@ const STATUS: Record<
     label: "Alive",
     icon: <Circle className="h-4 w-4" />,
     className: "bg-emerald-500/20 text-emerald-300",
+  },
+  tiebreaker_only: {
+    label: "Tiebreaker Only",
+    icon: <Scale className="h-4 w-4" />,
+    className: "bg-amber-500/20 text-amber-300",
   },
   not_proven: {
     label: "Not Proven Within Limit",
