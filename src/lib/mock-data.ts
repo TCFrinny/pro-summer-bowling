@@ -159,6 +159,7 @@ export const BOWLERS: Bowler[] = FIRST.map((f, i) => {
     handicap,
     scratchAverage: 0,
     points: 0,
+    pointsLost: 0,
     gamePoints: 0,
     setPoints: 0,
     scratchPinfall: 0,
