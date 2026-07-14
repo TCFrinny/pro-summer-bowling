@@ -754,6 +754,14 @@ export interface EliminationRow {
   /** Best proven margin over the strongest opponent under the alive/tie proof
    *  (in display points). 0 for tiebreaker_only. */
   bestMargin?: number;
+  /** Test-only diagnostics from the solver. Present when a witness exists or
+   *  the search budget was exhausted. Not rendered by the public UI. */
+  diagnostics?: {
+    witnessPairs?: Array<{ week: number; pairs: Array<[BowlerId, BowlerId]> }>;
+    witnessFinals?: Record<BowlerId, number>;
+    witnessType?: "strict" | "tie";
+    budgetExhausted?: boolean;
+  };
 }
 export interface EliminationSnapshot {
   lastCalculatedAt: string; weeksRemaining: number; rows: EliminationRow[];
