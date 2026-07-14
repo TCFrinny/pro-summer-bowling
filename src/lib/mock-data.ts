@@ -1086,18 +1086,22 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
   try {
     const probe = buildLeaderboardsForScope(999);
 
-    // Roster-only scratch boards must NOT contain the sub's 999 scratch game/set.
+    // Roster-only scratch boards must NOT contain the sub's 999 scratch
+    // performance. The opponent (side B, roster) legitimately rolled a real
+    // scratch in this match and IS allowed on the board — the assertion is
+    // scoped to the sub side (scheduled bowler A) specifically.
     const rosterHasSubScratchGame = probe.standard.scratchHighGame.some(
-      (r) => r.matchId === synthMatch.id,
+      (r) => r.bowlerId === scheduled.id || r.scratch >= 999,
     );
     const rosterHasSubScratchSet = probe.standard.scratchHighSeries.some(
-      (r) => r.matchId === synthMatch.id,
+      (r) => r.bowlerId === scheduled.id || r.scratchSet >= 999 * 3,
     );
     if (rosterHasSubScratchGame || rosterHasSubScratchSet) {
       throw new Error(
         "Sub crediting bug: sub scratch performance leaked into roster-only scratch boards.",
       );
     }
+
     const rosterHasSubAdvanced = probe.advanced.rows.some(
       (r) => r.bowlerId === scheduled.id && r.frames >= 30 && r.opens >= 30,
     );
