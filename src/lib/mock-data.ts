@@ -533,6 +533,7 @@ export function seedWeekMatches(week: number, bowlers: Bowler[]): Match[] {
         });
         match.result = computeMatchResult({
           scheduledA: a, scheduledB: b,
+          scheduledNameA: a.name, scheduledNameB: b.name,
           participationA: {
             scheduledId: a.id,
             status: isSubA ? "substitute" : "rostered",
