@@ -735,9 +735,24 @@ export interface LanePairSummary {
   lanePair: LanePair; games: number; average: number; plusMinusPOA: number;
 }
 export type EliminationStatus =
-  | "calculating" | "clinched" | "eliminated" | "alive" | "not_proven";
+  | "calculating"
+  | "clinched"
+  | "eliminated"
+  | "alive"
+  | "tiebreaker_only"
+  | "not_proven";
 export interface EliminationRow {
-  bowler: Bowler; status: EliminationStatus; note?: string;
+  bowler: Bowler;
+  status: EliminationStatus;
+  /** Plain-language reason shown to admins/spectators on the elimination page. */
+  note?: string;
+  /** Best possible final points total under the constructive scenario. */
+  maxFinalPoints?: number;
+  /** Name of the bowler's next published opponent (if any). */
+  nextOpponent?: string;
+  /** Best proven margin over the strongest opponent under the alive/tie proof
+   *  (in display points). 0 for tiebreaker_only. */
+  bestMargin?: number;
 }
 export interface EliminationSnapshot {
   lastCalculatedAt: string; weeksRemaining: number; rows: EliminationRow[];
@@ -1291,21 +1306,14 @@ export function buildSnapshot(input: {
   const weekLanes: Record<number, LanePairSummary[]> = {};
   for (const [wk, map] of Object.entries(weekLaneMaps)) weekLanes[Number(wk)] = laneSummariesFrom(map);
 
-  // 7) Elimination (heuristic clinch/eliminated by rank)
-  const weeksRemaining = weeks.length - weeks.filter((w) => w.completed).length;
-  const rows: EliminationRow[] = standings.map((s, i) => {
-    let status: EliminationStatus;
-    if (i < 4) status = "clinched";
-    else if (i < 10) status = "alive";
-    else if (i > 28) status = "eliminated";
-    else if (i > 22) status = "not_proven";
-    else status = "alive";
-    return { bowler: s.bowler, status };
+  // 7) Elimination — proof-safe, schedule-aware. Runs here (during snapshot
+  // rebuild) so /elimination reads a static payload with no calculation.
+  const elimination: EliminationSnapshot = computeElimination({
+    activeBowlers: publicBowlers,
+    weeks,
+    matchesByWeek,
+    totalWeeks: Math.max(TOTAL_WEEKS, weeks.length),
   });
-  const elimination: EliminationSnapshot = {
-    lastCalculatedAt: new Date().toISOString(),
-    weeksRemaining, rows,
-  };
 
   return {
     builtAt: Date.now(),
