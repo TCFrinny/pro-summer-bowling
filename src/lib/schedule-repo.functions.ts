@@ -381,9 +381,10 @@ const sideDraftSchema = z.object({
    *  are NOT accepted: every sub used in a result must exist in the
    *  active substitute pool (with a required ID Number). */
   substituteId: z.string().optional(),
-  /** Informational only. Substitutes bowl on the SCHEDULED bowler's
-   *  handicap; this field is stored for record-keeping (and to prefill
-   *  the sub's stored starting average) but is not used in scoring. */
+  /** Per-match Starting Average for the substitute. When finite and in
+   *  range (1–300) this takes precedence over the pool row's stored
+   *  starting average. This value DIRECTLY controls the substitute's
+   *  effective handicap for match scoring (league rule v6). */
   substituteStartingAverage: z.number().optional(),
   games: z.array(gameSchema).length(3).optional(),
   /** Required when status === "absent". Three integer scratch scores
