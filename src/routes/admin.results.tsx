@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import {
   WEEKS,
   formatPoints,
@@ -323,15 +323,15 @@ function AdminResultsPage() {
 
   if (!currentMatch) {
     return (
-      <AppShell>
+      <>
         <PageHeader title="Weekly Result Entry" subtitle="Admin · Phase 1 (mock)" />
         <p className="text-sm text-muted-foreground">No matches scheduled for this week.</p>
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell>
+    <>
       <PageHeader
         title="Admin · Weekly Result Entry"
         subtitle="Enter frame-by-frame linescores. W-L points derive from handicap totals unless a manual override is applied."
@@ -513,7 +513,7 @@ function AdminResultsPage() {
           </span>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 

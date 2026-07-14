@@ -3,6 +3,7 @@ import { LEAGUE_NAME, SEASON_LABEL, VENUE_NAME } from "@/lib/mock-data";
 import { Menu, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/hooks/use-session";
 
 const NAV = [
   { to: "/", label: "Home" },
@@ -14,7 +15,6 @@ const NAV = [
   { to: "/statistics", label: "Statistics" },
   { to: "/lane-data", label: "Lane Data" },
   { to: "/elimination", label: "Elimination" },
-  { to: "/admin-login", label: "Admin Login" },
 ] as const;
 
 function DuckpinBallMark({ className }: { className?: string }) {
@@ -38,6 +38,10 @@ function DuckpinBallMark({ className }: { className?: string }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { session } = useSession();
+  const adminLink = session
+    ? { to: "/admin/bowlers" as const, label: "Admin" }
+    : { to: "/admin-login" as const, label: "Admin Login" };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -73,6 +77,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Link>
               );
             })}
+            <Link
+              to={adminLink.to}
+              className={cn(
+                "px-3 py-2 text-sm rounded-md transition-colors",
+                pathname.startsWith("/admin")
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent",
+              )}
+            >
+              {adminLink.label}
+            </Link>
           </nav>
           <button
             onClick={() => setOpen((v) => !v)}
@@ -104,6 +119,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </Link>
                 );
               })}
+              <Link
+                to={adminLink.to}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "px-3 py-2 text-sm rounded-md col-span-2",
+                  pathname.startsWith("/admin")
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                )}
+              >
+                {adminLink.label}
+              </Link>
             </div>
           </nav>
         )}
