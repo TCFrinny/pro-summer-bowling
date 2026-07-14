@@ -10,6 +10,7 @@ import {
   formatPoints,
   getStandingsSnapshot,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { ArrowRight, Trophy, Users, CalendarDays } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -17,6 +18,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  useLeagueSnapshot();
   // Read pre-saved snapshot — no recalculation happens on this page.
   const standings = getStandingsSnapshot().slice(0, 5);
   const latestWeek = [...WEEKS].reverse().find((w) => w.completed);

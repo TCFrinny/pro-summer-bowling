@@ -5,6 +5,7 @@ import {
   getSeasonLaneSummaries,
   getWeekLaneSummaries,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState } from "react";
 import {
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/lane-data")({
 });
 
 function LaneDataPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   const season = getSeasonLaneSummaries();
   const completed = WEEKS.filter((w) => w.completed);
   const [week, setWeek] = useState<number>(

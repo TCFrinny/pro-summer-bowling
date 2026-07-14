@@ -7,6 +7,7 @@ import {
   getBowler,
   getMatchesForWeek,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,6 +33,7 @@ export const Route = createFileRoute("/schedule")({
 });
 
 function SchedulePage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   const [week, setWeek] = useState<number>(WEEKS[0].week);
   const matches = getMatchesForWeek(week);
 

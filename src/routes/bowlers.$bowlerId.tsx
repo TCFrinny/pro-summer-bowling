@@ -8,6 +8,7 @@ import {
   getBowlerSeasonExtras,
   type BowlerHistoryRow,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import { useState } from "react";
@@ -52,6 +53,7 @@ export const Route = createFileRoute("/bowlers/$bowlerId")({
 });
 
 function BowlerProfile() {
+  useLeagueSnapshot();
   const { bowler } = Route.useLoaderData();
   const history = getBowlerHistory(bowler.id);
   const extras = getBowlerSeasonExtras(bowler.id);

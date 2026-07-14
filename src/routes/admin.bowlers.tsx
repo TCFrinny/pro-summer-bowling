@@ -37,8 +37,8 @@ function AdminBowlersPage() {
   const [newRosterAvg, setNewRosterAvg] = useState("140");
   const [newSubName, setNewSubName] = useState("");
 
-  const activeRosterCount = state.rostered.filter((b) => b.active && !b.archived).length;
-  const activeSubCount = state.subs.filter((s) => s.active && !s.archived).length;
+  const activeRosterCount = state.db.rostered.filter((b) => b.active && !b.archived).length;
+  const activeSubCount = state.db.subs.filter((s) => s.active && !s.archived).length;
 
   return (
     <AppShell>
@@ -121,9 +121,10 @@ function AdminBowlersPage() {
                       const avg = Number(newRosterAvg);
                       if (!name || !Number.isFinite(avg)) return;
                       if (isDuplicateActiveRosterName(name)) {
-                        if (!window.confirm(`"${name}" already exists in the active roster. Add anyway?`)) return;
+                        window.alert(`"${name}" already exists in the active roster. Rename or archive the existing entry first.`);
+                        return;
                       }
-                      addRosteredBowler(name, avg);
+                      try { addRosteredBowler(name, avg); } catch (e) { window.alert((e as Error).message); return; }
                       setNewRosterName("");
                     }}
                     className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
@@ -136,7 +137,7 @@ function AdminBowlersPage() {
           </Card>
 
           <div className="grid gap-2">
-            {state.rostered.map((b) => (
+            {state.db.rostered.map((b) => (
               <RosterRow key={b.id} record={b} />
             ))}
           </div>
@@ -159,9 +160,10 @@ function AdminBowlersPage() {
                     const name = newSubName.trim();
                     if (!name) return;
                     if (isDuplicateActiveSubName(name)) {
-                      if (!window.confirm(`Substitute "${name}" already active. Add anyway?`)) return;
+                      window.alert(`Substitute "${name}" is already active. Rename or archive first.`);
+                      return;
                     }
-                    addSubstitute(name);
+                    try { addSubstitute(name); } catch (e) { window.alert((e as Error).message); return; }
                     setNewSubName("");
                   }}
                   className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
@@ -172,7 +174,7 @@ function AdminBowlersPage() {
             </CardContent>
           </Card>
           <div className="grid gap-2">
-            {state.subs.map((s) => (
+            {state.db.subs.map((s) => (
               <SubRow key={s.id} record={s} />
             ))}
           </div>
@@ -182,7 +184,7 @@ function AdminBowlersPage() {
   );
 }
 
-function RosterRow({ record }: { record: ReturnType<typeof useLeagueState>["rostered"][number] }) {
+function RosterRow({ record }: { record: import("@/lib/league-store").RosteredBowlerRecord }) {
   const [name, setName] = useState(record.name);
   const [avg, setAvg] = useState(String(record.entryAverage));
   const dirty = name !== record.name || Number(avg) !== record.entryAverage;
@@ -234,7 +236,7 @@ function RosterRow({ record }: { record: ReturnType<typeof useLeagueState>["rost
   );
 }
 
-function SubRow({ record }: { record: ReturnType<typeof useLeagueState>["subs"][number] }) {
+function SubRow({ record }: { record: import("@/lib/league-store").SubstituteRecord }) {
   const [name, setName] = useState(record.name);
   const dirty = name !== record.name;
   return (

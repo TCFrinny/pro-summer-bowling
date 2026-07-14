@@ -5,6 +5,7 @@ import {
   getAdvancedLeaderboards,
   type AdvancedRow,
 } from "@/lib/mock-data";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/leaderboards/advanced")({
 });
 
 function AdvancedLeaderboardsPage() {
+  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   const [scope, setScope] = useState<Scope>("season");
   const boards = getAdvancedLeaderboards(scope);
   const completed = WEEKS.filter((w) => w.completed);
