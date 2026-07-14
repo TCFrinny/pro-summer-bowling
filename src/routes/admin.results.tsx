@@ -716,8 +716,8 @@ function SidePanel({
           <span>{label}</span>
           {side.status === "substitute" && (
             <span className="normal-case tracking-normal text-[10px] text-muted-foreground">
-              Match hcp <b className="text-foreground">{scheduledHandicap}</b>
-              {" "}(scheduled bowler's — league rule)
+              Sub hcp <b className="text-foreground">{handicap}</b>
+              {" "}· Scheduled hcp <span className="text-muted-foreground">{scheduledHandicap}</span> (not used while sub bowls)
             </span>
           )}
           {side.status === "absent" && (
@@ -757,7 +757,8 @@ function SidePanel({
                     subId: v,
                     subName: found?.name ?? "",
                     // Prefill the sub's stored starting average — admin
-                    // can still override for this specific match.
+                    // can still override for this specific match. This
+                    // value DIRECTLY controls scoring for this side.
                     subStartAvg: found?.starting_average != null
                       ? String(found.starting_average)
                       : side.subStartAvg,
@@ -779,11 +780,11 @@ function SidePanel({
               </Select>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 Substitutes must be added first via Manage Bowlers (ID Number required). Walk-on names are not allowed.
-                Match handicap always uses the SCHEDULED bowler's handicap — the sub's own is informational only.
+                Match handicap uses the SUBSTITUTE'S own handicap (from their Starting Average below). Points and handicap pinfall still credit the scheduled bowler.
               </p>
             </div>
             <div>
-              <Label className="text-[10px]">Starting Average (informational)</Label>
+              <Label className="text-[10px]">Substitute Starting Average</Label>
               <Input
                 data-testid={`${testId}-sub-start-avg`}
                 type="number"
