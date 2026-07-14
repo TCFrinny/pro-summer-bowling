@@ -107,11 +107,21 @@ function main() {
   writeFileSync(configPath, JSON.stringify(patched, null, 2) + "\n");
   const verify = JSON.parse(readFileSync(configPath, "utf8"));
   if (verify.keep_vars !== true) {
-    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed at ${configPath}`);
+    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed (keep_vars) at ${configPath}`);
     process.exit(1);
   }
-  console.log(`[patch-cloudflare-config] keep_vars: true confirmed in ${configPath}`);
+  if (verify.name !== PINNED_WORKER_NAME) {
+    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed (name != '${PINNED_WORKER_NAME}') at ${configPath}`);
+    process.exit(1);
+  }
+  console.log(`[patch-cloudflare-config] patched ${configPath}`);
+  console.log(`[patch-cloudflare-config]   keep_vars: true confirmed`);
+  console.log(`[patch-cloudflare-config]   name: "${PINNED_WORKER_NAME}" confirmed`);
 }
+
+// Only run when executed directly (not when imported by tests).
+const isDirect = import.meta.url === `file://${process.argv[1]}`;
+if (isDirect) main();
 
 // Only run when executed directly (not when imported by tests).
 const isDirect = import.meta.url === `file://${process.argv[1]}`;
