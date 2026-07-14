@@ -2,9 +2,8 @@ import type { BowlerMatchLinescore } from "@/lib/mock-data";
 import { GameLinescore } from "./GameLinescore";
 
 /**
- * Three stacked game cards for one bowler in one match. Roster / sub badge
- * and per-game handicap totals sit above the frame rows. Use this in the
- * expanded state on Weekly Results and on each bowler profile week.
+ * Three stacked game cards for one bowler in one match. Frame cards show only
+ * the saved mark + running cumulative — the model contains no per-ball data.
  */
 export function ThreeGameLinescore({
   linescore,
