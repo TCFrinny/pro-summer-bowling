@@ -150,29 +150,21 @@ async function isRosterReferenced(
   return (refs.count ?? 0) > 0;
 }
 
-/** True when any match_result's side_a/side_b JSON references this sub id.
- *  PostgREST JSON `->>` accessor lets us match on the frozen subId key that
- *  admin/results writes into SideParticipation. */
+/** True when the substitute id appears anywhere in any match_result's
+ *  side_a, side_b, linescore_a, or linescore_b JSON — regardless of which
+ *  key holds it (`subId`, `substituteId`, `actualId`, etc.). Delegates to
+ *  the admin-only SECURITY DEFINER RPC `public.substitute_referenced`
+ *  which uses parameterized jsonpath (`$.** ? (@ == $sub)`) so we don't
+ *  depend on a single unconfirmed JSON key shape. */
 async function isSubReferenced(
   context: AuthedCtx,
   subId: string,
 ): Promise<boolean> {
-  // We use two independent HEAD counts because PostgREST does not support
-  // OR across `->>` filters cleanly with the `or=` grammar in all drivers.
-  const [a, b] = await Promise.all([
-    context.supabase
-      .from("match_results")
-      .select("id", { count: "exact", head: true })
-      .eq("side_a->>subId", subId),
-    context.supabase
-      .from("match_results")
-      .select("id", { count: "exact", head: true })
-      .eq("side_b->>subId", subId),
-  ]);
-  if (a.error) throw new Error(a.error.message);
-  if (b.error) throw new Error(b.error.message);
-  return (a.count ?? 0) + (b.count ?? 0) > 0;
+  const rpc = await context.supabase.rpc("substitute_referenced", { _sub_id: subId });
+  if (rpc.error) throw new Error(`sub reference check failed: ${rpc.error.message}`);
+  return rpc.data === true;
 }
+
 
 // ---------------------------------------------------------------------------
 // Input schemas
