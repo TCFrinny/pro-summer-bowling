@@ -8,7 +8,9 @@
  *  - Absent scores DO NOT feed personal stats (avg, games rolled, high
  *    game/set, mark metrics) on the scheduled bowler.
  *  - Opponent's legitimate rostered scores still count normally.
- *  - Substitutes use the SCHEDULED bowler's handicap for match scoring.
+ *  - Substitutes score on the SUBSTITUTE'S own handicap (derived from
+ *    the sub's Starting Average). Points/handicap pinfall still credit
+ *    the scheduled bowler downstream.
  */
 import {
   buildSnapshot,
