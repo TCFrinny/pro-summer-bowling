@@ -77,6 +77,13 @@ function AdminLogin() {
               </div>
               <div className="grid gap-2">
                 <Link
+                  to="/admin/bowlers"
+                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
+                >
+                  <span>Bowlers & Substitutes</span>
+                  <ArrowRight className="h-4 w-4 text-gold" />
+                </Link>
+                <Link
                   to="/admin/schedule"
                   className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
                 >
@@ -87,7 +94,7 @@ function AdminLogin() {
                   to="/admin/results"
                   className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
                 >
-                  <span>Weekly Result Entry</span>
+                  <span>Weekly Result Entry (frame-by-frame)</span>
                   <ArrowRight className="h-4 w-4 text-gold" />
                 </Link>
               </div>

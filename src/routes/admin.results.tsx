@@ -11,6 +11,18 @@ import {
   type Match,
   type ParticipationStatus,
 } from "@/lib/mock-data";
+import {
+  recordSavedResult,
+  selectActiveRoster,
+  selectActiveSubs,
+  useLeagueState,
+} from "@/lib/league-store";
+import {
+  SideLinescoreEditor,
+  computeSideDerived,
+  emptySideEditorState,
+  type SideEditorState,
+} from "@/components/linescore/MatchLinescoreEditor";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,8 +48,11 @@ export const Route = createFileRoute("/admin/results")({
 
 interface SideDraft {
   status: ParticipationStatus;
+  /** Sub id when status="substitute" and picked from pool. Empty string
+   *  means the admin is typing a free-form name in `subName`. */
+  subId: string;
   subName: string;
-  games: [string, string, string]; // scratch totals as strings
+  linescore: SideEditorState;
 }
 
 interface Draft {
@@ -51,19 +66,26 @@ interface Draft {
 
 const EMPTY_SIDE: SideDraft = {
   status: "rostered",
+  subId: "",
   subName: "",
-  games: ["", "", ""],
+  linescore: emptySideEditorState(),
 };
 
 function AdminResultsPage() {
+  const league = useLeagueState();
+  const activeSubs = selectActiveSubs(league);
+  // Roster available for reference (e.g. showing archived flags on
+  // scheduled bowlers). We don't currently swap scheduled bowlers here.
+  void selectActiveRoster(league);
+
   const [week, setWeek] = useState(1);
   const matches = useMemo(() => getMatchesForWeek(week), [week]);
   const [matchId, setMatchId] = useState(matches[0]?.id ?? "");
   const currentMatch = matches.find((m) => m.id === matchId) ?? matches[0];
 
   const [draft, setDraft] = useState<Draft>({
-    sideA: { ...EMPTY_SIDE },
-    sideB: { ...EMPTY_SIDE },
+    sideA: { ...EMPTY_SIDE, linescore: emptySideEditorState() },
+    sideB: { ...EMPTY_SIDE, linescore: emptySideEditorState() },
     overrideEnabled: false,
     overrideA: "0",
     overrideB: "0",
@@ -87,48 +109,65 @@ function AdminResultsPage() {
   const eitherAbsent =
     draft.sideA.status === "absent" || draft.sideB.status === "absent";
 
+  const a = currentMatch ? getBowler(currentMatch.bowlerA) : undefined;
+  const b = currentMatch ? getBowler(currentMatch.bowlerB) : undefined;
+
+  const derivedA = useMemo(
+    () => computeSideDerived(draft.sideA.linescore, a?.handicap ?? 0),
+    [draft.sideA.linescore, a?.handicap],
+  );
+  const derivedB = useMemo(
+    () => computeSideDerived(draft.sideB.linescore, b?.handicap ?? 0),
+    [draft.sideB.linescore, b?.handicap],
+  );
+
   const validation = useMemo(() => {
     const errors: string[] = [];
-    for (const [label, s] of [["A", draft.sideA], ["B", draft.sideB]] as const) {
-      if (s.status === "substitute" && !s.subName.trim())
-        errors.push(`Side ${label}: substitute name required`);
-      if (s.status !== "absent") {
-        for (let i = 0; i < 3; i++) {
-          const n = Number(s.games[i]);
-          if (!Number.isInteger(n) || n < 0 || n > 300)
-            errors.push(`Side ${label} game ${i + 1}: invalid scratch total`);
-        }
+    for (const [label, s, d] of [
+      ["A", draft.sideA, derivedA],
+      ["B", draft.sideB, derivedB],
+    ] as const) {
+      if (s.status === "substitute" && !s.subId && !s.subName.trim()) {
+        errors.push(`Side ${label}: pick a substitute or type a name`);
+      }
+      if (s.status !== "absent" && !d.valid) {
+        errors.push(`Side ${label}: linescore incomplete or invalid`);
       }
     }
     if (draft.overrideEnabled) {
-      const a = Number(draft.overrideA);
-      const b = Number(draft.overrideB);
+      const oa = Number(draft.overrideA);
+      const ob = Number(draft.overrideB);
       const check = validatePointsOverride({
-        enabled: true, pointsA: a, pointsB: b, reason: draft.overrideReason,
+        enabled: true, pointsA: oa, pointsB: ob, reason: draft.overrideReason,
       });
       if (!check.ok) errors.push(`Override: ${check.error}`);
     }
     return errors;
-  }, [draft]);
+  }, [draft, derivedA, derivedB]);
 
+  // Frame-derived W-L preview when both sides bowled.
   const previewNormal = useMemo(() => {
-    if (draft.sideA.status === "absent" || draft.sideB.status === "absent") return null;
-    const ga = draft.sideA.games.map(Number);
-    const gb = draft.sideB.games.map(Number);
-    if (ga.some((n) => !Number.isFinite(n)) || gb.some((n) => !Number.isFinite(n))) return null;
+    if (
+      draft.sideA.status === "absent" ||
+      draft.sideB.status === "absent" ||
+      !derivedA.valid || !derivedB.valid ||
+      !derivedA.games.every(Boolean) || !derivedB.games.every(Boolean)
+    ) return null;
     let ptsA = 0, ptsB = 0;
     for (let i = 0; i < 3; i++) {
-      if (ga[i] > gb[i]) ptsA += 2;
-      else if (gb[i] > ga[i]) ptsB += 2;
+      const ga = derivedA.games[i]!.scratchTotal;
+      const gb = derivedB.games[i]!.scratchTotal;
+      if (ga > gb) ptsA += 2;
+      else if (gb > ga) ptsB += 2;
       else { ptsA += 1; ptsB += 1; }
     }
-    const setA = ga.reduce((s, x) => s + x, 0);
-    const setB = gb.reduce((s, x) => s + x, 0);
-    if (setA > setB) ptsA += 1;
-    else if (setB > setA) ptsB += 1;
+    const hsA = derivedA.handicapSet ?? 0;
+    const hsB = derivedB.handicapSet ?? 0;
+    if (hsA > hsB) ptsA += 1;
+    else if (hsB > hsA) ptsB += 1;
     else { ptsA += 0.5; ptsB += 0.5; }
     return { ptsA, ptsB };
-  }, [draft]);
+  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB]);
 
   if (!currentMatch) {
     return (
@@ -139,14 +178,11 @@ function AdminResultsPage() {
     );
   }
 
-  const a = getBowler(currentMatch.bowlerA);
-  const b = getBowler(currentMatch.bowlerB);
-
   return (
     <AppShell>
       <PageHeader
         title="Admin · Weekly Result Entry"
-        subtitle="Enter participation, scratch totals, and any manual W-L override for each scheduled matchup."
+        subtitle="Enter frame-by-frame linescores. W-L points derive from the totals unless a manual override is applied."
       />
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[160px_1fr]">
@@ -183,12 +219,16 @@ function AdminResultsPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <SidePanel
           label={`Side A — ${a?.name ?? currentMatch.bowlerA}`}
+          handicap={a?.handicap ?? 0}
           side={draft.sideA}
+          subs={activeSubs}
           onChange={(patch) => setSide("A", patch)}
         />
         <SidePanel
           label={`Side B — ${b?.name ?? currentMatch.bowlerB}`}
+          handicap={b?.handicap ?? 0}
           side={draft.sideB}
+          subs={activeSubs}
           onChange={(patch) => setSide("B", patch)}
         />
       </div>
@@ -267,7 +307,10 @@ function AdminResultsPage() {
       <div className="mt-4 flex items-center gap-2">
         <button
           disabled={validation.length > 0}
-          onClick={() => setFlash("Result saved to local mock state.")}
+          onClick={() => {
+            recordSavedResult(currentMatch.id, `Saved by admin at ${new Date().toISOString()}`);
+            setFlash("Result draft saved to local mock store. Public snapshot regeneration is a Phase 2 task.");
+          }}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold",
             validation.length > 0
@@ -289,11 +332,15 @@ function AdminResultsPage() {
 
 function SidePanel({
   label,
+  handicap,
   side,
+  subs,
   onChange,
 }: {
   label: string;
+  handicap: number;
   side: SideDraft;
+  subs: { id: string; name: string }[];
   onChange: (patch: Partial<SideDraft>) => void;
 }) {
   const disabled = side.status === "absent";
@@ -321,35 +368,42 @@ function SidePanel({
         </div>
 
         {side.status === "substitute" && (
-          <div className="mb-3">
-            <Label>Substitute name</Label>
-            <Input
-              value={side.subName}
-              onChange={(e) => onChange({ subName: e.target.value })}
-              placeholder="Required"
-            />
+          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+            <div>
+              <Label className="text-[10px]">Pick from pool</Label>
+              <Select
+                value={side.subId || undefined}
+                onValueChange={(v) => {
+                  const found = subs.find((s) => s.id === v);
+                  onChange({ subId: v, subName: found?.name ?? side.subName });
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Choose sub…" /></SelectTrigger>
+                <SelectContent>
+                  {subs.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[10px]">Or type a name</Label>
+              <Input
+                value={side.subName}
+                onChange={(e) => onChange({ subId: "", subName: e.target.value })}
+                placeholder="Walk-on substitute"
+              />
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i}>
-              <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                Game {i + 1} scratch
-              </Label>
-              <Input
-                disabled={disabled}
-                inputMode="numeric"
-                value={side.games[i]}
-                onChange={(e) => {
-                  const games = [...side.games] as [string, string, string];
-                  games[i] = e.target.value;
-                  onChange({ games });
-                }}
-              />
-            </div>
-          ))}
-        </div>
+        <SideLinescoreEditor
+          label="Linescore"
+          handicap={handicap}
+          disabled={disabled}
+          state={side.linescore}
+          onChange={(next) => onChange({ linescore: next })}
+        />
 
         {disabled && (
           <p className="mt-2 text-[11px] text-muted-foreground">

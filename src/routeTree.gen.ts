@@ -24,6 +24,7 @@ import { Route as LeaderboardsAdvancedRouteImport } from './routes/leaderboards.
 import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
 import { Route as AdminScheduleRouteImport } from './routes/admin.schedule'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
+import { Route as AdminBowlersRouteImport } from './routes/admin.bowlers'
 
 const WeeklyResultsRoute = WeeklyResultsRouteImport.update({
   id: '/weekly-results',
@@ -100,6 +101,11 @@ const AdminResultsRoute = AdminResultsRouteImport.update({
   path: '/admin/results',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminBowlersRoute = AdminBowlersRouteImport.update({
+  id: '/admin/bowlers',
+  path: '/admin/bowlers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/standings': typeof StandingsRoute
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
+  '/admin/bowlers': typeof AdminBowlersRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/standings': typeof StandingsRoute
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
+  '/admin/bowlers': typeof AdminBowlersRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/standings': typeof StandingsRoute
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
+  '/admin/bowlers': typeof AdminBowlersRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/standings'
     | '/statistics'
     | '/weekly-results'
+    | '/admin/bowlers'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/standings'
     | '/statistics'
     | '/weekly-results'
+    | '/admin/bowlers'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/standings'
     | '/statistics'
     | '/weekly-results'
+    | '/admin/bowlers'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -216,6 +228,7 @@ export interface RootRouteChildren {
   StandingsRoute: typeof StandingsRoute
   StatisticsRoute: typeof StatisticsRoute
   WeeklyResultsRoute: typeof WeeklyResultsRoute
+  AdminBowlersRoute: typeof AdminBowlersRoute
   AdminResultsRoute: typeof AdminResultsRoute
   AdminScheduleRoute: typeof AdminScheduleRoute
 }
@@ -327,6 +340,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminResultsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/bowlers': {
+      id: '/admin/bowlers'
+      path: '/admin/bowlers'
+      fullPath: '/admin/bowlers'
+      preLoaderRoute: typeof AdminBowlersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -366,19 +386,10 @@ const rootRouteChildren: RootRouteChildren = {
   StandingsRoute: StandingsRoute,
   StatisticsRoute: StatisticsRoute,
   WeeklyResultsRoute: WeeklyResultsRoute,
+  AdminBowlersRoute: AdminBowlersRoute,
   AdminResultsRoute: AdminResultsRoute,
   AdminScheduleRoute: AdminScheduleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
