@@ -100,11 +100,12 @@ interface StoreState {
   version: number;
 }
 
-const STORAGE_KEY = "pss.leagueStore.v4";
+const STORAGE_KEY = "pss.leagueStore.v5";
 const OLD_KEYS_TO_CLEAR = ["pss.leagueStore.v1"];
 const OLD_KEY_V2 = "pss.leagueStore.v2";
 const OLD_KEY_V3 = "pss.leagueStore.v3";
-const SCHEMA_VERSION = 4;
+const OLD_KEY_V4 = "pss.leagueStore.v4";
+const SCHEMA_VERSION = 5;
 
 /** Format a bowlerNumber for display. Never used to store the value.
  *  Values are kept verbatim; only trim() is applied on save. */
