@@ -9,38 +9,214 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WeeklyResultsRouteImport } from './routes/weekly-results'
+import { Route as StatisticsRouteImport } from './routes/statistics'
+import { Route as StandingsRouteImport } from './routes/standings'
+import { Route as ScheduleRouteImport } from './routes/schedule'
+import { Route as LaneDataRouteImport } from './routes/lane-data'
+import { Route as EliminationRouteImport } from './routes/elimination'
+import { Route as BowlersRouteImport } from './routes/bowlers'
+import { Route as AdminLoginRouteImport } from './routes/admin-login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
 
+const WeeklyResultsRoute = WeeklyResultsRouteImport.update({
+  id: '/weekly-results',
+  path: '/weekly-results',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatisticsRoute = StatisticsRouteImport.update({
+  id: '/statistics',
+  path: '/statistics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StandingsRoute = StandingsRouteImport.update({
+  id: '/standings',
+  path: '/standings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ScheduleRoute = ScheduleRouteImport.update({
+  id: '/schedule',
+  path: '/schedule',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LaneDataRoute = LaneDataRouteImport.update({
+  id: '/lane-data',
+  path: '/lane-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EliminationRoute = EliminationRouteImport.update({
+  id: '/elimination',
+  path: '/elimination',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BowlersRoute = BowlersRouteImport.update({
+  id: '/bowlers',
+  path: '/bowlers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/admin-login',
+  path: '/admin-login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BowlersBowlerIdRoute = BowlersBowlerIdRouteImport.update({
+  id: '/$bowlerId',
+  path: '/$bowlerId',
+  getParentRoute: () => BowlersRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin-login': typeof AdminLoginRoute
+  '/bowlers': typeof BowlersRouteWithChildren
+  '/elimination': typeof EliminationRoute
+  '/lane-data': typeof LaneDataRoute
+  '/schedule': typeof ScheduleRoute
+  '/standings': typeof StandingsRoute
+  '/statistics': typeof StatisticsRoute
+  '/weekly-results': typeof WeeklyResultsRoute
+  '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin-login': typeof AdminLoginRoute
+  '/bowlers': typeof BowlersRouteWithChildren
+  '/elimination': typeof EliminationRoute
+  '/lane-data': typeof LaneDataRoute
+  '/schedule': typeof ScheduleRoute
+  '/standings': typeof StandingsRoute
+  '/statistics': typeof StatisticsRoute
+  '/weekly-results': typeof WeeklyResultsRoute
+  '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin-login': typeof AdminLoginRoute
+  '/bowlers': typeof BowlersRouteWithChildren
+  '/elimination': typeof EliminationRoute
+  '/lane-data': typeof LaneDataRoute
+  '/schedule': typeof ScheduleRoute
+  '/standings': typeof StandingsRoute
+  '/statistics': typeof StatisticsRoute
+  '/weekly-results': typeof WeeklyResultsRoute
+  '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/admin-login'
+    | '/bowlers'
+    | '/elimination'
+    | '/lane-data'
+    | '/schedule'
+    | '/standings'
+    | '/statistics'
+    | '/weekly-results'
+    | '/bowlers/$bowlerId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/admin-login'
+    | '/bowlers'
+    | '/elimination'
+    | '/lane-data'
+    | '/schedule'
+    | '/standings'
+    | '/statistics'
+    | '/weekly-results'
+    | '/bowlers/$bowlerId'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin-login'
+    | '/bowlers'
+    | '/elimination'
+    | '/lane-data'
+    | '/schedule'
+    | '/standings'
+    | '/statistics'
+    | '/weekly-results'
+    | '/bowlers/$bowlerId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminLoginRoute: typeof AdminLoginRoute
+  BowlersRoute: typeof BowlersRouteWithChildren
+  EliminationRoute: typeof EliminationRoute
+  LaneDataRoute: typeof LaneDataRoute
+  ScheduleRoute: typeof ScheduleRoute
+  StandingsRoute: typeof StandingsRoute
+  StatisticsRoute: typeof StatisticsRoute
+  WeeklyResultsRoute: typeof WeeklyResultsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/weekly-results': {
+      id: '/weekly-results'
+      path: '/weekly-results'
+      fullPath: '/weekly-results'
+      preLoaderRoute: typeof WeeklyResultsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/statistics': {
+      id: '/statistics'
+      path: '/statistics'
+      fullPath: '/statistics'
+      preLoaderRoute: typeof StatisticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/standings': {
+      id: '/standings'
+      path: '/standings'
+      fullPath: '/standings'
+      preLoaderRoute: typeof StandingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/schedule': {
+      id: '/schedule'
+      path: '/schedule'
+      fullPath: '/schedule'
+      preLoaderRoute: typeof ScheduleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lane-data': {
+      id: '/lane-data'
+      path: '/lane-data'
+      fullPath: '/lane-data'
+      preLoaderRoute: typeof LaneDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/elimination': {
+      id: '/elimination'
+      path: '/elimination'
+      fullPath: '/elimination'
+      preLoaderRoute: typeof EliminationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bowlers': {
+      id: '/bowlers'
+      path: '/bowlers'
+      fullPath: '/bowlers'
+      preLoaderRoute: typeof BowlersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin-login': {
+      id: '/admin-login'
+      path: '/admin-login'
+      fullPath: '/admin-login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,22 +224,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bowlers/$bowlerId': {
+      id: '/bowlers/$bowlerId'
+      path: '/$bowlerId'
+      fullPath: '/bowlers/$bowlerId'
+      preLoaderRoute: typeof BowlersBowlerIdRouteImport
+      parentRoute: typeof BowlersRoute
+    }
   }
 }
 
+interface BowlersRouteChildren {
+  BowlersBowlerIdRoute: typeof BowlersBowlerIdRoute
+}
+
+const BowlersRouteChildren: BowlersRouteChildren = {
+  BowlersBowlerIdRoute: BowlersBowlerIdRoute,
+}
+
+const BowlersRouteWithChildren =
+  BowlersRoute._addFileChildren(BowlersRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminLoginRoute: AdminLoginRoute,
+  BowlersRoute: BowlersRouteWithChildren,
+  EliminationRoute: EliminationRoute,
+  LaneDataRoute: LaneDataRoute,
+  ScheduleRoute: ScheduleRoute,
+  StandingsRoute: StandingsRoute,
+  StatisticsRoute: StatisticsRoute,
+  WeeklyResultsRoute: WeeklyResultsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
