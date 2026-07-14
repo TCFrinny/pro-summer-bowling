@@ -12,6 +12,11 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "@/components/layout/AppShell";
+import {
+  RootPublicGate,
+  snapshotQueryOptions,
+  useSnapshotRealtime,
+} from "@/lib/public-snapshot";
 
 function NotFoundComponent() {
   return (
@@ -123,6 +128,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
+  // Prime the public snapshot cache on the initial navigation so the very
+  // first render already has DB data (SSR-safe: supabase-js runs in Node).
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(snapshotQueryOptions),
 });
 
 function RootShell({ children }: { children: ReactNode }) {
@@ -144,7 +153,16 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <RealtimeBridge />
+      <RootPublicGate>
+        <Outlet />
+      </RootPublicGate>
     </QueryClientProvider>
   );
 }
+
+function RealtimeBridge() {
+  useSnapshotRealtime();
+  return null;
+}
+
