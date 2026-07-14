@@ -77,7 +77,7 @@ async function upsertWeekRow(
     return found.data.id;
   }
   const ins = await context.supabase.from("weeks")
-    .insert({ season_id: seasonId, week_number: weekNumber, ...clean })
+    .insert({ season_id: seasonId, week_number: weekNumber, ...(clean as { date?: string | null; published?: boolean; completed?: boolean }) })
     .select("id").single();
   if (ins.error) throw new Error(ins.error.message);
   return ins.data.id;
