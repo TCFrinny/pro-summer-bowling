@@ -4,6 +4,7 @@ import {
   LANE_PAIRS,
   WEEKS,
   formatPoints,
+  formatScheduleName,
   getBowler,
   getMatchesForWeek,
 } from "@/lib/mock-data";
