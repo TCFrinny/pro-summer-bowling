@@ -101,6 +101,8 @@ function BowlerProfile() {
         <Stat label="Strikes" value={extras.strikes.toString()} />
         <Stat label="Spares" value={extras.spares.toString()} />
         <Stat label="Opens" value={extras.opens.toString()} />
+        <Stat label="Total Marks" value={extras.marks.toString()} />
+        <Stat label="Frames Rolled" value={extras.framesRolled.toString()} />
         <Stat label="Mark %" value={`${extras.markPct.toFixed(1)}%`} />
         <Stat label="Strike %" value={`${extras.strikePct.toFixed(1)}%`} />
         <Stat
@@ -224,6 +226,13 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
       </button>
       {open && (
         <div className="border-t border-border/60 p-3 space-y-4">
+          {h.isSub && (
+            <div className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[11px] leading-snug text-primary">
+              Sub performance shown below; excluded from this bowler’s
+              roster-only season scratch and advanced totals. W-L points and
+              handicap pinfall remain credited.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
             <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
             <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
