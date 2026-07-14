@@ -518,7 +518,7 @@ export function seedWeekMatches(week: number, bowlers: Bowler[]): Match[] {
           actualId: isSubA ? null : a.id,
           actualName: isSubA ? `Sub — ${subNameA}` : a.name,
           isSub: isSubA,
-          entryAverage: isSubA ? Math.round(100 + r() * 60) : a.entryAverage,
+          entryAverage: a.entryAverage,
           handicap: a.handicap,
           games: [rollMockGame(r, skillA), rollMockGame(r, skillA), rollMockGame(r, skillA)],
         });
