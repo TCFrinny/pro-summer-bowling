@@ -66,6 +66,11 @@ function EliminationPage() {
   useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Read the last-published snapshot. NEVER run a solver here.
   const snap = getEliminationSnapshot();
+  const standings = getStandingsSnapshot();
+
+  // Render order only: mirror the standings ordering without mutating
+  // `snap.rows` or the underlying saved snapshot.
+  const orderedRows = sortEliminationRowsByStandings(snap.rows, standings);
 
   const counts = snap.rows.reduce(
     (acc, r) => {
