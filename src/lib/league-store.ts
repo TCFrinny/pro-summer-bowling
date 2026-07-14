@@ -128,7 +128,18 @@ function slotsFromMatches(matches: Match[]): ScheduleSlot[] {
 function seedDb(): LeagueDatabase {
   const rawBowlers = seedBowlers();
   const rawWeeks = seedWeeks();
+  const rostered: RosteredBowlerRecord[] = rawBowlers.map((b, i) => ({
+    id: b.id, name: b.name, entryAverage: b.entryAverage,
+    handicap: b.handicap, active: true, archived: false,
+    // Seed IDs "01001".."01036" — unique, editable, 5 chars. Not
+    // used by any lookup; display-only on schedule pages.
+    bowlerNumber: `0${(1000 + i + 1).toString()}`,
+  }));
   const matches = seedMatchesByWeek(rawBowlers);
+  // seedMatchesByWeek returns Match rows without frozen IDs; freeze them
+  // now against the roster we just built so /schedule renders IDs on a
+  // clean localStorage reset without any admin action.
+  backfillMatchBowlerNumbers(matches, rostered);
   const schedulesByWeek: Record<number, WeekSchedule> = {};
   for (const w of rawWeeks) {
     schedulesByWeek[w.week] = {
@@ -140,13 +151,7 @@ function seedDb(): LeagueDatabase {
   }
   return {
     version: SCHEMA_VERSION,
-    rostered: rawBowlers.map((b, i) => ({
-      id: b.id, name: b.name, entryAverage: b.entryAverage,
-      handicap: b.handicap, active: true, archived: false,
-      // Seed IDs "01001".."01036" — unique, editable, 5 chars. Not
-      // used by any lookup; display-only on schedule pages.
-      bowlerNumber: `0${(1000 + i + 1).toString()}`,
-    })),
+    rostered,
     subs: [
       "Rick M.", "Terry L.", "Alicia P.", "Marco V.", "Dee K.", "Ronnie F.",
     ].map((name, i) => ({
@@ -160,6 +165,29 @@ function seedDb(): LeagueDatabase {
     matchesByWeek: matches,
     schedulesByWeek,
   };
+}
+
+/** Freeze roster bowlerNumbers into every Match's bowlerNumberA/B when
+ *  the field is missing. NEVER overwrites an already-set number — editing
+ *  a roster ID later must only affect matches saved AFTER that edit.
+ *  Mutates in place; returns nothing. Idempotent — safe to call on every
+ *  DB load, including already-v5 stores. */
+function backfillMatchBowlerNumbers(
+  matchesByWeek: Record<number, Match[]>,
+  rostered: RosteredBowlerRecord[],
+): void {
+  const byId = new Map(rostered.map((r) => [r.id, r.bowlerNumber]));
+  for (const wk of Object.keys(matchesByWeek)) {
+    const list = matchesByWeek[Number(wk)];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      const aNum = m.bowlerNumberA ?? byId.get(m.bowlerA);
+      const bNum = m.bowlerNumberB ?? byId.get(m.bowlerB);
+      if (aNum !== m.bowlerNumberA || bNum !== m.bowlerNumberB) {
+        list[i] = { ...m, bowlerNumberA: aNum, bowlerNumberB: bNum };
+      }
+    }
+  }
 }
 
 let __stateVersion = 0;
