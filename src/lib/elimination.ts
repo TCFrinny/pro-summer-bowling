@@ -547,8 +547,30 @@ export function computeElimination(input: EliminationInput): EliminationSnapshot
   }
 
   const budget = input.nodeBudget ?? DEFAULT_NODE_BUDGET;
-  const rows: EliminationRow[] = [];
 
+  // Global remaining-schedule feasibility check. Runs BEFORE any clinch /
+  // elimination bound so that inconsistent/impossible schedules can never be
+  // reported as a final status. Never converts search failure into a
+  // clinched/eliminated verdict.
+  const feasBudget = { remaining: budget };
+  const feas = checkGlobalFeasibility(prep, feasBudget);
+  if (feas.status !== "ok") {
+    const reason = feas.status === "budget_exhausted"
+      ? "Could not verify a complete legal remaining schedule within the calculation limit."
+      : "No complete legal remaining schedule exists under the current roster, published matchups, and no-repeat rules.";
+    return {
+      lastCalculatedAt: now,
+      weeksRemaining: prep.weeksRemaining,
+      rows: prep.active.map((b) => ({
+        bowler: b,
+        status: "not_proven" as const,
+        note: reason,
+        diagnostics: { budgetExhausted: feas.status === "budget_exhausted" },
+      })),
+    };
+  }
+
+  const rows: EliminationRow[] = [];
   for (const target of prep.active) {
     rows.push(proveTarget(prep, target, budget));
   }
