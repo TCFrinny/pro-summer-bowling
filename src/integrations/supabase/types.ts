@@ -20,8 +20,8 @@ export type Database = {
           derived: Json
           entered_by: string | null
           id: string
-          linescore_a: Json
-          linescore_b: Json
+          linescore_a: Json | null
+          linescore_b: Json | null
           override: Json | null
           schedule_slot_id: string
           season_id: string
@@ -35,8 +35,8 @@ export type Database = {
           derived: Json
           entered_by?: string | null
           id?: string
-          linescore_a: Json
-          linescore_b: Json
+          linescore_a?: Json | null
+          linescore_b?: Json | null
           override?: Json | null
           schedule_slot_id: string
           season_id: string
@@ -50,8 +50,8 @@ export type Database = {
           derived?: Json
           entered_by?: string | null
           id?: string
-          linescore_a?: Json
-          linescore_b?: Json
+          linescore_a?: Json | null
+          linescore_b?: Json | null
           override?: Json | null
           schedule_slot_id?: string
           season_id?: string
@@ -383,6 +383,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_user_is_admin: { Args: never; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
