@@ -110,12 +110,15 @@ function nextIdWithPrefix(existing: readonly { id: string }[], prefix: string): 
 // -- Validation (server + client share the same rules) ------------------
 
 export const ROSTER_MAX_ACTIVE = 36;
+export const BOWLER_NUMBER_MAX_LEN = 10;
 
+/** ID Number is REQUIRED for every roster bowler and substitute. Returns
+ *  an error message when the value is missing, all-whitespace, or too long.
+ *  Callers must trim before passing. */
 export function validateBowlerNumber(value: string | null | undefined): string | null {
-  if (value == null) return null;
-  const t = value.trim();
-  if (t.length === 0) return null;
-  if (t.length > 10) return "ID Number must be 1–10 characters.";
+  const t = (value ?? "").trim();
+  if (t.length === 0) return "ID Number is required (1–10 characters).";
+  if (t.length > BOWLER_NUMBER_MAX_LEN) return "ID Number must be 1–10 characters.";
   return null;
 }
 export function validateName(value: string): string | null {
@@ -124,6 +127,7 @@ export function validateName(value: string): string | null {
   if (t.length > 80) return "Name is too long.";
   return null;
 }
+/** Accepts 0..300 as a real number (decimals preserved). */
 export function validateAverage(value: number): string | null {
   if (!Number.isFinite(value)) return "Average must be a number.";
   if (value < 0 || value > 300) return "Average must be between 0 and 300.";
