@@ -1210,8 +1210,13 @@ export function buildSnapshot(input: {
     return { standard, advanced };
   };
   const seasonBoards = buildBoards("season");
+  const weekHasResult = (w: WeekSummary) => (matchesByWeek[w.week] ?? []).some((m) => m.result);
   const weekBoards: Record<number, { standard: StandardLeaderboards; advanced: AdvancedLeaderboards }> = {};
-  for (const w of weeks) if (w.completed) weekBoards[w.week] = buildBoards(w.week);
+  // Partial weeks are first-class: any week with at least one saved
+  // result gets its own boards immediately. `completed` remains a
+  // display-only flag driven by "every scheduled slot has a result".
+  for (const w of weeks) if (weekHasResult(w)) weekBoards[w.week] = buildBoards(w.week);
+
 
   // 6) Lane data (derived from actual scratch scores by lane pair).
   const laneBucket = () => new Map<LanePair, { pins: number; games: number; poaSum: number; poaCount: number }>(
@@ -1219,7 +1224,8 @@ export function buildSnapshot(input: {
   );
   const seasonLaneMap = laneBucket();
   const weekLaneMaps: Record<number, ReturnType<typeof laneBucket>> = {};
-  for (const w of weeks) if (w.completed) weekLaneMaps[w.week] = laneBucket();
+  for (const w of weeks) if (weekHasResult(w)) weekLaneMaps[w.week] = laneBucket();
+
   for (const m of allCompleted) {
     const r = m.result!;
     const lb = seasonLaneMap.get(m.lanePair)!;
