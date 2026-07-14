@@ -1,9 +1,11 @@
 /**
  * Deterministic test for scripts/patch-cloudflare-config.mjs.
- * Verifies keep_vars is added, existing fields survive, and malformed
- * input is rejected.
+ * Verifies keep_vars is added, existing fields survive, malformed
+ * input is rejected, and the correct config path is selected
+ * (.output preferred over dist).
  */
-import { patchWranglerConfig } from "../scripts/patch-cloudflare-config.mjs";
+import { patchWranglerConfig, resolveConfigPath } from "../scripts/patch-cloudflare-config.mjs";
+import { resolve } from "node:path";
 
 const sample = {
   name: "tanstack-start-ts",
@@ -41,6 +43,38 @@ if (!threw) throw new Error("malformed JSON should throw");
 threw = false;
 try { patchWranglerConfig("[1,2,3]"); } catch { threw = true; }
 if (!threw) throw new Error("non-object JSON should throw");
+
+// --- Path resolution tests ---
+const cwd = "/repo";
+const outputAbs = resolve(cwd, ".output/server/wrangler.json");
+const distAbs = resolve(cwd, "dist/server/wrangler.json");
+
+// .output preferred when both exist.
+{
+  const exists = (p) => p === outputAbs || p === distAbs;
+  const got = resolveConfigPath(cwd, exists);
+  if (got !== outputAbs) throw new Error(`expected .output preferred, got ${got}`);
+}
+
+// Falls back to dist when only dist exists.
+{
+  const exists = (p) => p === distAbs;
+  const got = resolveConfigPath(cwd, exists);
+  if (got !== distAbs) throw new Error(`expected dist fallback, got ${got}`);
+}
+
+// Returns null when neither exists.
+{
+  const got = resolveConfigPath(cwd, () => false);
+  if (got !== null) throw new Error(`expected null when nothing found, got ${got}`);
+}
+
+// Only .output exists.
+{
+  const exists = (p) => p === outputAbs;
+  const got = resolveConfigPath(cwd, exists);
+  if (got !== outputAbs) throw new Error(`expected .output only, got ${got}`);
+}
 
 // eslint-disable-next-line no-console
 console.log("patch-cloudflare-config self-test passed");
