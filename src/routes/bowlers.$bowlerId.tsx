@@ -2,6 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   LANE_PAIRS,
+  formatPoints,
   getBowler,
   getBowlerHistory,
   type LanePair,
@@ -74,9 +75,17 @@ function BowlerProfile() {
           value={bowler.scratchAverage.toFixed(3)}
           accent
         />
-        <Stat label="Points" value={bowler.points.toString()} accent />
-        <Stat label="Scratch Pinfall" value={bowler.scratchPinfall.toLocaleString()} />
-        <Stat label="Handicap Pinfall" value={bowler.handicapPinfall.toLocaleString()} />
+        <Stat label="Total Points" value={formatPoints(bowler.points)} accent />
+        <Stat label="Game Points" value={formatPoints(bowler.gamePoints)} />
+        <Stat label="Set Points" value={formatPoints(bowler.setPoints)} />
+        <Stat
+          label="Scratch Pinfall"
+          value={bowler.scratchPinfall.toLocaleString()}
+        />
+        <Stat
+          label="Handicap Pinfall"
+          value={bowler.handicapPinfall.toLocaleString()}
+        />
         <Stat label="High Game" value={bowler.highGame.toString()} />
         <Stat label="High Set" value={bowler.highSet.toString()} />
       </div>
@@ -99,7 +108,9 @@ function BowlerProfile() {
                   <th className="px-2 py-2 text-right">G2</th>
                   <th className="px-2 py-2 text-right">G3</th>
                   <th className="px-2 py-2 text-right">Hdcp</th>
-                  <th className="px-2 py-2 text-right">Pts</th>
+                  <th className="px-2 py-2 text-right">GP</th>
+                  <th className="px-2 py-2 text-right">SP</th>
+                  <th className="px-2 py-2 text-right">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -108,27 +119,36 @@ function BowlerProfile() {
                     <td className="px-2 py-1.5">{h.week}</td>
                     <td className="px-2 py-1.5">{h.lanePair}</td>
                     <td className="px-2 py-1.5">{h.opponent}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.scores[0]}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.scores[1]}
-                    </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">
-                      {h.scores[2]}
-                    </td>
+                    {h.scores.map((s, i) => (
+                      <td
+                        key={i}
+                        className="px-2 py-1.5 text-right tabular-nums"
+                        title={`Game point: ${h.gameAwards[i]}`}
+                      >
+                        {s}
+                        <span className="ml-1 text-[10px] text-muted-foreground">
+                          ·{h.gameAwards[i]}
+                        </span>
+                      </td>
+                    ))}
                     <td className="px-2 py-1.5 text-right tabular-nums">
                       {h.handicap}
                     </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {formatPoints(h.gamePoints)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {formatPoints(h.setPoint)}
+                    </td>
                     <td className="px-2 py-1.5 text-right font-semibold text-gold">
-                      {h.points}
+                      {formatPoints(h.totalPoints)}
                     </td>
                   </tr>
                 ))}
                 {history.length === 0 && (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={10}
                       className="py-6 text-center text-muted-foreground"
                     >
                       No completed weeks yet.
@@ -137,6 +157,11 @@ function BowlerProfile() {
                 )}
               </tbody>
             </table>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              Scoring: each game 2 pts (win) / 1 pt (tie) / 0 pts (loss), plus a
+              1-pt set point for the higher 3-game handicap pinfall (0.5 each on
+              a tie). 7 total points per matchup.
+            </p>
           </CardContent>
         </Card>
 
