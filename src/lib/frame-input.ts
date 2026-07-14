@@ -20,11 +20,11 @@ import {
   TENTH_MARK_SET,
   classifyFrame,
   isValidRegulationMark,
-  isValidTenthMark,
   summarizeGame,
   type FrameLinescore,
   type GameLinescore,
 } from "./duckpin";
+
 
 export interface ParsedFrame {
   mark: string;
@@ -45,7 +45,9 @@ export function normalizeMarkInput(raw: string): string {
 
 /**
  * Parse a regulation (frames 1..9) mark.
- * Accepts: X, /, -, or a single digit 0..9 (treated as open with that pinfall).
+ * ONLY the league-established saved notation is accepted: X, /, or -.
+ * Whitespace is trimmed and lowercase "x" normalized to "X". No digit-
+ * based shorthand — the running-total field carries pin information.
  */
 export function parseRegulationMark(raw: string): ParsedFrame | FrameParseError {
   const m = normalizeMarkInput(raw);
@@ -53,63 +55,23 @@ export function parseRegulationMark(raw: string): ParsedFrame | FrameParseError 
   if (m === "X") return { mark: "X", impliedContribution: null, classification: "strike" };
   if (m === "/") return { mark: "/", impliedContribution: null, classification: "spare" };
   if (m === "-") return { mark: "-", impliedContribution: 0, classification: "open" };
-  if (/^[0-9]$/.test(m)) {
-    // Numeric digit shorthand for an open frame.
-    return { mark: "-", impliedContribution: Number(m), classification: "open" };
-  }
-  // Two-digit open like "72" (7 + 2 pins) => open with 9 pins.
-  if (/^[0-9][0-9]$/.test(m)) {
-    const a = Number(m[0]);
-    const b = Number(m[1]);
-    if (a + b > 9) return { error: `Two-ball open cannot exceed 9 pins ("${raw}")` };
-    return { mark: "-", impliedContribution: a + b, classification: "open" };
-  }
-  // "N/" spare notation shorthand.
-  if (/^[0-9]\/$/.test(m)) return { mark: "/", impliedContribution: 10, classification: "spare" };
-  return { error: `Illegal regulation mark "${raw}"` };
+  return { error: `Illegal regulation mark "${raw}" — use X, /, or -` };
 }
 
 /**
  * Normalize a tenth-frame admin input into one of the seven allowed
- * saved display strings. Returns null when the input is not interpretable.
+ * saved display strings: XXX, XX, X/, /X, X, /, -. The only
+ * transformations applied are whitespace trim and lowercase→uppercase.
+ * Digit-based shorthand (e.g. "XX7", "X9/", "9/X") is REJECTED — the
+ * running-total field carries pin information, not the mark.
  */
 export function normalizeTenthMark(raw: string): string | null {
   const m = normalizeMarkInput(raw);
   if (m === "") return null;
   if (TENTH_MARK_SET.has(m)) return m;
-  // Common shorthand → normalize.
-  //  X + digit + digit   -> "XX" (bonus pins recorded via cumulative)
-  //  X + digit + "/"     -> "X/"
-  //  digit + "/" + X     -> "/X"
-  //  digit + "/" + digit -> "/"
-  //  digit + "-"         -> "-"
-  //  X + X + digit       -> "XX"
-  //  X + X + "-"         -> "XX"
-  //  digit + digit       -> "-"
-  //  X + digit           -> "X"
-  //  digit + "/"         -> "/"
-  if (/^X[0-9][0-9]$/.test(m)) return "XX";
-  if (/^X[0-9]\/$/.test(m)) return "X/";
-  if (/^[0-9]\/X$/.test(m)) return "/X";
-  if (/^[0-9]\/[0-9-]$/.test(m)) return "/";
-  if (/^XX[0-9]$/.test(m)) return "XX";
-  if (/^XX-$/.test(m)) return "XX";
-  if (/^X-[0-9]$/.test(m)) return "X";
-  if (/^X-$/.test(m)) return "X";
-  if (/^X-\/$/.test(m)) return "X/";
-  if (/^[0-9][0-9]$/.test(m)) {
-    const a = Number(m[0]); const b = Number(m[1]);
-    if (a + b > 9) return null;
-    return "-";
-  }
-  if (/^[0-9]-$/.test(m)) return "-";
-  if (/^-[0-9]$/.test(m)) return "-";
-  if (/^X[0-9]$/.test(m)) return "X";
-  if (/^[0-9]\/$/.test(m)) return "/";
-  if (/^[0-9]$/.test(m)) return "-";
-  if (isValidTenthMark(m)) return m;
   return null;
 }
+
 
 export interface GameBuildInput {
   /** length 10 — raw mark strings as typed by the admin. */
@@ -199,16 +161,33 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
 // ---------------------------------------------------------------------------
 
 (function selfTest() {
-  // Regulation shorthand.
-  const digit = parseRegulationMark("7");
-  if ("error" in digit || digit.mark !== "-" || digit.impliedContribution !== 7) {
-    throw new Error("frame-input: regulation digit shorthand broken");
+  // Regulation marks: only X / - are accepted; digits and shorthand rejected.
+  const dash = parseRegulationMark("-");
+  if ("error" in dash || dash.mark !== "-") {
+    throw new Error("frame-input: '-' should parse as open");
   }
-  // Tenth normalization fixtures.
+  const lowerX = parseRegulationMark("x");
+  if ("error" in lowerX || lowerX.mark !== "X") {
+    throw new Error("frame-input: lowercase 'x' should normalize to 'X'");
+  }
+  const digit = parseRegulationMark("7");
+  if (!("error" in digit)) {
+    throw new Error("frame-input: digit '7' must be rejected in regulation frames");
+  }
+  const spareShort = parseRegulationMark("9/");
+  if (!("error" in spareShort)) {
+    throw new Error("frame-input: '9/' must be rejected — use '/' with running total");
+  }
+  // Tenth normalization fixtures — accept only the seven allowed strings
+  // (plus whitespace / lowercase-x normalization). Reject digit shorthand.
   const fixtures: Array<[string, string | null]> = [
-    ["X", "X"], ["XXX", "XXX"], ["XX7", "XX"], ["X9/", "X/"], ["9/X", "/X"],
-    ["9/-", "/"], ["9/7", "/"], ["x", "X"], [" xxx ", "XXX"], ["/-", null],
-    ["--", "-"], ["8-", "-"], ["-8", "-"], ["ZZ", null], ["99", null], ["72", "-"],
+    ["X", "X"], ["XXX", "XXX"], ["XX", "XX"], ["X/", "X/"], ["/X", "/X"],
+    ["/", "/"], ["-", "-"],
+    ["x", "X"], [" xxx ", "XXX"], ["  x/  ", "X/"],
+    // Digit / ball-level shorthand — MUST all be rejected.
+    ["XX7", null], ["X9/", null], ["9/X", null], ["9/-", null], ["9/7", null],
+    ["8-", null], ["-8", null], ["--", null], ["/-", null],
+    ["72", null], ["99", null], ["ZZ", null],
   ];
   for (const [input, expected] of fixtures) {
     const got = normalizeTenthMark(input);
@@ -216,9 +195,7 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
       throw new Error(`frame-input: normalizeTenthMark("${input}") -> ${got}, expected ${expected}`);
     }
   }
-  // End-to-end: three frames, striker → spare → open (12+16+6 = 34).
-  //   f1 strike, ball1 f2 = 6 pins, ball2 spare (=10). f1 = 10 + 6 + spare's completion? For a spare we can't infer strike bonus fully;
-  // We just verify cumulative flow when marks match contributions the admin types.
+  // End-to-end cumulative validation still works using only X / - marks.
   const gb = buildGameFromInput({
     marks: ["X","/","-", "-","-","-","-","-","-","-"],
     cumulatives: [20, 30, 30, 30, 30, 30, 30, 30, 30, 30],
@@ -226,7 +203,7 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
   if (gb.game == null) {
     throw new Error("frame-input: expected valid game, got errors: " + gb.errors.join("; "));
   }
-  // Frame-10 example: XXX totals 30 in a solo game.
+  // Frame-10 XXX totals 30 in a solo game.
   const gb10 = buildGameFromInput({
     marks: ["-","-","-","-","-","-","-","-","-","XXX"],
     cumulatives: [0,0,0,0,0,0,0,0,0,30],
@@ -234,4 +211,14 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
   if (gb10.game == null) {
     throw new Error("frame-input: XXX tenth broken: " + gb10.errors.join("; "));
   }
+  // Frame-10 with a fill ball worth 7 pins is saved as "XX" — running total
+  // 27 carries the pin information; the mark stays in the allowed set.
+  const gbFill = buildGameFromInput({
+    marks: ["-","-","-","-","-","-","-","-","-","XX"],
+    cumulatives: [0,0,0,0,0,0,0,0,0,27],
+  });
+  if (gbFill.game == null) {
+    throw new Error("frame-input: XX+7 fill via cumulative broken: " + gbFill.errors.join("; "));
+  }
 })();
+

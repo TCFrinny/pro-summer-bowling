@@ -101,6 +101,13 @@ export function GameEditor({ label, value, onChange, onResult }: GameEditorProps
           />
         ))}
       </div>
+      <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+        Marks: frames 1–9 use <span className="font-mono">X</span> /{" "}
+        <span className="font-mono">/</span> / <span className="font-mono">-</span>.
+        Frame 10 uses exactly one of{" "}
+        <span className="font-mono">XXX · XX · X/ · /X · X · / · -</span>.
+        Pin totals live in the running-total row.
+      </p>
       {result.errors.length > 0 && (
         <ul className="mt-1 list-disc pl-4 text-[10px] text-destructive">
           {result.errors.slice(0, 4).map((e, idx) => <li key={idx}>{e}</li>)}
