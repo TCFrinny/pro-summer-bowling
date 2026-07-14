@@ -38,6 +38,10 @@ function DuckpinBallMark({ className }: { className?: string }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { session } = useSession();
+  const adminLink = session
+    ? { to: "/admin/bowlers" as const, label: "Admin" }
+    : { to: "/admin-login" as const, label: "Admin Login" };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
