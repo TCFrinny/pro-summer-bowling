@@ -151,6 +151,12 @@ export interface BowlerMatchLinescore {
 export interface MatchResult {
   scheduledA: BowlerId;
   scheduledB: BowlerId;
+  /** FROZEN scheduled bowler display names at result-save time.
+   *  Roster renames must NOT rewrite completed history. Every completed
+   *  result read (Weekly Results, history, leaderboards, lane data)
+   *  reads these fields, never the current roster name. */
+  scheduledNameA: string;
+  scheduledNameB: string;
   actualA: BowlerId | null;
   actualB: BowlerId | null;
   actualNameA: string;
@@ -161,6 +167,8 @@ export interface MatchResult {
   subB?: string;
   participationA: SideParticipation;
   participationB: SideParticipation;
+  /** Frozen scheduled entry avg / handicap at save time — used for POA,
+   *  lane summaries, and handicap totals. */
   entryAverageA: number;
   entryAverageB: number;
   handicapA: number;
