@@ -584,6 +584,9 @@ export interface BowlerHistoryRow {
   opponentId: BowlerId;
   actualBowler: string;
   isSub: boolean;
+  /** True when the scheduled bowler was Absent for the week. Score fields
+   *  and linescore are null / zero; W-L and override note still populate. */
+  absent: boolean;
   scores: [number, number, number];
   handicap: number;
   handicapGames: [number, number, number];
@@ -601,7 +604,7 @@ export interface BowlerHistoryRow {
   poaSet: number;
   poaBestGame: number;
   result: "W" | "L" | "T";
-  linescore: BowlerMatchLinescore;
+  linescore: BowlerMatchLinescore | null;
   opponentLinescore: BowlerMatchLinescore | null;
   weekStrikes: number;
   weekSpares: number;
