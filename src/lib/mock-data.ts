@@ -38,11 +38,18 @@ export interface Bowler {
   handicap: number;
   /** Season scratch average, pre-computed and stored (3 decimals). */
   scratchAverage: number;
-  /** Season total match points (0..7 per match, half-points allowed). */
+  /** Season total match points WON (0..7 per match, half-points allowed). */
   points: number;
+  /** Season total match points LOST — equals (7 * matchesPlayed) − points. */
+  pointsLost: number;
   /** Season total game points only (0..6 per match, half-points allowed). */
   gamePoints: number;
-  /** Season total set points only (0, 0.5, or 1 per match). */
+  /**
+   * Season total set-point contribution (0, 0.5, or 1 per match).
+   * Retained internally because the set point still contributes to the
+   * 7-point match total, but it is no longer displayed as a separate
+   * standings statistic.
+   */
   setPoints: number;
   scratchPinfall: number;
   handicapPinfall: number;
