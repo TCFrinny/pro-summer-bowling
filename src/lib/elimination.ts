@@ -229,21 +229,21 @@ interface ScheduleWitness {
 }
 
 interface SearchCtx {
-  target: BowlerId;
+  target: BowlerId | null;
   currUnits: Map<BowlerId, number>;
   pastPairsPreFinal: Set<string>;
   budget: { remaining: number };
 }
 
 /**
- * Try to build a legal remaining schedule where target is paired according
- * to fixed constraints, and for every other unresolved week where target
- * is present the target's opponent is chosen greedily (highest-current
- * opponent first — that opponent gets 0 units under target-wins-all).
+ * Try to build a legal remaining schedule. When `target` is non-null, the
+ * target is paired first each week (opponent iteration ordered by current
+ * points, tiebreak by id). When `target` is null, no bowler is preferred —
+ * used for the global schedule-feasibility check.
  *
  * Returns null if the budget runs out or no legal schedule exists.
  */
-function buildSchedule(prep: Prep, target: BowlerId, budget: { remaining: number }): ScheduleWitness | null {
+function buildSchedule(prep: Prep, target: BowlerId | null, budget: { remaining: number }): ScheduleWitness | null {
   const ctx: SearchCtx = {
     target,
     currUnits: prep.currUnits,
@@ -254,6 +254,28 @@ function buildSchedule(prep: Prep, target: BowlerId, budget: { remaining: number
   const activeUnresolvedSlots = prep.weekSlots.filter((s) => s.unresolvedActive.size > 0);
   const ok = solveWeeks(ctx, activeUnresolvedSlots, 0, witness);
   return ok ? witness : null;
+}
+
+/**
+ * Global remaining-schedule feasibility check. Returns:
+ *  - "ok" if a complete legal schedule exists (including trivially, when
+ *    there are no unresolved matches).
+ *  - "infeasible" if the bounded search completed and no legal schedule
+ *    exists.
+ *  - "budget_exhausted" if the search consumed its node budget without
+ *    reaching a conclusion.
+ * Never returns a witness — this is used only as a precondition for
+ * proving per-target statuses.
+ */
+function checkGlobalFeasibility(
+  prep: Prep,
+  budget: { remaining: number },
+): { status: "ok" | "infeasible" | "budget_exhausted" } {
+  if (prep.weeksRemaining === 0) return { status: "ok" };
+  const witness = buildSchedule(prep, null, budget);
+  if (witness) return { status: "ok" };
+  if (budget.remaining <= 0) return { status: "budget_exhausted" };
+  return { status: "infeasible" };
 }
 
 function solveWeeks(
