@@ -2,12 +2,14 @@
 /**
  * Post-build patch for the generated Cloudflare Worker config.
  *
- * Nitro (cloudflare-module preset) emits `dist/server/wrangler.json`. By
- * default it does NOT include `keep_vars`, which means every
- * `wrangler deploy` wipes any dashboard-managed text environment variables
- * that aren't also declared in the config. That silently removes runtime
- * vars like SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY and breaks server
- * functions after each deploy.
+ * Nitro (cloudflare-module preset) emits the Wrangler config for the built
+ * Worker. Depending on Nitro version the output lives at either
+ * `.output/server/wrangler.json` (current) or `dist/server/wrangler.json`
+ * (legacy). By default neither includes `keep_vars: true`, which means
+ * every `wrangler deploy` wipes any dashboard-managed text environment
+ * variables that aren't also declared in the config. That silently removes
+ * runtime vars like SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY and breaks
+ * server functions after each deploy.
  *
  * This script sets top-level `keep_vars: true` and preserves every other
  * generated field. It exits non-zero on any inconsistency so CI/local
@@ -16,7 +18,12 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-const CONFIG_PATH = resolve(process.cwd(), "dist/server/wrangler.json");
+// Candidate paths in preference order. `.output/...` is the current Nitro
+// shape; `dist/...` is kept for older/local build layouts.
+const CANDIDATE_PATHS = [
+  ".output/server/wrangler.json",
+  "dist/server/wrangler.json",
+];
 
 export function patchWranglerConfig(source) {
   let parsed;
@@ -44,27 +51,60 @@ export function patchWranglerConfig(source) {
   return parsed;
 }
 
+/**
+ * Resolve which Wrangler config to patch. Prefers `.output/server/wrangler.json`
+ * (current Nitro output), falls back to `dist/server/wrangler.json`.
+ * If `.wrangler/deploy/config.json` exists and points at an existing file,
+ * that path is honored as an additional preferred candidate.
+ */
+export function resolveConfigPath(cwd, existsFn = existsSync) {
+  // Honor .wrangler/deploy/config.json if it references an existing file.
+  const deployPointer = resolve(cwd, ".wrangler/deploy/config.json");
+  if (existsFn(deployPointer)) {
+    try {
+      const pointer = JSON.parse(readFileSync(deployPointer, "utf8"));
+      const configPath = pointer && typeof pointer.config === "string" ? pointer.config : null;
+      if (configPath) {
+        const abs = resolve(cwd, ".wrangler/deploy", configPath);
+        if (existsFn(abs)) return abs;
+      }
+    } catch {
+      // Ignore malformed pointer; fall through to candidates.
+    }
+  }
+  for (const rel of CANDIDATE_PATHS) {
+    const abs = resolve(cwd, rel);
+    if (existsFn(abs)) return abs;
+  }
+  return null;
+}
+
 function main() {
-  if (!existsSync(CONFIG_PATH)) {
-    console.error(`[patch-cloudflare-config] ERROR: ${CONFIG_PATH} not found. Did the Nitro build run?`);
+  const cwd = process.cwd();
+  const configPath = resolveConfigPath(cwd);
+  if (!configPath) {
+    console.error(
+      `[patch-cloudflare-config] ERROR: no Wrangler config found. Looked for: ${CANDIDATE_PATHS
+        .map((p) => resolve(cwd, p))
+        .join(", ")}. Did the Nitro build run?`,
+    );
     process.exit(1);
   }
-  const source = readFileSync(CONFIG_PATH, "utf8");
+  const source = readFileSync(configPath, "utf8");
   let patched;
   try {
     patched = patchWranglerConfig(source);
   } catch (err) {
-    console.error(`[patch-cloudflare-config] ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[patch-cloudflare-config] ERROR at ${configPath}: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  writeFileSync(CONFIG_PATH, JSON.stringify(patched, null, 2) + "\n");
-  // Re-read to verify on disk.
-  const verify = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
+  writeFileSync(configPath, JSON.stringify(patched, null, 2) + "\n");
+  const verify = JSON.parse(readFileSync(configPath, "utf8"));
   if (verify.keep_vars !== true) {
-    console.error("[patch-cloudflare-config] ERROR: post-write verification failed");
+    console.error(`[patch-cloudflare-config] ERROR: post-write verification failed at ${configPath}`);
     process.exit(1);
   }
-  console.log("[patch-cloudflare-config] keep_vars: true confirmed in dist/server/wrangler.json");
+  console.log(`[patch-cloudflare-config] keep_vars: true confirmed in ${configPath}`);
 }
 
 // Only run when executed directly (not when imported by tests).
