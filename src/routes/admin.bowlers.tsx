@@ -6,21 +6,25 @@ import { PageHeader } from "@/components/layout/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertTriangle, Archive, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react";
+import { AlertTriangle, Archive, Plus, Power, PowerOff, RefreshCw, Trash2, Undo2 } from "lucide-react";
 import {
   addRosterBowler,
   addSubstitute,
   deleteRosterBowler,
   deleteSubstitute,
   listRosterAndSubs,
+  setRosterActive,
   setRosterArchived,
+  setSubstituteActive,
   setSubstituteArchived,
   updateRosterBowler,
   updateSubstitute,
 } from "@/lib/league-repo.functions";
 import {
+  BOWLER_NUMBER_MAX_LEN,
   isDuplicateActive,
   ROSTER_MAX_ACTIVE,
+  validateAverage,
   validateBowlerNumber,
   type RosteredRow,
   type SubRow,
@@ -40,6 +44,19 @@ export const Route = createFileRoute("/admin/bowlers")({
 
 const ROSTER_QUERY_KEY = ["admin", "roster-and-subs"] as const;
 
+// Allow only digits and a single decimal point in average inputs. Preserves
+// user-entered decimals (e.g. "145.75") without any silent Math.round().
+function sanitizeAverageInput(raw: string): string {
+  // Strip any character that is not a digit or dot, then keep only the first dot.
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  if (firstDot === -1) return cleaned;
+  return cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+}
+function parseAverage(raw: string): number {
+  return Number(raw);
+}
+
 function useRosterQuery() {
   const fetchRoster = useServerFn(listRosterAndSubs);
   return useQuery({
@@ -49,8 +66,6 @@ function useRosterQuery() {
   });
 }
 
-/** Invalidate BOTH the admin roster query and the public snapshot query so
- *  any open public tab receives the freshly-rebuilt snapshot immediately. */
 function useAfterMutation() {
   const qc = useQueryClient();
   return () => {
@@ -67,9 +82,7 @@ function AdminBowlersPage() {
     return (
       <>
         <PageHeader title="Admin · Bowlers & Substitutes" subtitle="Loading roster…" />
-        <Card className="bg-card">
-          <CardContent className="p-4 text-sm text-muted-foreground">Loading…</CardContent>
-        </Card>
+        <Card className="bg-card"><CardContent className="p-4 text-sm text-muted-foreground">Loading…</CardContent></Card>
       </>
     );
   }
@@ -96,7 +109,7 @@ function AdminBowlersPage() {
     <>
       <PageHeader
         title="Admin · Bowlers & Substitutes"
-        subtitle="Live Supabase data. ID Numbers appear on schedules as `Name (ID …)`. Archived people are preserved in the database and hidden from future scheduling."
+        subtitle="Live Supabase data. ID Number is required for every person and appears on schedules as `Name (ID …)`. Active = eligible for scheduling; Archived = preserved for history and hidden from future selection."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -112,7 +125,7 @@ function AdminBowlersPage() {
             >
               {t === "rostered"
                 ? `Rostered (${activeRosterCount}/${ROSTER_MAX_ACTIVE})`
-                : `Substitute Pool (${activeSubCount})`}
+                : `Substitute Pool (${activeSubCount} active)`}
             </button>
           ))}
         </div>
@@ -133,11 +146,7 @@ function AdminBowlersPage() {
         </Card>
       )}
 
-      {tab === "rostered" ? (
-        <RosterTab rostered={rostered} />
-      ) : (
-        <SubsTab subs={subs} />
-      )}
+      {tab === "rostered" ? <RosterTab rostered={rostered} /> : <SubsTab subs={subs} />}
     </>
   );
 }
@@ -150,16 +159,17 @@ function RosterTab({ rostered }: { rostered: RosteredRow[] }) {
   const [idNum, setIdNum] = useState("");
   const invalidate = useAfterMutation();
   const addFn = useServerFn(addRosterBowler);
+  const activeCount = rostered.filter((r) => r.active && !r.archived).length;
+  const atCap = activeCount >= ROSTER_MAX_ACTIVE;
   const add = useMutation({
-    mutationFn: (input: { name: string; entryAverage: number; bowlerNumber: string | null }) =>
+    mutationFn: (input: { name: string; entryAverage: number; bowlerNumber: string }) =>
       addFn({ data: input }),
-    onSuccess: () => {
-      invalidate();
-      setName("");
-      setIdNum("");
-    },
+    onSuccess: () => { invalidate(); setName(""); setIdNum(""); },
     onError: (e) => window.alert((e as Error).message),
   });
+
+  const parsedAvg = parseAverage(avg);
+  const hcpPreview = Number.isFinite(parsedAvg) ? computeHandicap(parsedAvg) : 0;
 
   return (
     <>
@@ -168,49 +178,52 @@ function RosterTab({ rostered }: { rostered: RosteredRow[] }) {
           <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
             Add rostered bowler
           </div>
-          <div className="grid gap-2 sm:grid-cols-[1fr_120px_130px_120px_auto]">
+          <div className="grid gap-2 sm:grid-cols-[1fr_140px_140px_120px_auto]">
             <div>
-              <Label className="text-[10px]">Name</Label>
+              <Label className="text-[10px]">Name <span className="text-destructive">*</span></Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
             </div>
             <div>
-              <Label className="text-[10px]">ID Number</Label>
+              <Label className="text-[10px]">ID Number <span className="text-destructive">*</span></Label>
               <Input
                 value={idNum}
-                maxLength={10}
+                maxLength={BOWLER_NUMBER_MAX_LEN}
                 onChange={(e) => setIdNum(e.target.value)}
-                placeholder="optional"
+                placeholder="required, 1–10"
               />
             </div>
             <div>
-              <Label className="text-[10px]">Entry avg</Label>
+              <Label className="text-[10px]">Entry avg (0–300)</Label>
               <Input
-                inputMode="numeric"
+                inputMode="decimal"
                 value={avg}
-                onChange={(e) => setAvg(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={(e) => setAvg(sanitizeAverageInput(e.target.value))}
+                placeholder="e.g. 145.75"
               />
             </div>
             <div>
               <Label className="text-[10px]">Handicap</Label>
               <div className="rounded-md border border-border bg-background/40 px-3 py-2 text-sm font-mono">
-                {computeHandicap(Number(avg || 0))}
+                {hcpPreview}
               </div>
             </div>
             <div className="flex items-end">
               <button
-                disabled={add.isPending}
+                disabled={add.isPending || atCap}
+                title={atCap ? `Active roster is full (${ROSTER_MAX_ACTIVE})` : undefined}
                 onClick={() => {
                   const trimmed = name.trim();
-                  const n = Number(avg);
-                  if (!trimmed || !Number.isFinite(n)) return;
-                  if (isDuplicateActive(trimmed, rostered)) {
-                    window.alert(`"${trimmed}" is already on the active roster.`);
-                    return;
-                  }
                   const bn = idNum.trim();
+                  if (!trimmed) return window.alert("Name is required.");
                   const eNum = validateBowlerNumber(bn);
-                  if (eNum) { window.alert(eNum); return; }
-                  add.mutate({ name: trimmed, entryAverage: n, bowlerNumber: bn || null });
+                  if (eNum) return window.alert(eNum);
+                  const n = parseAverage(avg);
+                  const eAvg = validateAverage(n);
+                  if (eAvg) return window.alert(eAvg);
+                  if (isDuplicateActive(trimmed, rostered)) {
+                    return window.alert(`"${trimmed}" is already on the active roster.`);
+                  }
+                  add.mutate({ name: trimmed, entryAverage: n, bowlerNumber: bn });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
               >
@@ -218,97 +231,106 @@ function RosterTab({ rostered }: { rostered: RosteredRow[] }) {
               </button>
             </div>
           </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            ID Number is required — decimal averages are preserved (handicap ={" "}
+            <span className="font-mono">max(0, floor(0.8 × (160 − avg)))</span>).
+          </p>
         </CardContent>
       </Card>
 
       <div className="grid gap-2">
         {rostered.map((r) => (
-          <RosterRow key={r.id} record={r} rows={rostered} />
+          <RosterRow key={r.id} record={r} rows={rostered} atActiveCap={atCap} />
         ))}
       </div>
     </>
   );
 }
 
-function RosterRow({ record, rows }: { record: RosteredRow; rows: RosteredRow[] }) {
+function RosterRow({
+  record, rows, atActiveCap,
+}: { record: RosteredRow; rows: RosteredRow[]; atActiveCap: boolean }) {
   const [name, setName] = useState(record.name);
   const [avg, setAvg] = useState(String(record.entry_average));
   const [idNum, setIdNum] = useState(record.bowler_number ?? "");
   const invalidate = useAfterMutation();
   const updateFn = useServerFn(updateRosterBowler);
+  const activeFn = useServerFn(setRosterActive);
   const archiveFn = useServerFn(setRosterArchived);
   const deleteFn = useServerFn(deleteRosterBowler);
+
   const upd = useMutation({
-    mutationFn: (input: { id: string; name: string; entryAverage: number; bowlerNumber: string | null }) =>
+    mutationFn: (input: { id: string; name: string; entryAverage: number; bowlerNumber: string }) =>
       updateFn({ data: input }),
-    onSuccess: invalidate,
-    onError: (e) => window.alert((e as Error).message),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
+  });
+  const act = useMutation({
+    mutationFn: (input: { id: string; active: boolean }) => activeFn({ data: input }),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
   });
   const arch = useMutation({
     mutationFn: (input: { id: string; archived: boolean }) => archiveFn({ data: input }),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate();
+      // The server returns the row as INACTIVE after a restore — surface that.
+    },
     onError: (e) => window.alert((e as Error).message),
   });
   const del = useMutation({
     mutationFn: (input: { id: string }) => deleteFn({ data: input }),
-    onSuccess: invalidate,
-    onError: (e) => window.alert((e as Error).message),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
   });
 
+  const parsedAvg = parseAverage(avg);
   const dirty =
     name !== record.name ||
-    Number(avg) !== record.entry_average ||
+    !Number.isNaN(parsedAvg) && parsedAvg !== record.entry_average ||
     (idNum || "") !== (record.bowler_number ?? "");
+  const legacyMissingId = !(record.bowler_number ?? "").trim();
 
   return (
     <Card className={cn("bg-card", record.archived && "opacity-60")}>
-      <CardContent className="grid grid-cols-[80px_1fr_110px_100px_100px_auto_auto] items-center gap-2 p-3">
+      <CardContent className="grid grid-cols-[80px_1fr_120px_110px_110px_auto_auto] items-center gap-2 p-3">
         <div className="font-mono text-xs text-muted-foreground">{record.id}</div>
         <Input value={name} onChange={(e) => setName(e.target.value)} className="h-8" />
         <Input
           value={idNum}
-          maxLength={10}
+          maxLength={BOWLER_NUMBER_MAX_LEN}
           onChange={(e) => setIdNum(e.target.value)}
-          className="h-8 font-mono"
-          placeholder="ID"
+          className={cn("h-8 font-mono", legacyMissingId && "border-destructive/60")}
+          placeholder="required"
         />
         <Input
           value={avg}
-          inputMode="numeric"
-          onChange={(e) => setAvg(e.target.value.replace(/[^0-9]/g, ""))}
+          inputMode="decimal"
+          onChange={(e) => setAvg(sanitizeAverageInput(e.target.value))}
           className="h-8 font-mono"
         />
         <div className="text-xs text-muted-foreground">
-          hcp <span className="font-mono text-foreground">{computeHandicap(Number(avg || 0))}</span>
+          hcp{" "}
+          <span className="font-mono text-foreground">
+            {Number.isFinite(parsedAvg) ? computeHandicap(parsedAvg) : "–"}
+          </span>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          {record.archived ? (
-            <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Archived
-            </span>
-          ) : (
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-400">
-              Active
-            </span>
-          )}
+        <div className="flex items-center gap-1">
+          <StatusBadge active={record.active} archived={record.archived} />
         </div>
         <div className="flex items-center gap-1">
           <button
             disabled={!dirty || upd.isPending}
             onClick={() => {
               const trimmed = name.trim();
-              if (!trimmed) return;
+              const bn = idNum.trim();
+              if (!trimmed) return window.alert("Name is required.");
+              const eNum = validateBowlerNumber(bn);
+              if (eNum) return window.alert(eNum);
+              const eAvg = validateAverage(parsedAvg);
+              if (eAvg) return window.alert(eAvg);
               if (isDuplicateActive(trimmed, rows, record.id)) {
-                window.alert(`"${trimmed}" is already on the active roster.`);
-                return;
+                return window.alert(`"${trimmed}" is already on the active roster.`);
               }
-              const eNum = validateBowlerNumber(idNum.trim());
-              if (eNum) { window.alert(eNum); return; }
               upd.mutate({
-                id: record.id,
-                name: trimmed,
-                entryAverage: Number(avg),
-                bowlerNumber: idNum.trim() || null,
+                id: record.id, name: trimmed,
+                entryAverage: parsedAvg, bowlerNumber: bn,
               });
             }}
             className={cn(
@@ -320,9 +342,21 @@ function RosterRow({ record, rows }: { record: RosteredRow; rows: RosteredRow[] 
           >
             {upd.isPending ? "Saving…" : "Save"}
           </button>
+
+          {!record.archived && (
+            <button
+              title={record.active ? "Deactivate (hide from scheduling)" : "Activate"}
+              disabled={act.isPending || (!record.active && atActiveCap)}
+              onClick={() => act.mutate({ id: record.id, active: !record.active })}
+              className="rounded-md border border-border p-1 hover:bg-accent/40 disabled:opacity-50"
+            >
+              {record.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+            </button>
+          )}
+
           {record.archived ? (
             <button
-              title="Restore from archive"
+              title="Restore (stays inactive until you re-activate)"
               disabled={arch.isPending}
               onClick={() => arch.mutate({ id: record.id, archived: false })}
               className="rounded-md border border-border p-1 hover:bg-accent/40"
@@ -354,6 +388,11 @@ function RosterRow({ record, rows }: { record: RosteredRow; rows: RosteredRow[] 
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+        {legacyMissingId && (
+          <div className="col-span-full text-[10px] text-destructive">
+            Legacy row missing ID Number — add one before saving.
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -368,12 +407,9 @@ function SubsTab({ subs }: { subs: SubRow[] }) {
   const invalidate = useAfterMutation();
   const addFn = useServerFn(addSubstitute);
   const add = useMutation({
-    mutationFn: (input: { name: string; startingAverage: number; bowlerNumber: string | null }) =>
+    mutationFn: (input: { name: string; startingAverage: number; bowlerNumber: string }) =>
       addFn({ data: input }),
-    onSuccess: () => {
-      invalidate();
-      setName(""); setIdNum(""); setAvg("");
-    },
+    onSuccess: () => { invalidate(); setName(""); setIdNum(""); setAvg(""); },
     onError: (e) => window.alert((e as Error).message),
   });
 
@@ -381,30 +417,28 @@ function SubsTab({ subs }: { subs: SubRow[] }) {
     <>
       <Card className="mb-3 bg-card">
         <CardContent className="p-3">
-          <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
-            Add substitute
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[1fr_120px_140px_auto]">
+          <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">Add substitute</div>
+          <div className="grid gap-2 sm:grid-cols-[1fr_140px_160px_auto]">
             <div>
-              <Label className="text-[10px]">Name</Label>
+              <Label className="text-[10px]">Name <span className="text-destructive">*</span></Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" />
             </div>
             <div>
-              <Label className="text-[10px]">ID Number</Label>
+              <Label className="text-[10px]">ID Number <span className="text-destructive">*</span></Label>
               <Input
                 value={idNum}
-                maxLength={10}
+                maxLength={BOWLER_NUMBER_MAX_LEN}
                 onChange={(e) => setIdNum(e.target.value)}
-                placeholder="optional"
+                placeholder="required, 1–10"
               />
             </div>
             <div>
-              <Label className="text-[10px]">Starting Avg</Label>
+              <Label className="text-[10px]">Starting Avg (0–300)</Label>
               <Input
-                inputMode="numeric"
+                inputMode="decimal"
                 value={avg}
-                onChange={(e) => setAvg(e.target.value.replace(/[^0-9]/g, ""))}
-                placeholder="required"
+                onChange={(e) => setAvg(sanitizeAverageInput(e.target.value))}
+                placeholder="required, e.g. 132.5"
               />
             </div>
             <div className="flex items-end">
@@ -412,22 +446,18 @@ function SubsTab({ subs }: { subs: SubRow[] }) {
                 disabled={add.isPending}
                 onClick={() => {
                   const trimmed = name.trim();
-                  if (!trimmed) return;
-                  if (avg.trim() === "") {
-                    window.alert("A Starting Average is required so the sub's handicap can be computed.");
-                    return;
-                  }
+                  const bn = idNum.trim();
+                  if (!trimmed) return window.alert("Name is required.");
+                  const eNum = validateBowlerNumber(bn);
+                  if (eNum) return window.alert(eNum);
+                  if (avg.trim() === "") return window.alert("Starting Average is required.");
+                  const n = parseAverage(avg);
+                  const eAvg = validateAverage(n);
+                  if (eAvg) return window.alert(eAvg);
                   if (isDuplicateActive(trimmed, subs)) {
-                    window.alert(`Substitute "${trimmed}" is already active.`);
-                    return;
+                    return window.alert(`Substitute "${trimmed}" is already active.`);
                   }
-                  const eNum = validateBowlerNumber(idNum.trim());
-                  if (eNum) { window.alert(eNum); return; }
-                  add.mutate({
-                    name: trimmed,
-                    startingAverage: Number(avg),
-                    bowlerNumber: idNum.trim() || null,
-                  });
+                  add.mutate({ name: trimmed, startingAverage: n, bowlerNumber: bn });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
               >
@@ -436,9 +466,9 @@ function SubsTab({ subs }: { subs: SubRow[] }) {
             </div>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground">
-            A substitute must have a Starting Average before they can score — the sub's handicap for
-            the match is <span className="font-mono">floor(0.80 × (160 − avg))</span>. Points and
-            handicap pinfall are still credited to the scheduled bowler.
+            ID Number and Starting Average are required — the sub's handicap is{" "}
+            <span className="font-mono">max(0, floor(0.8 × (160 − avg)))</span>. Points and handicap
+            pinfall are still credited to the scheduled bowler.
           </p>
         </CardContent>
       </Card>
@@ -458,79 +488,76 @@ function SubRowRow({ record, rows }: { record: SubRow; rows: SubRow[] }) {
   const [avg, setAvg] = useState(record.starting_average != null ? String(record.starting_average) : "");
   const invalidate = useAfterMutation();
   const updateFn = useServerFn(updateSubstitute);
+  const activeFn = useServerFn(setSubstituteActive);
   const archiveFn = useServerFn(setSubstituteArchived);
   const deleteFn = useServerFn(deleteSubstitute);
+
   const upd = useMutation({
-    mutationFn: (input: { id: string; name: string; startingAverage: number; bowlerNumber: string | null }) =>
+    mutationFn: (input: { id: string; name: string; startingAverage: number; bowlerNumber: string }) =>
       updateFn({ data: input }),
-    onSuccess: invalidate,
-    onError: (e) => window.alert((e as Error).message),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
+  });
+  const act = useMutation({
+    mutationFn: (input: { id: string; active: boolean }) => activeFn({ data: input }),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
   });
   const arch = useMutation({
     mutationFn: (input: { id: string; archived: boolean }) => archiveFn({ data: input }),
-    onSuccess: invalidate,
-    onError: (e) => window.alert((e as Error).message),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
   });
   const del = useMutation({
     mutationFn: (input: { id: string }) => deleteFn({ data: input }),
-    onSuccess: invalidate,
-    onError: (e) => window.alert((e as Error).message),
+    onSuccess: invalidate, onError: (e) => window.alert((e as Error).message),
   });
 
   const savedAvg = record.starting_average != null ? String(record.starting_average) : "";
+  const parsedAvg = parseAverage(avg);
   const dirty =
     name !== record.name ||
     (idNum || "") !== (record.bowler_number ?? "") ||
     avg !== savedAvg;
+  const legacyMissingId = !(record.bowler_number ?? "").trim();
 
   return (
     <Card className={cn("bg-card", record.archived && "opacity-60")}>
-      <CardContent className="grid grid-cols-[80px_1fr_110px_110px_auto_auto] items-center gap-2 p-3">
+      <CardContent className="grid grid-cols-[80px_1fr_120px_120px_auto_auto] items-center gap-2 p-3">
         <div className="font-mono text-xs text-muted-foreground">{record.id}</div>
         <Input value={name} onChange={(e) => setName(e.target.value)} className="h-8" />
         <Input
           value={idNum}
-          maxLength={10}
+          maxLength={BOWLER_NUMBER_MAX_LEN}
           onChange={(e) => setIdNum(e.target.value)}
-          className="h-8 font-mono"
-          placeholder="ID"
+          className={cn("h-8 font-mono", legacyMissingId && "border-destructive/60")}
+          placeholder="required"
         />
         <Input
           value={avg}
-          inputMode="numeric"
-          onChange={(e) => setAvg(e.target.value.replace(/[^0-9]/g, ""))}
+          inputMode="decimal"
+          onChange={(e) => setAvg(sanitizeAverageInput(e.target.value))}
           className="h-8 font-mono"
           placeholder="Start avg"
         />
-        <div className="flex items-center gap-2 text-xs">
-          {record.archived ? (
-            <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Archived
-            </span>
-          ) : (
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-400">
-              Active
-            </span>
-          )}
+        <div className="flex items-center gap-1">
+          <StatusBadge active={record.active} archived={record.archived} />
         </div>
         <div className="flex items-center gap-1">
           <button
             disabled={!dirty || upd.isPending}
             onClick={() => {
               const trimmed = name.trim();
-              if (!trimmed) return;
-              if (avg.trim() === "") { window.alert("Starting Average is required."); return; }
+              const bn = idNum.trim();
+              if (!trimmed) return window.alert("Name is required.");
+              const eNum = validateBowlerNumber(bn);
+              if (eNum) return window.alert(eNum);
+              if (avg.trim() === "") return window.alert("Starting Average is required.");
+              const eAvg = validateAverage(parsedAvg);
+              if (eAvg) return window.alert(eAvg);
               if (isDuplicateActive(trimmed, rows, record.id)) {
-                window.alert(`Substitute "${trimmed}" is already active.`);
-                return;
+                return window.alert(`Substitute "${trimmed}" is already active.`);
               }
-              const eNum = validateBowlerNumber(idNum.trim());
-              if (eNum) { window.alert(eNum); return; }
               upd.mutate({
-                id: record.id,
-                name: trimmed,
-                startingAverage: Number(avg),
-                bowlerNumber: idNum.trim() || null,
+                id: record.id, name: trimmed,
+                startingAverage: parsedAvg, bowlerNumber: bn,
               });
             }}
             className={cn(
@@ -542,9 +569,19 @@ function SubRowRow({ record, rows }: { record: SubRow; rows: SubRow[] }) {
           >
             {upd.isPending ? "Saving…" : "Save"}
           </button>
+          {!record.archived && (
+            <button
+              title={record.active ? "Deactivate" : "Activate"}
+              disabled={act.isPending}
+              onClick={() => act.mutate({ id: record.id, active: !record.active })}
+              className="rounded-md border border-border p-1 hover:bg-accent/40"
+            >
+              {record.active ? <PowerOff className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
+            </button>
+          )}
           {record.archived ? (
             <button
-              title="Restore from archive"
+              title="Restore (stays inactive until you re-activate)"
               disabled={arch.isPending}
               onClick={() => arch.mutate({ id: record.id, archived: false })}
               className="rounded-md border border-border p-1 hover:bg-accent/40"
@@ -565,7 +602,7 @@ function SubRowRow({ record, rows }: { record: SubRow; rows: SubRow[] }) {
             </button>
           )}
           <button
-            title="Delete permanently"
+            title="Delete permanently (only if never used in a match)"
             disabled={del.isPending}
             onClick={() => {
               if (window.confirm(`Permanently delete substitute "${record.name}"?`))
@@ -576,7 +613,34 @@ function SubRowRow({ record, rows }: { record: SubRow; rows: SubRow[] }) {
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+        {legacyMissingId && (
+          <div className="col-span-full text-[10px] text-destructive">
+            Legacy row missing ID Number — add one before saving.
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function StatusBadge({ active, archived }: { active: boolean; archived: boolean }) {
+  if (archived) {
+    return (
+      <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        Archived
+      </span>
+    );
+  }
+  if (active) {
+    return (
+      <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-400">
+        Active
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-400">
+      Inactive
+    </span>
   );
 }
