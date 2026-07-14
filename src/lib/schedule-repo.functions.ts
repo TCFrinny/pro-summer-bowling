@@ -53,25 +53,46 @@ async function ensureSeasonId(context: Ctx): Promise<string> {
   return ins.data.id;
 }
 
+/**
+ * Upsert (season_id, week_number) → weeks row. Only fields present with a
+ * NON-UNDEFINED value in `patch` are written. This preserves the existing
+ * `published`, `date`, and `completed` values whenever a caller doesn't
+ * intend to change them. Callers that want to explicitly clear `date` must
+ * pass `date: null` (not `undefined`).
+ */
 async function upsertWeekRow(
   context: Ctx, seasonId: string, weekNumber: number,
   patch: { date?: string | null; published?: boolean; completed?: boolean },
 ): Promise<string> {
+  const clean = __buildWeekPatchForTest(patch);
   const found = await context.supabase
     .from("weeks").select("id")
     .eq("season_id", seasonId).eq("week_number", weekNumber).maybeSingle();
   if (found.error) throw new Error(found.error.message);
   if (found.data) {
+    if (Object.keys(clean).length === 0) return found.data.id;
     const upd = await context.supabase.from("weeks")
-      .update(patch).eq("id", found.data.id);
+      .update(clean).eq("id", found.data.id);
     if (upd.error) throw new Error(upd.error.message);
     return found.data.id;
   }
   const ins = await context.supabase.from("weeks")
-    .insert({ season_id: seasonId, week_number: weekNumber, ...patch })
+    .insert({ season_id: seasonId, week_number: weekNumber, ...clean })
     .select("id").single();
   if (ins.error) throw new Error(ins.error.message);
   return ins.data.id;
+}
+
+/** Pure helper exposed for deterministic tests. Strips undefined so a
+ *  weeks PATCH never touches an unrelated column. */
+export function __buildWeekPatchForTest(patch: {
+  date?: string | null; published?: boolean; completed?: boolean;
+}): Record<string, unknown> {
+  const clean: Record<string, unknown> = {};
+  if (patch.date !== undefined) clean.date = patch.date;
+  if (patch.published !== undefined) clean.published = patch.published;
+  if (patch.completed !== undefined) clean.completed = patch.completed;
+  return clean;
 }
 
 async function loadActiveRoster(context: Ctx, seasonId: string) {
