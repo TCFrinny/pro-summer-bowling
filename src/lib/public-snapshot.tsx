@@ -138,12 +138,32 @@ export function useSnapshotRealtime(): void {
  *  into the mock-data provider, and either renders children or a friendly
  *  empty state when no snapshot row exists for the current season. */
 export function PublicSnapshotGate({ children }: { children: ReactNode }) {
-  const { data, isLoading, isError } = useQuery(snapshotQueryOptions);
+  const { data, isPending, isError, fetchStatus } = useQuery(snapshotQueryOptions);
 
-  // Install/uninstall on every render — cheap, avoids stale closures.
+  // Install (or clear) the DB snapshot each render so getters called by
+  // children read from the right source. When data is undefined (initial
+  // fetch not settled yet) we clear the provider so no local seed can leak
+  // through even if a child renders — the gate itself renders a neutral
+  // loading state below.
   installDbSnapshot(data ?? null);
 
-  if (isLoading) return <>{children}</>; // let route render with local fallback until first fetch settles
+  // `isPending` is true until the first fetch resolves. We ALSO treat any
+  // in-flight fetch as loading — this guards against the SSR→client
+  // hydration case where a fresh client-side QueryClient starts empty and
+  // would otherwise briefly render children with the local seed.
+  if (isPending || (data === undefined && fetchStatus === "fetching")) {
+    return (
+      <AppShell>
+        <div
+          className="flex min-h-[40vh] items-center justify-center"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div className="text-sm text-muted-foreground">Loading season data…</div>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (isError || !data) {
     return (
@@ -159,6 +179,7 @@ export function PublicSnapshotGate({ children }: { children: ReactNode }) {
 
   return <>{children}</>;
 }
+
 
 /** Convenience: wraps `<Outlet />` from the root, gating only non-admin,
  *  non-auth paths. Admin routes must stay reachable without the gate. */
