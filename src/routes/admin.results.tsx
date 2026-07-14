@@ -627,7 +627,7 @@ function SidePanel({
         </div>
 
         {side.status === "substitute" && (
-          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_140px]">
+          <div className="mb-3 grid gap-2 sm:grid-cols-[2fr_140px]">
             <div>
               <Label className="text-[10px]">Pick from pool</Label>
               <Select
@@ -636,10 +636,12 @@ function SidePanel({
                   const found = subs.find((s) => s.id === v);
                   onChange({
                     subId: v,
-                    subName: found?.name ?? side.subName,
-                    subStartAvg: side.subStartAvg
-                      ? side.subStartAvg
-                      : (found?.starting_average != null ? String(found.starting_average) : ""),
+                    subName: found?.name ?? "",
+                    // Prefill the sub's stored starting average — admin
+                    // can still override for this specific match.
+                    subStartAvg: found?.starting_average != null
+                      ? String(found.starting_average)
+                      : side.subStartAvg,
                   });
                 }}
               >
@@ -649,22 +651,15 @@ function SidePanel({
                 <SelectContent>
                   {subs.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.name}{s.starting_average != null ? ` · avg ${s.starting_average}` : ""}
+                      {s.name}
+                      {s.bowler_number ? ` (ID ${s.bowler_number})` : ""}
+                      {s.starting_average != null ? ` · avg ${s.starting_average}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label className="text-[10px]">Or type a name</Label>
-              <Input
-                data-testid={`${testId}-sub-name`}
-                value={side.subName}
-                onChange={(e) => onChange({ subId: "", subName: e.target.value })}
-                placeholder="Walk-on substitute"
-              />
               <p className="mt-1 text-[10px] text-muted-foreground">
-                Add subs with ID numbers via Manage Bowlers.
+                Substitutes must be added first via Manage Bowlers (ID Number required). Walk-on names are not allowed.
               </p>
             </div>
             <div>
@@ -678,6 +673,7 @@ function SidePanel({
                 placeholder="e.g. 138"
               />
             </div>
+
           </div>
         )}
 
