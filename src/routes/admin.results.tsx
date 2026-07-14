@@ -57,6 +57,10 @@ interface SideDraft {
    *  means the admin is typing a free-form name in `subName`. */
   subId: string;
   subName: string;
+  /** Sub's own Starting Average (string for input control). Required when
+   *  status === "substitute" — sub's handicap for this match derives from
+   *  it via floor(0.80 * (160 - startingAverage)). */
+  subStartAvg: string;
   linescore: SideEditorState;
 }
 
@@ -74,6 +78,7 @@ function emptySide(): SideDraft {
     status: "rostered",
     subId: "",
     subName: "",
+    subStartAvg: "",
     linescore: emptySideEditorState(),
   };
 }
@@ -110,10 +115,17 @@ function draftFromResult(r: MatchResult): Draft {
       }
     }
     const isSub = p.status === "substitute";
+    // For a saved sub, `entryAverage*` on the result is already the sub's
+    // Starting Average that was used to score the match. Round-trip it so
+    // re-saving the same match does not change the sub's handicap.
+    const savedSubStartAvg = isSub
+      ? String(isA ? r.entryAverageA : r.entryAverageB)
+      : "";
     return {
       status: p.status,
       subId: isSub && p.actualId ? p.actualId : "",
       subName: isSub && !p.actualId ? p.actualName : "",
+      subStartAvg: savedSubStartAvg,
       linescore: { games },
     };
   };
@@ -174,13 +186,27 @@ function AdminResultsPage() {
   const a = currentMatch ? getBowler(currentMatch.bowlerA) : undefined;
   const b = currentMatch ? getBowler(currentMatch.bowlerB) : undefined;
 
+  // Effective handicap per side: rostered/absent → scheduled bowler's;
+  // substitute → derived from the sub's Starting Average.
+  const subHandicapFromAvg = (raw: string): number | null => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return Math.floor(0.8 * (160 - n));
+  };
+  const effHandicapA = draft.sideA.status === "substitute"
+    ? (subHandicapFromAvg(draft.sideA.subStartAvg) ?? 0)
+    : (a?.handicap ?? 0);
+  const effHandicapB = draft.sideB.status === "substitute"
+    ? (subHandicapFromAvg(draft.sideB.subStartAvg) ?? 0)
+    : (b?.handicap ?? 0);
+
   const derivedA = useMemo(
-    () => computeSideDerived(draft.sideA.linescore, a?.handicap ?? 0),
-    [draft.sideA.linescore, a?.handicap],
+    () => computeSideDerived(draft.sideA.linescore, effHandicapA),
+    [draft.sideA.linescore, effHandicapA],
   );
   const derivedB = useMemo(
-    () => computeSideDerived(draft.sideB.linescore, b?.handicap ?? 0),
-    [draft.sideB.linescore, b?.handicap],
+    () => computeSideDerived(draft.sideB.linescore, effHandicapB),
+    [draft.sideB.linescore, effHandicapB],
   );
 
   const validation = useMemo(() => {
@@ -189,8 +215,14 @@ function AdminResultsPage() {
       ["A", draft.sideA, derivedA],
       ["B", draft.sideB, derivedB],
     ] as const) {
-      if (s.status === "substitute" && !s.subId && !s.subName.trim()) {
-        errors.push(`Side ${label}: pick a substitute or type a name`);
+      if (s.status === "substitute") {
+        if (!s.subId && !s.subName.trim()) {
+          errors.push(`Side ${label}: pick a substitute or type a name`);
+        }
+        const avg = Number(s.subStartAvg);
+        if (!s.subStartAvg.trim() || !Number.isFinite(avg) || avg <= 0 || avg > 300) {
+          errors.push(`Side ${label}: substitute Starting Average required (1–300)`);
+        }
       }
       if (s.status !== "absent" && !d.valid) {
         errors.push(`Side ${label}: linescore incomplete or invalid`);
@@ -220,8 +252,8 @@ function AdminResultsPage() {
     ) return null;
     let ptsA = 0, ptsB = 0;
     for (let i = 0; i < 3; i++) {
-      const ga = (derivedA.games[i]!.scratchTotal) + (a?.handicap ?? 0);
-      const gb = (derivedB.games[i]!.scratchTotal) + (b?.handicap ?? 0);
+      const ga = (derivedA.games[i]!.scratchTotal) + effHandicapA;
+      const gb = (derivedB.games[i]!.scratchTotal) + effHandicapB;
       if (ga > gb) ptsA += 2;
       else if (gb > ga) ptsB += 2;
       else { ptsA += 1; ptsB += 1; }
@@ -232,7 +264,7 @@ function AdminResultsPage() {
     else if (hsB > hsA) ptsB += 1;
     else { ptsA += 0.5; ptsB += 0.5; }
     return { ptsA, ptsB };
-  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB, a?.handicap, b?.handicap]);
+  }, [draft.sideA.status, draft.sideB.status, derivedA, derivedB, effHandicapA, effHandicapB]);
 
   const handleReset = () => {
     setDraft(savedResult ? draftFromResult(savedResult) : emptyDraft());
@@ -249,18 +281,26 @@ function AdminResultsPage() {
       ];
     };
     if (!currentMatch) return;
+    const subStartAvgOrUndef = (raw: string): number | undefined => {
+      const n = Number(raw);
+      return Number.isFinite(n) && raw.trim() !== "" ? n : undefined;
+    };
     const outcome = applyResult({
       matchId: currentMatch.id,
       sideA: {
         status: draft.sideA.status,
         substituteId: draft.sideA.subId || undefined,
         substituteName: draft.sideA.subName.trim() || undefined,
+        substituteStartingAverage: draft.sideA.status === "substitute"
+          ? subStartAvgOrUndef(draft.sideA.subStartAvg) : undefined,
         games: buildSideGames(draft.sideA, derivedA),
       },
       sideB: {
         status: draft.sideB.status,
         substituteId: draft.sideB.subId || undefined,
         substituteName: draft.sideB.subName.trim() || undefined,
+        substituteStartingAverage: draft.sideB.status === "substitute"
+          ? subStartAvgOrUndef(draft.sideB.subStartAvg) : undefined,
         games: buildSideGames(draft.sideB, derivedB),
       },
       override: draft.overrideEnabled ? {
@@ -348,7 +388,8 @@ function AdminResultsPage() {
         <SidePanel
           testId="side-A"
           label={`Side A — ${a?.name ?? currentMatch.bowlerA}`}
-          handicap={a?.handicap ?? 0}
+          handicap={effHandicapA}
+          scheduledHandicap={a?.handicap ?? 0}
           side={draft.sideA}
           subs={activeSubs}
           onChange={(patch) => setSide("A", patch)}
@@ -356,7 +397,8 @@ function AdminResultsPage() {
         <SidePanel
           testId="side-B"
           label={`Side B — ${b?.name ?? currentMatch.bowlerB}`}
-          handicap={b?.handicap ?? 0}
+          handicap={effHandicapB}
+          scheduledHandicap={b?.handicap ?? 0}
           side={draft.sideB}
           subs={activeSubs}
           onChange={(patch) => setSide("B", patch)}
@@ -478,15 +520,19 @@ function AdminResultsPage() {
 function SidePanel({
   label,
   handicap,
+  scheduledHandicap,
   side,
   subs,
   onChange,
   testId,
 }: {
   label: string;
+  /** Effective handicap to apply to the linescore (sub's if substitute). */
   handicap: number;
+  /** Scheduled bowler's own handicap; shown for reference on sub rows. */
+  scheduledHandicap: number;
   side: SideDraft;
-  subs: { id: string; name: string }[];
+  subs: import("@/lib/league-store").SubstituteRecord[];
   onChange: (patch: Partial<SideDraft>) => void;
   testId?: string;
 }) {
@@ -494,8 +540,13 @@ function SidePanel({
   return (
     <Card className="bg-card" data-testid={testId}>
       <CardContent className="p-4">
-        <div className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">
-          {label}
+        <div className="mb-2 flex items-baseline justify-between gap-3 text-xs uppercase tracking-widest text-muted-foreground">
+          <span>{label}</span>
+          {side.status === "substitute" && (
+            <span className="normal-case tracking-normal text-[10px] text-muted-foreground">
+              Scheduled hcp {scheduledHandicap} · Sub hcp <b className="text-foreground">{handicap}</b>
+            </span>
+          )}
         </div>
         <div className="mb-3 grid grid-cols-3 gap-1 text-xs">
           {(["rostered", "substitute", "absent"] as const).map((s) => (
@@ -516,14 +567,23 @@ function SidePanel({
         </div>
 
         {side.status === "substitute" && (
-          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_140px]">
             <div>
               <Label className="text-[10px]">Pick from pool</Label>
               <Select
                 value={side.subId || undefined}
                 onValueChange={(v) => {
                   const found = subs.find((s) => s.id === v);
-                  onChange({ subId: v, subName: found?.name ?? side.subName });
+                  onChange({
+                    subId: v,
+                    subName: found?.name ?? side.subName,
+                    // Prefill the sub's saved starting average when present,
+                    // but do NOT clobber a value the admin has already
+                    // typed for this match.
+                    subStartAvg: side.subStartAvg
+                      ? side.subStartAvg
+                      : (found?.startingAverage != null ? String(found.startingAverage) : ""),
+                  });
                 }}
               >
                 <SelectTrigger data-testid={`${testId}-sub-select`}>
@@ -531,7 +591,9 @@ function SidePanel({
                 </SelectTrigger>
                 <SelectContent>
                   {subs.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}{s.startingAverage != null ? ` · avg ${s.startingAverage}` : ""}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -547,29 +609,44 @@ function SidePanel({
                 />
                 <button
                   type="button"
-                  disabled={!side.subName.trim()}
+                  disabled={!side.subName.trim() || !side.subStartAvg.trim()}
                   onClick={() => {
                     const nm = side.subName.trim();
-                    if (!nm) return;
+                    const avg = Number(side.subStartAvg);
+                    if (!nm || !Number.isFinite(avg)) return;
                     try {
-                      const rec = addSubstitute(nm);
+                      const rec = addSubstitute(nm, { startingAverage: avg });
                       onChange({ subId: rec.id, subName: rec.name });
                     } catch (e) { window.alert((e as Error).message); }
                   }}
                   className={cn(
                     "shrink-0 rounded-md px-2 text-xs font-semibold",
-                    side.subName.trim()
+                    side.subName.trim() && side.subStartAvg.trim()
                       ? "bg-gold text-gold-foreground hover:bg-gold/90"
                       : "bg-muted text-muted-foreground",
                   )}
-                  title="Add this person to the substitute pool"
+                  title="Add this person to the substitute pool (needs Starting Average)"
                 >
                   + Pool
                 </button>
               </div>
             </div>
+            <div>
+              <Label className="text-[10px]">Starting Average</Label>
+              <Input
+                data-testid={`${testId}-sub-start-avg`}
+                type="number"
+                min={1}
+                max={300}
+                step={1}
+                value={side.subStartAvg}
+                onChange={(e) => onChange({ subStartAvg: e.target.value })}
+                placeholder="e.g. 138"
+              />
+            </div>
           </div>
         )}
+
 
         <SideLinescoreEditor
           label="Linescore"

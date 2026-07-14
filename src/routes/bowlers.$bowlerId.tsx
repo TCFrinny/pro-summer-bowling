@@ -112,24 +112,24 @@ function BowlerProfile() {
           value={`${extras.spareConversionPct.toFixed(1)}%`}
         />
         <Stat label="Open %" value={`${extras.openPct.toFixed(1)}%`} />
-        <Stat label="Pins Lost" value={extras.pinsLost.toFixed(2)} />
+        <Stat label="Pins Lost / Game" value={extras.pinsLost.toFixed(2)} />
         <Stat label="Consistency (σ)" value={extras.consistency.toFixed(2)} />
         <Stat label="Season POA" value={formatSigned(extras.seasonPOA)} />
         <Stat
-          label="First 5 / match"
-          value={extras.first5PerMatch.toFixed(1)}
+          label="First 5 / game"
+          value={extras.first5PerGame.toFixed(1)}
         />
         <Stat
-          label="Last 5 / match"
-          value={extras.last5PerMatch.toFixed(1)}
+          label="Last 5 / game"
+          value={extras.last5PerGame.toFixed(1)}
         />
         <Stat
-          label="Big Opening / match"
-          value={extras.bigOpeningPerMatch.toFixed(1)}
+          label="Big Opening / game"
+          value={extras.bigOpeningPerGame.toFixed(1)}
         />
         <Stat
-          label="Big Finish / match"
-          value={extras.bigFinishPerMatch.toFixed(1)}
+          label="Big Finish / game"
+          value={extras.bigFinishPerGame.toFixed(1)}
         />
         <Stat
           label="Clutch % (Fr 9–10)"
