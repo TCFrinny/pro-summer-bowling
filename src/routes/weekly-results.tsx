@@ -87,9 +87,11 @@ function WeeklyResultsPage() {
 }
 
 function MatchCard({ m }: { m: Match }) {
-  const a = getBowler(m.bowlerA)!;
-  const b = getBowler(m.bowlerB)!;
   const r = m.result!;
+  // Prefer FROZEN scheduled names from the saved result so a later
+  // roster rename does not rewrite completed weekly-results history.
+  const a = { name: r.scheduledNameA ?? getBowler(m.bowlerA)?.name ?? "—" };
+  const b = { name: r.scheduledNameB ?? getBowler(m.bowlerB)?.name ?? "—" };
   const [openA, setOpenA] = useState(false);
   const [openB, setOpenB] = useState(false);
 
