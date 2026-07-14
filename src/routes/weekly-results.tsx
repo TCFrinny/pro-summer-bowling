@@ -38,9 +38,13 @@ export const Route = createFileRoute("/weekly-results")({
 
 function WeeklyResultsPage() {
   useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
-  const completed = WEEKS.filter((w) => w.completed);
+  // A week appears here as soon as it has ANY saved match — admins do
+  // not have to complete all 18 matches before results are visible.
+  const withResults = WEEKS.filter(
+    (w) => (getMatchesForWeek(w.week) ?? []).some((m) => !!m.result),
+  );
   const [week, setWeek] = useState<number>(
-    completed[completed.length - 1]?.week ?? 1,
+    withResults[withResults.length - 1]?.week ?? 1,
   );
   const matches = getMatchesForWeek(week).filter((m) => m.result);
 
@@ -51,11 +55,11 @@ function WeeklyResultsPage() {
         subtitle="Every score, W-L point, and season aggregate is derived from these frame linescores."
       >
         <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-40" data-testid="wr-week-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {completed.map((w) => (
+            {withResults.map((w) => (
               <SelectItem key={w.week} value={String(w.week)}>
                 Week {w.week}
               </SelectItem>
@@ -96,7 +100,7 @@ function MatchCard({ m }: { m: Match }) {
   const [openB, setOpenB] = useState(false);
 
   return (
-    <Card className="bg-card">
+    <Card className="bg-card" data-testid={`wr-match-${m.id}`}>
       <CardContent className="p-4">
         <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-widest text-muted-foreground">
           <span>Lanes {m.lanePair}</span>
@@ -239,7 +243,7 @@ function SummaryRow({
   const setTied = sp === 0.5;
 
   return (
-    <tr className={cn(winner && "bg-primary/10")}>
+    <tr className={cn(winner && "bg-primary/10")} data-testid={`wr-row-${m.id}-${side}`}>
       <td className="py-1.5 pr-2">
         <div className="flex items-center gap-1.5 font-medium">
           {winner && <Crown className="h-3.5 w-3.5 text-gold" />}
@@ -272,7 +276,7 @@ function SummaryRow({
         <>
           <td className="py-1.5 text-right">{hdcp}</td>
           {games.map((g, i) => (
-            <td key={i} className="py-1.5 text-right">
+            <td key={i} className="py-1.5 text-right" data-testid={`wr-row-${m.id}-${side}-g${i + 1}`}>
               <div className="font-semibold">{g}</div>
               <div
                 className={cn(
@@ -288,7 +292,7 @@ function SummaryRow({
               </div>
             </td>
           ))}
-          <td className="py-1.5 text-right font-semibold">{scratchTotal}</td>
+          <td className="py-1.5 text-right font-semibold" data-testid={`wr-row-${m.id}-${side}-scratch`}>{scratchTotal}</td>
           <td
             className={cn(
               "py-1.5 text-right font-semibold",
@@ -298,6 +302,7 @@ function SummaryRow({
                   ? "text-gold"
                   : "text-muted-foreground",
             )}
+            data-testid={`wr-row-${m.id}-${side}-hdcp`}
           >
             {hdcpTotal}
             <div className="text-[9px] font-normal uppercase text-muted-foreground">

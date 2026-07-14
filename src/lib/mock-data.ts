@@ -759,7 +759,8 @@ export function buildSnapshot(input: {
   // 1) Bowler season totals from completed matches.
   const allCompleted: Match[] = [];
   for (const w of weeks) {
-    if (!w.completed) continue;
+    // Aggregate every match with a saved result — a partial week counts.
+    // `m.result` is the source of truth; `w.completed` is a display flag.
     for (const m of matchesByWeek[w.week] ?? []) if (m.result) allCompleted.push(m);
   }
   for (const m of allCompleted) {
@@ -826,7 +827,7 @@ export function buildSnapshot(input: {
   const history: Record<BowlerId, BowlerHistoryRow[]> = {};
   for (const b of bowlers) history[b.id] = [];
   for (const w of weeks) {
-    if (!w.completed) continue;
+    // History: include any match with a saved result.
     for (const m of matchesByWeek[w.week] ?? []) {
       const res = m.result;
       if (!res) continue;
@@ -932,7 +933,7 @@ export function buildSnapshot(input: {
     }
     const s = emptyRoster();
     for (const w of weeks) {
-      if (!w.completed) continue;
+      // Per-bowler frame stats: any match with a saved result contributes.
       for (const m of matchesByWeek[w.week] ?? []) {
         const r = m.result;
         if (!r) continue;
