@@ -301,16 +301,6 @@ async def main() -> int:
         print(f"saved awards: A={r['totalPointsA']} B={r['totalPointsB']} "
               f"scratch A={r['scratchTotalA']} B={r['scratchTotalB']} "
               f"hdcpA={r['handicapTotalA']} hdcpB={r['handicapTotalB']}")
-        # DEBUG — directly ask the client store what b35 aggregates look like now.
-        dbg = await page.evaluate("""(id) => {
-            const db = window.__pssStore.getDb();
-            const persisted = localStorage.getItem('pss.leagueStore.v3');
-            const parsed = persisted ? JSON.parse(persisted) : null;
-            const w8mem = (db.matchesByWeek[8] || []).filter(m => m.result).length;
-            const w8ls = parsed ? (parsed.matchesByWeek['8'] || parsed.matchesByWeek[8] || []).filter(m => m.result).length : -1;
-            return {w8InMemory: w8mem, w8InLocalStorage: w8ls, keys: Object.keys(parsed?.matchesByWeek || {}).slice(0,12)};
-        }""", a_id)
-        print("DEBUG post-save DB:", dbg)
 
         awarded_a1 = r["totalPointsA"]
         awarded_b1 = r["totalPointsB"]
