@@ -1324,9 +1324,12 @@ export function buildSnapshot(input: {
   const weekLanes: Record<number, LanePairSummary[]> = {};
   for (const [wk, map] of Object.entries(weekLaneMaps)) weekLanes[Number(wk)] = laneSummariesFrom(map);
 
-  // 7) Elimination — proof-safe, schedule-aware. Runs here (during snapshot
-  // rebuild) so /elimination reads a static payload with no calculation.
-  const elimination: EliminationSnapshot = computeElimination({
+  // 7) Elimination — bounds-only proof-safe pass. Deliberately does NOT
+  // invoke the full schedule-aware solver (which is O(exponential) in the
+  // worst case and would blow the 10 ms Cloudflare Worker CPU limit on the
+  // real 36-bowler roster). The admin browser runs the full solver in a
+  // Web Worker and persists results via `saveFullEliminationResult`.
+  const elimination: EliminationSnapshot = computeEliminationBounds({
     activeBowlers: publicBowlers,
     weeks,
     matchesByWeek,
