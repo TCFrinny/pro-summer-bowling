@@ -771,17 +771,28 @@ export function buildSnapshot(input: {
   bowlers: Bowler[];
   weeks: WeekSummary[];
   matchesByWeek: Record<number, Match[]>;
+  /** IDs of bowlers currently visible on public roster/standings and
+   *  eligible for scheduling. When omitted, every provided bowler is
+   *  treated as active (back-compat with seed/deterministic tests).
+   *  Bowlers NOT in this set are HISTORICAL: their completed results and
+   *  identity remain in `bowlersById`, `history`, and leaderboards so
+   *  their opponent's stats and the historical record survive, but they
+   *  do not appear on `snapshot.bowlers`, `standings`, or `elimination`. */
+  activeBowlerIds?: ReadonlySet<BowlerId>;
 }): PublicSnapshot {
   // Deep-clone bowlers so we can mutate aggregate fields without touching the
   // raw db.
-  const bowlers = input.bowlers.map((b) => ({ ...b,
+  const allBowlers = input.bowlers.map((b) => ({ ...b,
     scratchAverage: 0, points: 0, pointsLost: 0, gamePoints: 0, setPoints: 0,
     scratchPinfall: 0, handicapPinfall: 0, highGame: 0, highSet: 0,
     matchesPlayed: 0, gamesPlayed: 0, actualGamesRolled: 0, actualScratchPinfall: 0,
   }));
-  const bowlersById: Record<BowlerId, Bowler> = Object.fromEntries(bowlers.map((b) => [b.id, b]));
+  const activeIds: ReadonlySet<BowlerId> =
+    input.activeBowlerIds ?? new Set(allBowlers.map((b) => b.id));
+  const bowlersById: Record<BowlerId, Bowler> = Object.fromEntries(allBowlers.map((b) => [b.id, b]));
   const weeks = input.weeks;
   const matchesByWeek = input.matchesByWeek;
+
 
   // 1) Bowler season totals from completed matches.
   const allCompleted: Match[] = [];
@@ -835,14 +846,17 @@ export function buildSnapshot(input: {
       if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
     }
   }
-  for (const bowler of bowlers) {
+  for (const bowler of allBowlers) {
     bowler.scratchAverage = bowler.actualGamesRolled > 0
       ? Number((bowler.actualScratchPinfall / bowler.actualGamesRolled).toFixed(3))
       : bowler.entryAverage;
   }
 
-  // 2) Standings
-  const sorted = [...bowlers].sort((a, b) => {
+  // 2) Standings — PUBLIC roster only. Archived / inactive bowlers keep
+  // aggregated stats in `bowlersById` (for opponent histories and name
+  // resolution) but do not appear on the standings board.
+  const publicBowlers = allBowlers.filter((b) => activeIds.has(b.id));
+  const sorted = [...publicBowlers].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     return b.handicapPinfall - a.handicapPinfall;
   });
@@ -850,9 +864,11 @@ export function buildSnapshot(input: {
     rank: i + 1, bowler: b, movement: b.movement,
   }));
 
-  // 3) History per bowler
+  // 3) History per bowler — populated for ALL bowlers (including archived)
+  // so historical profiles keep resolving.
   const history: Record<BowlerId, BowlerHistoryRow[]> = {};
-  for (const b of bowlers) history[b.id] = [];
+  for (const b of allBowlers) history[b.id] = [];
+
   for (const w of weeks) {
     // History: include any match with a saved result.
     for (const m of matchesByWeek[w.week] ?? []) {
@@ -949,7 +965,7 @@ export function buildSnapshot(input: {
 
   // 4) Season extras per bowler
   const extras: Record<BowlerId, BowlerSeasonExtras> = {};
-  for (const b of bowlers) {
+  for (const b of allBowlers) {
     const rows = history[b.id];
     const usage = new Map<LanePair, number>(LANE_PAIRS.map((lp) => [lp, 0]));
     let bestGame = 0, bestSet = 0;
@@ -1194,8 +1210,13 @@ export function buildSnapshot(input: {
     return { standard, advanced };
   };
   const seasonBoards = buildBoards("season");
+  const weekHasResult = (w: WeekSummary) => (matchesByWeek[w.week] ?? []).some((m) => m.result);
   const weekBoards: Record<number, { standard: StandardLeaderboards; advanced: AdvancedLeaderboards }> = {};
-  for (const w of weeks) if (w.completed) weekBoards[w.week] = buildBoards(w.week);
+  // Partial weeks are first-class: any week with at least one saved
+  // result gets its own boards immediately. `completed` remains a
+  // display-only flag driven by "every scheduled slot has a result".
+  for (const w of weeks) if (weekHasResult(w)) weekBoards[w.week] = buildBoards(w.week);
+
 
   // 6) Lane data (derived from actual scratch scores by lane pair).
   const laneBucket = () => new Map<LanePair, { pins: number; games: number; poaSum: number; poaCount: number }>(
@@ -1203,7 +1224,8 @@ export function buildSnapshot(input: {
   );
   const seasonLaneMap = laneBucket();
   const weekLaneMaps: Record<number, ReturnType<typeof laneBucket>> = {};
-  for (const w of weeks) if (w.completed) weekLaneMaps[w.week] = laneBucket();
+  for (const w of weeks) if (weekHasResult(w)) weekLaneMaps[w.week] = laneBucket();
+
   for (const m of allCompleted) {
     const r = m.result!;
     const lb = seasonLaneMap.get(m.lanePair)!;
@@ -1256,7 +1278,7 @@ export function buildSnapshot(input: {
 
   return {
     builtAt: Date.now(),
-    bowlers, bowlersById, weeks, matchesByWeek,
+    bowlers: publicBowlers, bowlersById, weeks, matchesByWeek,
     standings, history, extras,
     seasonBoards, weekBoards,
     seasonLanes, weekLanes,
