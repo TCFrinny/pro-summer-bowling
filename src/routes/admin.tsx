@@ -55,9 +55,13 @@ function AdminLayout() {
         setGate({ kind: "admin" });
       })
       .catch((err) => {
-        console.error(err);
+        console.error("getIsAdmin threw", err);
         if (cancelled) return;
-        setGate({ kind: "not-admin", email: session.user.email });
+        // A thrown exception (network failure, missing SUPABASE_* runtime
+        // variables on the Worker, RPC error) is NOT the same as a legitimate
+        // { isAdmin: false } response. Surface a distinct state so admins can
+        // tell "you lack the role" apart from "the server can't tell right now".
+        setGate({ kind: "check-failed", email: session.user.email });
       });
     return () => {
       cancelled = true;
