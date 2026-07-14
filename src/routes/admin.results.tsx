@@ -129,6 +129,8 @@ function AdminResultsPage() {
   const qc = useQueryClient();
   const load = useServerFn(getAdminScheduleData);
   const save = useServerFn(saveMatchResult);
+  const del = useServerFn(deleteMatchResult);
+
 
   const query = useQuery({
     queryKey: ["admin", "schedule"],
@@ -344,10 +346,25 @@ function AdminResultsPage() {
     onError: (e: Error) => setFlash("Save failed: " + e.message),
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentMatch) throw new Error("No match selected");
+      return del({ data: { slotId: currentMatch.id } });
+    },
+    onSuccess: () => {
+      setFlash("Saved result deleted. Standings and leaderboards updated.");
+      setDraft(emptyDraft());
+      qc.invalidateQueries({ queryKey: ["admin", "schedule"] });
+      qc.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
+    },
+    onError: (e: Error) => setFlash("Delete failed: " + e.message),
+  });
+
   const handleReset = () => {
     setDraft(savedResult ? draftFromResult(savedResult) : emptyDraft());
     setFlash(null);
   };
+
 
   if (query.isLoading) {
     return (
