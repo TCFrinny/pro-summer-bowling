@@ -7,7 +7,7 @@ import {
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale } from "lucide-react";
 
 export const Route = createFileRoute("/elimination")({
   head: () => ({
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/elimination")({
       {
         name: "description",
         content:
-          "Saved elimination proofs: clinched, alive, eliminated, and not proven within limit.",
+          "Saved elimination proofs: clinched, alive, eliminated, tiebreaker only, and not proven within limit.",
       },
     ],
   }),
@@ -46,6 +46,11 @@ const STATUS: Record<
     label: "Alive",
     icon: <Circle className="h-4 w-4" />,
     className: "bg-emerald-500/20 text-emerald-300",
+  },
+  tiebreaker_only: {
+    label: "Tiebreaker Only",
+    icon: <Scale className="h-4 w-4" />,
+    className: "bg-amber-500/20 text-amber-300",
   },
   not_proven: {
     label: "Not Proven Within Limit",
@@ -107,11 +112,12 @@ function EliminationPage() {
               <th className="px-3 py-3 text-left">Bowler</th>
               <th className="px-3 py-3 text-right">Points</th>
               <th className="px-3 py-3 text-left">Status</th>
+              <th className="px-3 py-3 text-left">Reason</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {snap.rows.map((r) => (
-              <tr key={r.bowler.id} className="hover:bg-accent/30">
+              <tr key={r.bowler.id} className="align-top hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
                 <td className="px-3 py-2 text-right font-display text-base text-gold">
                   {formatPoints(r.bowler.points)}
@@ -122,6 +128,16 @@ function EliminationPage() {
                   >
                     {STATUS[r.status].icon} {STATUS[r.status].label}
                   </span>
+                </td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">
+                  {r.note ?? "—"}
+                  {(r.maxFinalPoints != null || r.nextOpponent || r.bestMargin != null) && (
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] uppercase tracking-widest opacity-75">
+                      {r.maxFinalPoints != null && <span>Max {formatPoints(r.maxFinalPoints)}</span>}
+                      {r.nextOpponent && <span>Next {r.nextOpponent}</span>}
+                      {r.bestMargin != null && <span>Margin {formatPoints(r.bestMargin)}</span>}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

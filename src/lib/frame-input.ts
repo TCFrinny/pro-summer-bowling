@@ -130,18 +130,55 @@ export function buildGameFromInput(input: GameBuildInput): GameBuildResult {
       // Range check on this frame's contribution.
       const diff = cum - prev;
       const cls = classifyFrame(frameNumber, mark);
+      // "Contribution" = current running total minus previous running total.
+      // Include the arithmetic in every error message so an admin can see
+      // exactly which cumulative total or mark they need to fix.
+      const arith = `(${cum} − ${prev})`;
+      const F = frameNumber === 10 ? "Frame 10" : `Frame ${frameNumber}`;
       if (frameNumber <= 9) {
-        if (cls === "open" && (diff < 0 || diff > 9))
-          errors.push(`Frame ${frameNumber}: open contribution ${diff} outside 0..9`);
-        else if (cls === "spare" && (diff < 10 || diff > 20))
-          errors.push(`Frame ${frameNumber}: spare contribution ${diff} outside 10..20`);
-        else if (cls === "strike" && (diff < 10 || diff > 30))
-          errors.push(`Frame ${frameNumber}: strike contribution ${diff} outside 10..30`);
+        if (cls === "open" && (diff < 0 || diff > 9)) {
+          if (diff === 10) {
+            errors.push(
+              `${F} is marked open (${mark}), but it adds 10 pins ${arith}. An open frame must add 0–9. Change the mark to / (spare) or X (strike), or correct the running total.`,
+            );
+          } else if (diff < 0) {
+            errors.push(
+              `${F} is marked open (${mark}), but the running total dropped by ${-diff} ${arith}. Running totals must never decrease.`,
+            );
+          } else {
+            errors.push(
+              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open frame must add 0–9. Change the mark or correct the running total.`,
+            );
+          }
+        } else if (cls === "spare" && (diff < 10 || diff > 20)) {
+          errors.push(
+            `${F} is marked spare (/), but it adds ${diff} pins ${arith}. A spare must add 10–20 (10 pins + the first ball of the next frame). Fix the mark or the running total.`,
+          );
+        } else if (cls === "strike" && (diff < 10 || diff > 30)) {
+          errors.push(
+            `${F} is marked strike (X), but it adds ${diff} pins ${arith}. A strike must add 10–30 (10 pins + the next two balls). Fix the mark or the running total.`,
+          );
+        }
       } else {
-        if (cls === "open" && (diff < 0 || diff > 9))
-          errors.push(`Frame 10: open contribution ${diff} outside 0..9`);
-        else if (cls !== "open" && (diff < 10 || diff > 30))
-          errors.push(`Frame 10: ${cls} contribution ${diff} outside 10..30`);
+        if (cls === "open" && (diff < 0 || diff > 9)) {
+          if (diff === 10) {
+            errors.push(
+              `${F} is marked open (${mark}), but it adds 10 pins ${arith}. An open tenth frame must add 0–9. Change the mark or correct the running total.`,
+            );
+          } else if (diff < 0) {
+            errors.push(
+              `${F} is marked open (${mark}), but the running total dropped by ${-diff} ${arith}. Running totals must never decrease.`,
+            );
+          } else {
+            errors.push(
+              `${F} is marked open (${mark}), but it adds ${diff} pins ${arith}. An open tenth frame must add 0–9.`,
+            );
+          }
+        } else if (cls !== "open" && (diff < 10 || diff > 30)) {
+          errors.push(
+            `${F} is marked ${cls} (${mark}), but it adds ${diff} pins ${arith}. A ${cls} tenth frame must add 10–30. Fix the mark or the running total.`,
+          );
+        }
       }
       frames.push({ frameNumber, mark, cumulativeScore: cum });
     }
