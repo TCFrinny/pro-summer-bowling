@@ -183,18 +183,16 @@ function modestOpenLinescore(scheduled: Bowler, entry: number, handicap: number)
   assert(sB.points === 7 && sB.pointsLost === 0, "opponent awarded override points");
 }
 
-// ---- Test 3: substitute uses SCHEDULED bowler's handicap ---------------
+// ---- Test 3: substitute uses SUBSTITUTE'S OWN handicap ---------------
 {
   const A = mkBowler("a", "Alice", 120); // scheduled A: hcp 32
   const B = mkBowler("b", "Bob", 140);   // scheduled B: hcp 16
-  const SUB = mkBowler("sub", "SubStar", 100); // sub own hcp 48 — must be IGNORED
-  const hA = computeHandicap(A.entryAverage); // 32
-  const hB = computeHandicap(B.entryAverage); // 16
+  const SUB = mkBowler("sub", "SubStar", 100); // sub avg 100 → hcp 48
+  const hSub = computeHandicap(SUB.entryAverage); // 48
+  const hB = computeHandicap(B.entryAverage);     // 16
 
-  // Sub bowls for A with the SCHEDULED bowler's handicap (32), not 48.
-  const lsA = allStrikeLinescore(A, A.entryAverage, hA);
-  // Rewrite lsA fields to reflect the substitute identity — assembleSideLinescore
-  // already sets actualId/name we passed in; force isSub for realism.
+  // Sub bowls for A using the SUB'S handicap (48), NOT scheduled A's (32).
+  const lsA = allStrikeLinescore(A, SUB.entryAverage, hSub);
   const lsSubAsA = { ...lsA, isSub: true, actualId: SUB.id, actualName: SUB.name };
   const lsB = modestOpenLinescore(B, B.entryAverage, hB);
 
@@ -209,17 +207,74 @@ function modestOpenLinescore(scheduled: Bowler, entry: number, handicap: number)
       scheduledId: B.id, status: "rostered",
       actualId: B.id, actualName: B.name,
     },
-    entryAverageA: A.entryAverage, entryAverageB: B.entryAverage,
-    handicapA: hA, handicapB: hB, // scheduled bowler's handicap
+    // Frozen entry avg / handicap for side A reflect the SUB's identity.
+    entryAverageA: SUB.entryAverage, entryAverageB: B.entryAverage,
+    handicapA: hSub, handicapB: hB,
     linescoreA: lsSubAsA, linescoreB: lsB,
     pointsOverride: null,
   });
 
-  // Each hcp game applies scheduled A's handicap (32), not sub's (48).
-  assert(result.handicapGamesA[0] === 300 + 32,
-    `substitute uses scheduled hcp per game (got ${result.handicapGamesA[0]})`);
-  assert(result.handicapTotalA === 900 + 32 * 3,
-    `substitute hcp total uses scheduled hcp*3 (got ${result.handicapTotalA})`);
+  // Each hcp game applies the SUB'S handicap (48), not scheduled A's (32).
+  assert(result.handicapGamesA[0] === 300 + 48,
+    `substitute uses sub hcp per game (got ${result.handicapGamesA[0]})`);
+  assert(result.handicapTotalA === 900 + 48 * 3,
+    `substitute hcp total uses sub hcp*3 (got ${result.handicapTotalA})`);
+  // Frozen sub avg + hcp on the result.
+  assert(result.entryAverageA === 100 && result.handicapA === 48,
+    "match result freezes substitute's entry average and handicap");
+}
+
+// ---- Test 4: pure resolver — submitted override beats pool, missing rejected ----
+{
+  // Dynamic import to avoid registering another self-test file at module load.
+  // The helper module runs its own self-test on load.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require("../src/lib/substitute-handicap") as typeof import("../src/lib/substitute-handicap");
+
+  const rostered = mod.resolveEffectiveScoring({ status: "rostered", scheduledEntryAverage: 120 });
+  assert(rostered.ok && rostered.value.hcp === 32, "rostered → scheduled hcp");
+
+  const absent = mod.resolveEffectiveScoring({ status: "absent", scheduledEntryAverage: 140 });
+  assert(absent.ok && absent.value.hcp === 16, "absent → scheduled hcp");
+
+  const withOverride = mod.resolveEffectiveScoring({
+    status: "substitute", scheduledEntryAverage: 120,
+    submittedSubStartingAverage: 100, poolSubStartingAverage: 150,
+  });
+  assert(withOverride.ok && withOverride.value.entry === 100 && withOverride.value.hcp === 48,
+    "per-match sub avg override takes precedence over pool");
+
+  const poolFallback = mod.resolveEffectiveScoring({
+    status: "substitute", scheduledEntryAverage: 120,
+    poolSubStartingAverage: 130,
+  });
+  assert(poolFallback.ok && poolFallback.value.entry === 130 && poolFallback.value.hcp === 24,
+    "pool starting average used when no per-match override");
+
+  const missing = mod.resolveEffectiveScoring({
+    status: "substitute", scheduledEntryAverage: 120,
+  });
+  assert(!missing.ok, "missing sub starting average must be rejected");
+
+  const invalid = mod.resolveEffectiveScoring({
+    status: "substitute", scheduledEntryAverage: 120,
+    submittedSubStartingAverage: 0, poolSubStartingAverage: null,
+  });
+  assert(!invalid.ok, "0 avg is invalid; no pool fallback → rejected");
+
+  // UI helper: never silently falls back to scheduled hcp for sub w/ blank avg.
+  assert(mod.effectiveHandicapForUi({
+    status: "substitute", scheduledEntryAverage: 120, subStartAvgRaw: "",
+  }) === 0, "UI helper: blank sub avg → 0 (pending), not scheduled hcp");
+  assert(mod.effectiveHandicapForUi({
+    status: "substitute", scheduledEntryAverage: 120, subStartAvgRaw: "100",
+  }) === 48, "UI helper: sub avg 100 → 48");
+  assert(mod.effectiveHandicapForUi({
+    status: "rostered", scheduledEntryAverage: 120,
+  }) === 32, "UI helper: rostered → scheduled hcp");
+  assert(mod.effectiveHandicapForUi({
+    status: "absent", scheduledEntryAverage: 140,
+  }) === 16, "UI helper: absent → scheduled hcp");
 }
 
 // eslint-disable-next-line no-console
