@@ -27,6 +27,7 @@ import {
   buildMatchResultFromDraft,
   rebuildAndSaveSnapshot,
 } from "@/lib/snapshot-builder.server";
+import { resolveEffectiveScoring } from "@/lib/substitute-handicap";
 
 type Sb = SupabaseClient<Database>;
 type Ctx = { supabase: Sb; userId: string };
@@ -381,9 +382,10 @@ const sideDraftSchema = z.object({
    *  are NOT accepted: every sub used in a result must exist in the
    *  active substitute pool (with a required ID Number). */
   substituteId: z.string().optional(),
-  /** Informational only. Substitutes bowl on the SCHEDULED bowler's
-   *  handicap; this field is stored for record-keeping (and to prefill
-   *  the sub's stored starting average) but is not used in scoring. */
+  /** Per-match Starting Average for the substitute. When finite and in
+   *  range (1–300) this takes precedence over the pool row's stored
+   *  starting average. This value DIRECTLY controls the substitute's
+   *  effective handicap for match scoring (league rule v6). */
   substituteStartingAverage: z.number().optional(),
   games: z.array(gameSchema).length(3).optional(),
   /** Required when status === "absent". Three integer scratch scores
@@ -503,20 +505,27 @@ export const saveMatchResult = createServerFn({ method: "POST" })
     const partB = buildPart({ id: rosterB.id, name: rosterB.name }, data.sideB, "B");
     const pA = partA.part, pB = partB.part;
 
-    // Effective handicap per side. LEAGUE RULE: substitutes use the
-    // SCHEDULED bowler's handicap for match scoring (the substitute's
-    // own starting-average handicap is informational only, kept in the
-    // substitute pool for reference). Points and handicap pinfall are
-    // credited to the scheduled bowler by the pure computeMatchResult.
+    // Effective per-side scoring identity. LEAGUE RULE v6: substitutes
+    // score on the SUBSTITUTE'S own handicap (derived from their Starting
+    // Average — either the per-match override or the pool row's stored
+    // value). Rostered/Absent use the scheduled bowler's handicap.
+    // Points and handicap pinfall are still credited to the scheduled
+    // bowler downstream by computeMatchResult / buildSnapshot.
     const resolveSide = (
-      sched: { id: string; entry_average: number },
-      _sd: z.infer<typeof sideDraftSchema>,
-      _partInfo: ReturnType<typeof buildPart>,
-      _side: "A" | "B",
-    ) => ({
-      entry: sched.entry_average,
-      hcp: computeHandicap(sched.entry_average),
-    });
+      sched: { entry_average: number },
+      sd: z.infer<typeof sideDraftSchema>,
+      partInfo: ReturnType<typeof buildPart>,
+      side: "A" | "B",
+    ) => {
+      const r = resolveEffectiveScoring({
+        status: sd.status,
+        scheduledEntryAverage: sched.entry_average,
+        submittedSubStartingAverage: sd.substituteStartingAverage ?? null,
+        poolSubStartingAverage: partInfo.subRec?.starting_average ?? null,
+      });
+      if (!r.ok) throw new Error(`Side ${side}: ${r.error}`);
+      return { entry: r.value.entry, hcp: r.value.hcp };
+    };
     const rA = resolveSide(rosterA, data.sideA, partA, "A");
     const rB = resolveSide(rosterB, data.sideB, partB, "B");
 

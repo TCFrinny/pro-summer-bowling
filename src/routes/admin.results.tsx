@@ -15,6 +15,7 @@ import {
   getAdminScheduleData,
   saveMatchResult,
 } from "@/lib/schedule-repo.functions";
+import { effectiveHandicapForUi } from "@/lib/substitute-handicap";
 import { SNAPSHOT_QUERY_KEY } from "@/lib/public-snapshot";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -219,19 +220,26 @@ function AdminResultsPage() {
 
   const eitherAbsent = draft.sideA.status === "absent" || draft.sideB.status === "absent";
 
-  const subHandicapFromAvg = (raw: string): number | null => {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return null;
-    return computeHandicap(n);
-  };
-  // LEAGUE RULE: substitutes bowl on the SCHEDULED bowler's handicap.
-  // The sub's own starting-average handicap is informational only.
-  const effHandicapA = currentMatch ? computeHandicap(currentMatch.bowlerA.entryAverage) : 0;
-  const effHandicapB = currentMatch ? computeHandicap(currentMatch.bowlerB.entryAverage) : 0;
-  // Kept for the (removed) previous per-side sub-hcp preview; retained
-  // as a no-op reference so the SidePanel can still show the sub's
-  // informational handicap next to their starting average.
-  void subHandicapFromAvg;
+  // Effective per-side handicap for the LIVE PREVIEW. League rule v6:
+  // substitutes score on the SUB'S handicap (from their Starting Average);
+  // rostered/absent use the scheduled bowler's handicap. When a substitute
+  // Starting Average is blank/invalid the preview shows 0 (pending) rather
+  // than silently falling back to the scheduled handicap — validation
+  // blocks saving in that state.
+  const effHandicapA = currentMatch
+    ? effectiveHandicapForUi({
+        status: draft.sideA.status,
+        scheduledEntryAverage: currentMatch.bowlerA.entryAverage,
+        subStartAvgRaw: draft.sideA.subStartAvg,
+      })
+    : 0;
+  const effHandicapB = currentMatch
+    ? effectiveHandicapForUi({
+        status: draft.sideB.status,
+        scheduledEntryAverage: currentMatch.bowlerB.entryAverage,
+        subStartAvgRaw: draft.sideB.subStartAvg,
+      })
+    : 0;
 
   const derivedA = useMemo(
     () => computeSideDerived(draft.sideA.linescore, effHandicapA),
@@ -708,8 +716,8 @@ function SidePanel({
           <span>{label}</span>
           {side.status === "substitute" && (
             <span className="normal-case tracking-normal text-[10px] text-muted-foreground">
-              Match hcp <b className="text-foreground">{scheduledHandicap}</b>
-              {" "}(scheduled bowler's — league rule)
+              Sub hcp <b className="text-foreground">{handicap}</b>
+              {" "}· Scheduled hcp <span className="text-muted-foreground">{scheduledHandicap}</span> (not used while sub bowls)
             </span>
           )}
           {side.status === "absent" && (
@@ -749,7 +757,8 @@ function SidePanel({
                     subId: v,
                     subName: found?.name ?? "",
                     // Prefill the sub's stored starting average — admin
-                    // can still override for this specific match.
+                    // can still override for this specific match. This
+                    // value DIRECTLY controls scoring for this side.
                     subStartAvg: found?.starting_average != null
                       ? String(found.starting_average)
                       : side.subStartAvg,
@@ -771,11 +780,11 @@ function SidePanel({
               </Select>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 Substitutes must be added first via Manage Bowlers (ID Number required). Walk-on names are not allowed.
-                Match handicap always uses the SCHEDULED bowler's handicap — the sub's own is informational only.
+                Match handicap uses the SUBSTITUTE'S own handicap (from their Starting Average below). Points and handicap pinfall still credit the scheduled bowler.
               </p>
             </div>
             <div>
-              <Label className="text-[10px]">Starting Average (informational)</Label>
+              <Label className="text-[10px]">Substitute Starting Average</Label>
               <Input
                 data-testid={`${testId}-sub-start-avg`}
                 type="number"
