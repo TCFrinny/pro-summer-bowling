@@ -12,6 +12,7 @@ import "./checkpoint-3b-hardening";
 import "./week-patch-preservation";
 import "./absent-scoring";
 import "./elimination";
+import "./elimination-bounds";
 import "./frame-input-messages";
 // @ts-expect-error - JS module without types
 import "./patch-cloudflare-config.test.mjs";
