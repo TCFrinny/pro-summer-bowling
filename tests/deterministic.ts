@@ -6,6 +6,7 @@
  */
 import "../src/lib/frame-input";
 import "../src/lib/league-store";
+import "../src/lib/roster-adapter";
 
 // eslint-disable-next-line no-console
 console.log("deterministic self-tests passed");
