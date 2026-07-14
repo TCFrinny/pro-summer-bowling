@@ -700,7 +700,7 @@ function SidePanel({
   onChange: (patch: Partial<SideDraft>) => void;
   testId?: string;
 }) {
-  const disabled = side.status === "absent";
+  // status === "absent" branches to a numeric-scores editor below.
   return (
     <Card className="bg-card" data-testid={testId}>
       <CardContent className="p-4">
