@@ -226,4 +226,30 @@ export function isDuplicateActive(
     { id: "b01", name: "Alice", active: false, archived: true },
   ]);
   if (dupArchived) throw new Error("roster-adapter: archived rows must not block reuse");
+
+  // ID Number is REQUIRED — empty / null / whitespace all rejected.
+  if (validateBowlerNumber(null) == null)   throw new Error("roster-adapter: null ID must be rejected");
+  if (validateBowlerNumber("")   == null)   throw new Error("roster-adapter: empty ID must be rejected");
+  if (validateBowlerNumber("   ") == null)  throw new Error("roster-adapter: whitespace ID must be rejected");
+  if (validateBowlerNumber("12345678901") == null)
+    throw new Error("roster-adapter: >10-char ID must be rejected");
+  if (validateBowlerNumber("01001") !== null)
+    throw new Error("roster-adapter: valid ID must pass");
+
+  // Decimal averages accepted.
+  if (validateAverage(140.5) !== null) throw new Error("roster-adapter: decimals must be accepted");
+  if (validateAverage(-1)    == null)  throw new Error("roster-adapter: negative avg must be rejected");
+  if (validateAverage(301)   == null)  throw new Error("roster-adapter: avg > 300 must be rejected");
+
+  // Decimal average round-trips through the adapter without silent rounding.
+  const decBowler = rosteredRowToBowler({
+    id: "b03", name: "Cara", entry_average: 145.75, handicap: 0,
+    active: true, archived: false, bowler_number: "01003", season_id: "s1",
+  });
+  if (decBowler.entryAverage !== 145.75) {
+    throw new Error(`roster-adapter: decimal avg lost (${decBowler.entryAverage})`);
+  }
+  if (decBowler.handicap !== computeHandicap(145.75)) {
+    throw new Error("roster-adapter: handicap must derive from decimal avg via floor");
+  }
 })();
