@@ -61,16 +61,24 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
   ];
 }
 
-// --- 1. Two-bowler / 11-week roster → Not Proven (no legal schedule) -----
+// --- 1. Two-bowler / 11-week roster with huge lead → Not Proven ----------
+// The lead (100 pts) would satisfy the naive clinch bound (>77 = opp max),
+// but no legal remaining schedule exists (only one distinct pair possible,
+// 10 pre-final weeks require 10 distinct pairs). Global feasibility must
+// force Not Proven for BOTH rows.
 {
-  const bs = [bowler("a", 0), bowler("b", 0)];
+  const bs = [bowler("a", 100, "A"), bowler("b", 0, "B")];
   const snap = computeElimination({
     activeBowlers: bs, weeks: [], matchesByWeek: {}, totalWeeks: 11,
   });
+  expect(snap.rows.length === 2, "two rows");
   for (const r of snap.rows) {
     expect(r.status === "not_proven",
       `two-bowler/11-week: ${r.bowler.name} got ${r.status}, note=${r.note}`);
-    expect(r.status !== "clinched", "must not be clinched");
+    expect(r.status !== "clinched", "must not be clinched even with huge lead");
+    expect(r.status !== "eliminated", "must not be eliminated");
+    expect((r.note ?? "").toLowerCase().includes("no complete legal remaining schedule"),
+      `note should mention no complete legal schedule, got: ${r.note}`);
   }
 }
 
