@@ -965,7 +965,7 @@ export function buildSnapshot(input: {
 
   // 4) Season extras per bowler
   const extras: Record<BowlerId, BowlerSeasonExtras> = {};
-  for (const b of bowlers) {
+  for (const b of allBowlers) {
     const rows = history[b.id];
     const usage = new Map<LanePair, number>(LANE_PAIRS.map((lp) => [lp, 0]));
     let bestGame = 0, bestSet = 0;
@@ -1272,7 +1272,7 @@ export function buildSnapshot(input: {
 
   return {
     builtAt: Date.now(),
-    bowlers, bowlersById, weeks, matchesByWeek,
+    bowlers: publicBowlers, bowlersById, weeks, matchesByWeek,
     standings, history, extras,
     seasonBoards, weekBoards,
     seasonLanes, weekLanes,
