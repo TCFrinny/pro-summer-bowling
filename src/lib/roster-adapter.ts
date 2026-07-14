@@ -73,18 +73,23 @@ export function rosteredRowToBowler(row: RosteredRow): Bowler {
 /** Build a PublicSnapshot from the raw Supabase rows for a single season.
  *  For checkpoint 3A the weeks/matchesByWeek inputs are empty and the
  *  resulting snapshot has zero standings/history, matching the real
- *  Supabase roster (not seeded demo data). */
+ *  Supabase roster (not seeded demo data).
+ *
+ *  ONLY `active === true && archived === false` bowlers appear in the
+ *  public snapshot. Inactive or archived rows stay in Supabase (so the
+ *  admin UI can repair or restore them and historical match_results can
+ *  still hydrate their names later) but must NOT surface on the public
+ *  Bowlers/Standings pages nor be scheduling-eligible via the snapshot. */
 export function buildSnapshotFromRows(input: {
   rostered: RosteredRow[];
 }): PublicSnapshot {
-  // Only ACTIVE + non-archived roster members enter public views; archived
-  // rows are preserved in the DB for future history hydration.
   const activeRoster = input.rostered
-    .filter((r) => !r.archived)
+    .filter((r) => r.active === true && r.archived === false)
     .sort((a, b) => a.id.localeCompare(b.id));
   const bowlers = activeRoster.map(rosteredRowToBowler);
   return buildSnapshot({ bowlers, weeks: [], matchesByWeek: {} });
 }
+
 
 // -- ID minting ----------------------------------------------------------
 
