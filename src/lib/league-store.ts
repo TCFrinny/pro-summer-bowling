@@ -472,6 +472,7 @@ export function applyResult(draft: ResultDraft): ApplyResultOutcome {
   const result: MatchResult = computeMatchResult({
     scheduledA: rosteredToBowler(sched.A),
     scheduledB: rosteredToBowler(sched.B),
+    scheduledNameA: sched.A.name, scheduledNameB: sched.B.name,
     participationA: pA, participationB: pB,
     entryAverageA: entryA, entryAverageB: entryB,
     handicapA: hcpA, handicapB: hcpB,
