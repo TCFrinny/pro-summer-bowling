@@ -7,6 +7,7 @@
 import "../src/lib/frame-input";
 import "../src/lib/league-store";
 import "../src/lib/roster-adapter";
+import "../src/lib/elimination-order";
 import "./checkpoint-3b-hardening";
 import "./week-patch-preservation";
 import "./absent-scoring";
