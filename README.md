@@ -26,6 +26,18 @@ Every matchup distributes **exactly 7 points**:
 - **Season averages** are **scratch only**, displayed to **3 decimals**.
 - **Official standings tiebreaker**: total points **DESC**, then total
   handicap pinfall **DESC**.
+- **Record (W - L)**: standings show each bowler's league points **won**
+  and **lost** across completed matches. Because every match distributes
+  exactly 7 points, `L = 7 − W` per match, so half-points and ties are
+  handled naturally (e.g. `31 - 18`, `24.5 - 24.5`).
+- **Points Behind (PB)**: informational only — never replaces the
+  official tiebreaker. Standard games-behind formula on points won/lost:
+  `PB = ((leaderW − W) + (L − leaderL)) / 2`. The leader displays `—`.
+  Works correctly when bowlers have completed different numbers of
+  matches. Set Points are still awarded as part of the 7-point match
+  total but are **not** shown as a separate standings column.
+
+
 
 
 ### The performance rule (do not violate)
