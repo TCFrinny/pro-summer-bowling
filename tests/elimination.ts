@@ -61,16 +61,24 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
   ];
 }
 
-// --- 1. Two-bowler / 11-week roster → Not Proven (no legal schedule) -----
+// --- 1. Two-bowler / 11-week roster with huge lead → Not Proven ----------
+// The lead (100 pts) would satisfy the naive clinch bound (>77 = opp max),
+// but no legal remaining schedule exists (only one distinct pair possible,
+// 10 pre-final weeks require 10 distinct pairs). Global feasibility must
+// force Not Proven for BOTH rows.
 {
-  const bs = [bowler("a", 0), bowler("b", 0)];
+  const bs = [bowler("a", 100, "A"), bowler("b", 0, "B")];
   const snap = computeElimination({
     activeBowlers: bs, weeks: [], matchesByWeek: {}, totalWeeks: 11,
   });
+  expect(snap.rows.length === 2, "two rows");
   for (const r of snap.rows) {
     expect(r.status === "not_proven",
       `two-bowler/11-week: ${r.bowler.name} got ${r.status}, note=${r.note}`);
-    expect(r.status !== "clinched", "must not be clinched");
+    expect(r.status !== "clinched", "must not be clinched even with huge lead");
+    expect(r.status !== "eliminated", "must not be eliminated");
+    expect((r.note ?? "").toLowerCase().includes("no complete legal remaining schedule"),
+      `note should mention no complete legal schedule, got: ${r.note}`);
   }
 }
 
@@ -228,7 +236,7 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
   const weeks: WeekSummary[] = [week(1, { completed: true }), week(2)];
   const snap = computeElimination({ activeBowlers: bs, weeks, matchesByWeek: matches, totalWeeks: 2 });
   const t = snap.rows.find((r) => r.bowler.id === "t")!;
-  expect(t.status === "alive" || t.status === "tiebreaker_only",
+  expect(t.status === "alive",
     `final-week repeat: got ${t.status}, note=${t.note}`);
   const w2 = t.diagnostics!.witnessPairs!.find((w) => w.week === 2)!;
   expect(hasPair(w2, "t", "x"), "final-week schedule must include T-X repeat");
@@ -275,16 +283,26 @@ function rr4(a: string, b: string, c: string, d: string, weeks: number[]): Match
   }
 }
 
-// --- 13. Budget exhaustion → Not Proven (never Eliminated) ------------
+// --- 13. Global feasibility budget exhaustion → every row Not Proven ---
 {
+  // 4 bowlers, 3 unresolved weeks. nodeBudget=0 forces the global
+  // schedule-feasibility check to bail without a verdict; every row must
+  // become not_proven with the "within the calculation limit" reason.
   const bs = [bowler("t", 0, "T"), bowler("x", 0, "X"), bowler("y", 0, "Y"), bowler("z", 0, "Z")];
   const snap = computeElimination({
     activeBowlers: bs, weeks: [week(1), week(2), week(3)],
     matchesByWeek: {}, totalWeeks: 3, nodeBudget: 0,
   });
-  const t = snap.rows.find((r) => r.bowler.id === "t")!;
-  expect(t.status === "not_proven", `budget-exhaust: got ${t.status}, note=${t.note}`);
-  expect(t.diagnostics?.budgetExhausted === true, "budgetExhausted flag");
+  expect(snap.rows.length === 4, "four rows");
+  for (const r of snap.rows) {
+    expect(r.status === "not_proven",
+      `budget-exhaust: ${r.bowler.name} got ${r.status}, note=${r.note}`);
+    expect(r.status !== "clinched" && r.status !== "eliminated",
+      "budget exhaustion must never produce clinched/eliminated");
+    expect(r.diagnostics?.budgetExhausted === true, "budgetExhausted flag");
+    expect((r.note ?? "").toLowerCase().includes("within the calculation limit"),
+      `note should mention calculation-limit reason, got: ${r.note}`);
+  }
 }
 
 // --- 14. Public route reads snapshot only (no solver invocation) ------

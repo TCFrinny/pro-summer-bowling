@@ -229,21 +229,21 @@ interface ScheduleWitness {
 }
 
 interface SearchCtx {
-  target: BowlerId;
+  target: BowlerId | null;
   currUnits: Map<BowlerId, number>;
   pastPairsPreFinal: Set<string>;
   budget: { remaining: number };
 }
 
 /**
- * Try to build a legal remaining schedule where target is paired according
- * to fixed constraints, and for every other unresolved week where target
- * is present the target's opponent is chosen greedily (highest-current
- * opponent first — that opponent gets 0 units under target-wins-all).
+ * Try to build a legal remaining schedule. When `target` is non-null, the
+ * target is paired first each week (opponent iteration ordered by current
+ * points, tiebreak by id). When `target` is null, no bowler is preferred —
+ * used for the global schedule-feasibility check.
  *
  * Returns null if the budget runs out or no legal schedule exists.
  */
-function buildSchedule(prep: Prep, target: BowlerId, budget: { remaining: number }): ScheduleWitness | null {
+function buildSchedule(prep: Prep, target: BowlerId | null, budget: { remaining: number }): ScheduleWitness | null {
   const ctx: SearchCtx = {
     target,
     currUnits: prep.currUnits,
@@ -254,6 +254,28 @@ function buildSchedule(prep: Prep, target: BowlerId, budget: { remaining: number
   const activeUnresolvedSlots = prep.weekSlots.filter((s) => s.unresolvedActive.size > 0);
   const ok = solveWeeks(ctx, activeUnresolvedSlots, 0, witness);
   return ok ? witness : null;
+}
+
+/**
+ * Global remaining-schedule feasibility check. Returns:
+ *  - "ok" if a complete legal schedule exists (including trivially, when
+ *    there are no unresolved matches).
+ *  - "infeasible" if the bounded search completed and no legal schedule
+ *    exists.
+ *  - "budget_exhausted" if the search consumed its node budget without
+ *    reaching a conclusion.
+ * Never returns a witness — this is used only as a precondition for
+ * proving per-target statuses.
+ */
+function checkGlobalFeasibility(
+  prep: Prep,
+  budget: { remaining: number },
+): { status: "ok" | "infeasible" | "budget_exhausted" } {
+  if (prep.weeksRemaining === 0) return { status: "ok" };
+  const witness = buildSchedule(prep, null, budget);
+  if (witness) return { status: "ok" };
+  if (budget.remaining <= 0) return { status: "budget_exhausted" };
+  return { status: "infeasible" };
 }
 
 function solveWeeks(
@@ -310,10 +332,14 @@ function solveWeeks(
   };
 
   // Prefer pairing the target first, choosing the opponent with the highest
-  // current points (deterministic tiebreak by id ascending).
-  const targetHere = remaining.has(ctx.target) && !slot.fixedForBowler.has(ctx.target);
+  // current points (deterministic tiebreak by id ascending). When target is
+  // null (global feasibility check) skip the target-first branch entirely.
+  const target = ctx.target;
+  const targetHere = target !== null
+    && remaining.has(target)
+    && !slot.fixedForBowler.has(target);
   const rest: BowlerId[] = [];
-  for (const id of remaining) if (id !== ctx.target) rest.push(id);
+  for (const id of remaining) if (id !== target) rest.push(id);
   rest.sort((a, b) => {
     const dc = (ctx.currUnits.get(b) ?? 0) - (ctx.currUnits.get(a) ?? 0);
     if (dc !== 0) return dc;
@@ -355,18 +381,18 @@ function solveWeeks(
     return false;
   };
 
-  if (targetHere) {
+  if (targetHere && target !== null) {
     const candidates = rest.filter((o) => !paired.has(o));
     for (const opp of candidates) {
       if (ctx.budget.remaining-- <= 0) return false;
-      if (!addPair(ctx.target, opp)) continue;
+      if (!addPair(target, opp)) continue;
       if (backtrackRest()) return true;
-      removePair(ctx.target, opp);
+      removePair(target, opp);
     }
     return false;
   }
   // Target has a fixed pair this week (or target isn't in unresolvedActive
-  // this week); just pair the rest.
+  // this week, or no target was specified); just pair the rest.
   return backtrackRest();
 }
 
@@ -521,8 +547,30 @@ export function computeElimination(input: EliminationInput): EliminationSnapshot
   }
 
   const budget = input.nodeBudget ?? DEFAULT_NODE_BUDGET;
-  const rows: EliminationRow[] = [];
 
+  // Global remaining-schedule feasibility check. Runs BEFORE any clinch /
+  // elimination bound so that inconsistent/impossible schedules can never be
+  // reported as a final status. Never converts search failure into a
+  // clinched/eliminated verdict.
+  const feasBudget = { remaining: budget };
+  const feas = checkGlobalFeasibility(prep, feasBudget);
+  if (feas.status !== "ok") {
+    const reason = feas.status === "budget_exhausted"
+      ? "Could not verify a complete legal remaining schedule within the calculation limit."
+      : "No complete legal remaining schedule exists under the current roster, published matchups, and no-repeat rules.";
+    return {
+      lastCalculatedAt: now,
+      weeksRemaining: prep.weeksRemaining,
+      rows: prep.active.map((b) => ({
+        bowler: b,
+        status: "not_proven" as const,
+        note: reason,
+        diagnostics: { budgetExhausted: feas.status === "budget_exhausted" },
+      })),
+    };
+  }
+
+  const rows: EliminationRow[] = [];
   for (const target of prep.active) {
     rows.push(proveTarget(prep, target, budget));
   }
