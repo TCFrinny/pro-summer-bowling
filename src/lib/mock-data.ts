@@ -330,6 +330,9 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
         bowler.gamePoints += gp;
         bowler.setPoints += sp;
         bowler.points += total;
+        // Each match distributes exactly 7 points; the opponent's share is
+        // this bowler's "points lost" for W-L record purposes.
+        bowler.pointsLost += 7 - total;
         bowler.scratchPinfall += games.reduce((s, x) => s + x, 0);
         bowler.handicapPinfall += hdcpTotal;
         for (const g of games) {
