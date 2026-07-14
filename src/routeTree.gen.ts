@@ -18,6 +18,7 @@ import { Route as LaneDataRouteImport } from './routes/lane-data'
 import { Route as EliminationRouteImport } from './routes/elimination'
 import { Route as BowlersRouteImport } from './routes/bowlers'
 import { Route as AdminLoginRouteImport } from './routes/admin-login'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LeaderboardsIndexRouteImport } from './routes/leaderboards.index'
 import { Route as LeaderboardsAdvancedRouteImport } from './routes/leaderboards.advanced'
@@ -71,6 +72,11 @@ const AdminLoginRoute = AdminLoginRouteImport.update({
   path: '/admin-login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -92,23 +98,24 @@ const BowlersBowlerIdRoute = BowlersBowlerIdRouteImport.update({
   getParentRoute: () => BowlersRoute,
 } as any)
 const AdminScheduleRoute = AdminScheduleRouteImport.update({
-  id: '/admin/schedule',
-  path: '/admin/schedule',
-  getParentRoute: () => rootRouteImport,
+  id: '/schedule',
+  path: '/schedule',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AdminResultsRoute = AdminResultsRouteImport.update({
-  id: '/admin/results',
-  path: '/admin/results',
-  getParentRoute: () => rootRouteImport,
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AdminBowlersRoute = AdminBowlersRouteImport.update({
-  id: '/admin/bowlers',
-  path: '/admin/bowlers',
-  getParentRoute: () => rootRouteImport,
+  id: '/bowlers',
+  path: '/bowlers',
+  getParentRoute: () => AdminRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/admin-login': typeof AdminLoginRoute
   '/bowlers': typeof BowlersRouteWithChildren
   '/elimination': typeof EliminationRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/admin-login': typeof AdminLoginRoute
   '/bowlers': typeof BowlersRouteWithChildren
   '/elimination': typeof EliminationRoute
@@ -145,6 +153,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/admin-login': typeof AdminLoginRoute
   '/bowlers': typeof BowlersRouteWithChildren
   '/elimination': typeof EliminationRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/admin-login'
     | '/bowlers'
     | '/elimination'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
     | '/admin-login'
     | '/bowlers'
     | '/elimination'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/admin-login'
     | '/bowlers'
     | '/elimination'
@@ -219,6 +231,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   AdminLoginRoute: typeof AdminLoginRoute
   BowlersRoute: typeof BowlersRouteWithChildren
   EliminationRoute: typeof EliminationRoute
@@ -228,9 +241,6 @@ export interface RootRouteChildren {
   StandingsRoute: typeof StandingsRoute
   StatisticsRoute: typeof StatisticsRoute
   WeeklyResultsRoute: typeof WeeklyResultsRoute
-  AdminBowlersRoute: typeof AdminBowlersRoute
-  AdminResultsRoute: typeof AdminResultsRoute
-  AdminScheduleRoute: typeof AdminScheduleRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -298,6 +308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -328,27 +345,41 @@ declare module '@tanstack/react-router' {
     }
     '/admin/schedule': {
       id: '/admin/schedule'
-      path: '/admin/schedule'
+      path: '/schedule'
       fullPath: '/admin/schedule'
       preLoaderRoute: typeof AdminScheduleRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/admin/results': {
       id: '/admin/results'
-      path: '/admin/results'
+      path: '/results'
       fullPath: '/admin/results'
       preLoaderRoute: typeof AdminResultsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/admin/bowlers': {
       id: '/admin/bowlers'
-      path: '/admin/bowlers'
+      path: '/bowlers'
       fullPath: '/admin/bowlers'
       preLoaderRoute: typeof AdminBowlersRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminRoute
     }
   }
 }
+
+interface AdminRouteChildren {
+  AdminBowlersRoute: typeof AdminBowlersRoute
+  AdminResultsRoute: typeof AdminResultsRoute
+  AdminScheduleRoute: typeof AdminScheduleRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminBowlersRoute: AdminBowlersRoute,
+  AdminResultsRoute: AdminResultsRoute,
+  AdminScheduleRoute: AdminScheduleRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface BowlersRouteChildren {
   BowlersBowlerIdRoute: typeof BowlersBowlerIdRoute
@@ -377,6 +408,7 @@ const LeaderboardsRouteWithChildren = LeaderboardsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   AdminLoginRoute: AdminLoginRoute,
   BowlersRoute: BowlersRouteWithChildren,
   EliminationRoute: EliminationRoute,
@@ -386,9 +418,6 @@ const rootRouteChildren: RootRouteChildren = {
   StandingsRoute: StandingsRoute,
   StatisticsRoute: StatisticsRoute,
   WeeklyResultsRoute: WeeklyResultsRoute,
-  AdminBowlersRoute: AdminBowlersRoute,
-  AdminResultsRoute: AdminResultsRoute,
-  AdminScheduleRoute: AdminScheduleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
