@@ -3,8 +3,10 @@ import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   formatPoints,
   getEliminationSnapshot,
+  getStandingsSnapshot,
   type EliminationStatus,
 } from "@/lib/mock-data";
+import { sortEliminationRowsByStandings } from "@/lib/elimination-order";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale } from "lucide-react";
@@ -63,6 +65,11 @@ function EliminationPage() {
   useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Read the last-published snapshot. NEVER run a solver here.
   const snap = getEliminationSnapshot();
+  const standings = getStandingsSnapshot();
+
+  // Render order only: mirror the standings ordering without mutating
+  // `snap.rows` or the underlying saved snapshot.
+  const orderedRows = sortEliminationRowsByStandings(snap.rows, standings);
 
   const counts = snap.rows.reduce(
     (acc, r) => {
@@ -116,7 +123,7 @@ function EliminationPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {snap.rows.map((r) => (
+            {orderedRows.map((r) => (
               <tr key={r.bowler.id} className="align-top hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
                 <td className="px-3 py-2 text-right font-display text-base text-gold">
