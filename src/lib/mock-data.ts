@@ -765,6 +765,15 @@ export interface EliminationRow {
 }
 export interface EliminationSnapshot {
   lastCalculatedAt: string; weeksRemaining: number; rows: EliminationRow[];
+  /** How this row set was derived. `bounds_only` (cheap, server-side) uses
+   *  only trivial arithmetic on current points and remaining match counts;
+   *  `full` is the schedule-aware solver output run by the admin browser
+   *  and persisted through `saveFullEliminationResult`. */
+  calculationMode?: "bounds_only" | "full";
+  /** PublicSnapshot.builtAt this elimination result was proven against.
+   *  Used as a concurrency token so admin recalculations can't overwrite
+   *  results computed against a stale roster/schedule. */
+  sourceBuiltAt?: number;
 }
 
 /** The single object every public read comes from. */
