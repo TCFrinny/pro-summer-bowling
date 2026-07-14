@@ -151,6 +151,12 @@ export interface BowlerMatchLinescore {
 export interface MatchResult {
   scheduledA: BowlerId;
   scheduledB: BowlerId;
+  /** FROZEN scheduled bowler display names at result-save time.
+   *  Roster renames must NOT rewrite completed history. Every completed
+   *  result read (Weekly Results, history, leaderboards, lane data)
+   *  reads these fields, never the current roster name. */
+  scheduledNameA: string;
+  scheduledNameB: string;
   actualA: BowlerId | null;
   actualB: BowlerId | null;
   actualNameA: string;
@@ -161,6 +167,8 @@ export interface MatchResult {
   subB?: string;
   participationA: SideParticipation;
   participationB: SideParticipation;
+  /** Frozen scheduled entry avg / handicap at save time — used for POA,
+   *  lane summaries, and handicap totals. */
   entryAverageA: number;
   entryAverageB: number;
   handicapA: number;
@@ -362,6 +370,9 @@ export function assembleSideLinescore(input: {
 export function computeMatchResult(input: {
   scheduledA: Bowler;
   scheduledB: Bowler;
+  /** FROZEN scheduled display names at save time. */
+  scheduledNameA: string;
+  scheduledNameB: string;
   participationA: SideParticipation;
   participationB: SideParticipation;
   entryAverageA: number;
@@ -373,26 +384,34 @@ export function computeMatchResult(input: {
   pointsOverride: PointsOverride | null;
 }): MatchResult {
   const {
-    scheduledA, scheduledB, participationA, participationB,
+    scheduledA, scheduledB, scheduledNameA, scheduledNameB,
+    participationA, participationB,
     entryAverageA, entryAverageB, handicapA, handicapB,
     linescoreA, linescoreB, pointsOverride,
   } = input;
 
-  const gamesA: [number, number, number] = linescoreA
-    ? [linescoreA.games[0].scratchTotal, linescoreA.games[1].scratchTotal, linescoreA.games[2].scratchTotal]
-    : [0, 0, 0];
-  const gamesB: [number, number, number] = linescoreB
-    ? [linescoreB.games[0].scratchTotal, linescoreB.games[1].scratchTotal, linescoreB.games[2].scratchTotal]
-    : [0, 0, 0];
-  const hcpGamesA: [number, number, number] = [gamesA[0] + handicapA, gamesA[1] + handicapA, gamesA[2] + handicapA];
-  const hcpGamesB: [number, number, number] = [gamesB[0] + handicapB, gamesB[1] + handicapB, gamesB[2] + handicapB];
-  const scratchA = gamesA[0] + gamesA[1] + gamesA[2];
-  const scratchB = gamesB[0] + gamesB[1] + gamesB[2];
-  const hcpTotalA = scratchA + handicapA * 3;
-  const hcpTotalB = scratchB + handicapB * 3;
-
   const bowledA = participationA.status !== "absent" && linescoreA != null;
   const bowledB = participationB.status !== "absent" && linescoreB != null;
+
+  // An absent side has NO pinfall — scratch/handicap game/set = 0. The
+  // side that bowled retains its own valid totals; do not credit the
+  // opponent with phantom handicap pinfall just because they showed up.
+  const gamesA: [number, number, number] = bowledA
+    ? [linescoreA!.games[0].scratchTotal, linescoreA!.games[1].scratchTotal, linescoreA!.games[2].scratchTotal]
+    : [0, 0, 0];
+  const gamesB: [number, number, number] = bowledB
+    ? [linescoreB!.games[0].scratchTotal, linescoreB!.games[1].scratchTotal, linescoreB!.games[2].scratchTotal]
+    : [0, 0, 0];
+  const hcpGamesA: [number, number, number] = bowledA
+    ? [gamesA[0] + handicapA, gamesA[1] + handicapA, gamesA[2] + handicapA]
+    : [0, 0, 0];
+  const hcpGamesB: [number, number, number] = bowledB
+    ? [gamesB[0] + handicapB, gamesB[1] + handicapB, gamesB[2] + handicapB]
+    : [0, 0, 0];
+  const scratchA = gamesA[0] + gamesA[1] + gamesA[2];
+  const scratchB = gamesB[0] + gamesB[1] + gamesB[2];
+  const hcpTotalA = bowledA ? scratchA + handicapA * 3 : 0;
+  const hcpTotalB = bowledB ? scratchB + handicapB * 3 : 0;
 
   const gameAwardsA: [GameAward, GameAward, GameAward] = [0, 0, 0];
   const gameAwardsB: [GameAward, GameAward, GameAward] = [0, 0, 0];
@@ -411,17 +430,16 @@ export function computeMatchResult(input: {
     else if (hcpTotalB > hcpTotalA) { setPointA = 0; setPointB = 1; }
     else { setPointA = 0.5; setPointB = 0.5; }
   }
-  // Frame-derived totals (before any override).
   const totalPointsA = gpA + setPointA;
   const totalPointsB = gpB + setPointB;
   const finalA = pointsOverride?.enabled ? pointsOverride.pointsA : totalPointsA;
   const finalB = pointsOverride?.enabled ? pointsOverride.pointsB : totalPointsB;
-
   const winner: "A" | "B" | "T" =
     finalA > finalB ? "A" : finalB > finalA ? "B" : "T";
 
   return {
     scheduledA: scheduledA.id, scheduledB: scheduledB.id,
+    scheduledNameA, scheduledNameB,
     actualA: participationA.actualId, actualB: participationB.actualId,
     actualNameA: participationA.actualName, actualNameB: participationB.actualName,
     isSubA: participationA.status === "substitute",
@@ -500,7 +518,7 @@ export function seedWeekMatches(week: number, bowlers: Bowler[]): Match[] {
           actualId: isSubA ? null : a.id,
           actualName: isSubA ? `Sub — ${subNameA}` : a.name,
           isSub: isSubA,
-          entryAverage: isSubA ? Math.round(100 + r() * 60) : a.entryAverage,
+          entryAverage: a.entryAverage,
           handicap: a.handicap,
           games: [rollMockGame(r, skillA), rollMockGame(r, skillA), rollMockGame(r, skillA)],
         });
@@ -509,12 +527,13 @@ export function seedWeekMatches(week: number, bowlers: Bowler[]): Match[] {
           actualId: isSubB ? null : b.id,
           actualName: isSubB ? `Sub — ${subNameB}` : b.name,
           isSub: isSubB,
-          entryAverage: isSubB ? Math.round(100 + r() * 60) : b.entryAverage,
+          entryAverage: b.entryAverage,
           handicap: b.handicap,
           games: [rollMockGame(r, skillB), rollMockGame(r, skillB), rollMockGame(r, skillB)],
         });
         match.result = computeMatchResult({
           scheduledA: a, scheduledB: b,
+          scheduledNameA: a.name, scheduledNameB: b.name,
           participationA: {
             scheduledId: a.id,
             status: isSubA ? "substitute" : "rostered",
@@ -565,6 +584,9 @@ export interface BowlerHistoryRow {
   opponentId: BowlerId;
   actualBowler: string;
   isSub: boolean;
+  /** True when the scheduled bowler was Absent for the week. Score fields
+   *  and linescore are null / zero; W-L and override note still populate. */
+  absent: boolean;
   scores: [number, number, number];
   handicap: number;
   handicapGames: [number, number, number];
@@ -582,7 +604,7 @@ export interface BowlerHistoryRow {
   poaSet: number;
   poaBestGame: number;
   result: "W" | "L" | "T";
-  linescore: BowlerMatchLinescore;
+  linescore: BowlerMatchLinescore | null;
   opponentLinescore: BowlerMatchLinescore | null;
   weekStrikes: number;
   weekSpares: number;
@@ -804,7 +826,6 @@ export function buildSnapshot(input: {
         const self = bowlersById[selfId];
         if (!self) continue;
         const oppId = isA ? m.bowlerB : m.bowlerA;
-        const opp = bowlersById[oppId];
         const scores = isA ? res.gamesA : res.gamesB;
         const scratchTotal = isA ? res.scratchTotalA : res.scratchTotalB;
         const hdcp = isA ? res.handicapA : res.handicapB;
@@ -820,18 +841,50 @@ export function buildSnapshot(input: {
         const ls = isA ? res.linescoreA : res.linescoreB;
         const oppLs = isA ? res.linescoreB : res.linescoreA;
         const participation = isA ? res.participationA : res.participationB;
-        if (!ls || participation.status === "absent") continue;
-        const poaSet = scratchTotal - 3 * self.entryAverage;
-        const poaBest = Math.max(...scores.map((g) => g - self.entryAverage));
+        // FROZEN scheduled entry avg / opponent name — from the result,
+        // not the current roster record. Renaming a bowler or editing
+        // an entry average must NOT rewrite completed history.
+        const selfFrozenAvg = isA ? res.entryAverageA : res.entryAverageB;
+        const oppFrozenName = isA ? res.scheduledNameB : res.scheduledNameA;
+        const resultLetter: "W" | "L" | "T" =
+          res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L";
+
+        if (participation.status === "absent" || !ls) {
+          // Absent history row — visible in profile, no stats/linescore.
+          history[selfId].push({
+            week: w.week, matchId: m.id, lanePair: m.lanePair,
+            opponent: oppFrozenName, opponentId: oppId,
+            actualBowler: "Absent", isSub: false, absent: true,
+            scores: [0, 0, 0], handicap: hdcp,
+            handicapGames: [0, 0, 0],
+            scratchTotal: 0, handicapTotal: 0,
+            opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
+            opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
+            gameAwards: [0, 0, 0], gamePoints: 0, setPoint: 0,
+            totalPoints: tp, pointsLost: lostPts,
+            pointsOverridden: awarded.overridden, overrideReason: awarded.reason,
+            poaSet: 0, poaBestGame: 0,
+            result: resultLetter,
+            linescore: null, opponentLinescore: oppLs,
+            weekStrikes: 0, weekSpares: 0, weekOpens: 0, weekMarks: 0,
+            weekMarkPct: 0, weekStrikePct: 0, weekSpareConversionPct: 0,
+            weekOpenPct: 0, weekPinsLost: 0,
+            weekFirst5: 0, weekLast5: 0, weekBigOpening: 0, weekBigFinish: 0,
+            weekClutchMarks: 0, weekClutchOpportunities: 0, weekClutchPct: 0,
+          });
+          continue;
+        }
+        const poaSet = scratchTotal - 3 * selfFrozenAvg;
+        const poaBest = Math.max(...scores.map((g) => g - selfFrozenAvg));
         const frames = ls.framesRolled;
         const marks = ls.marks;
         const spareOpp = ls.spares + ls.opens;
         const clutchOpp = ls.segments.clutchOpportunities;
         history[selfId].push({
           week: w.week, matchId: m.id, lanePair: m.lanePair,
-          opponent: opp?.name ?? "—", opponentId: oppId,
-          actualBowler: isSub ? ls.actualName : self.name,
-          isSub, scores, handicap: hdcp, handicapGames: hdcpGames,
+          opponent: oppFrozenName, opponentId: oppId,
+          actualBowler: isSub ? ls.actualName : (isA ? res.scheduledNameA : res.scheduledNameB),
+          isSub, absent: false, scores, handicap: hdcp, handicapGames: hdcpGames,
           scratchTotal, handicapTotal: hdcpTotal,
           opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
           opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
@@ -839,7 +892,7 @@ export function buildSnapshot(input: {
           totalPoints: tp, pointsLost: lostPts,
           pointsOverridden: awarded.overridden, overrideReason: awarded.reason,
           poaSet, poaBestGame: poaBest,
-          result: res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L",
+          result: resultLetter,
           linescore: ls, opponentLinescore: oppLs,
           weekStrikes: ls.strikes, weekSpares: ls.spares, weekOpens: ls.opens, weekMarks: marks,
           weekMarkPct: frames > 0 ? (marks / frames) * 100 : 0,
@@ -1103,15 +1156,16 @@ export function buildSnapshot(input: {
     const wb = weekLaneMaps[m.week]?.get(m.lanePair);
     for (const isA of [true, false]) {
       const ls = isA ? r.linescoreA : r.linescoreB;
-      const schedId = isA ? m.bowlerA : m.bowlerB;
-      const sched = bowlersById[schedId];
-      if (!ls || !sched) continue;
+      if (!ls) continue;
+      // Use FROZEN scheduled entry average from the result — editing a
+      // roster average later must not rewrite historical lane POA.
+      const frozenAvg = isA ? r.entryAverageA : r.entryAverageB;
       for (const g of ls.games) {
         lb.pins += g.scratchTotal; lb.games += 1;
-        lb.poaSum += g.scratchTotal - sched.entryAverage; lb.poaCount += 1;
+        lb.poaSum += g.scratchTotal - frozenAvg; lb.poaCount += 1;
         if (wb) {
           wb.pins += g.scratchTotal; wb.games += 1;
-          wb.poaSum += g.scratchTotal - sched.entryAverage; wb.poaCount += 1;
+          wb.poaSum += g.scratchTotal - frozenAvg; wb.poaCount += 1;
         }
       }
     }
