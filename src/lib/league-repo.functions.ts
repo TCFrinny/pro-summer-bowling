@@ -236,11 +236,11 @@ export const deleteRosterBowler = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const seasonId = await ensureCurrentSeasonId(context);
-    // Guard: refuse if any schedule_slot references this bowler.
+    // Guard: refuse if any schedule_slot references this bowler. Bowler ids
+    // are globally unique (b01…), so no season filter is required here.
     const refs = await context.supabase
       .from("schedule_slots")
       .select("id", { count: "exact", head: true })
-      .eq("season_id", seasonId)
       .or(`bowler_a_id.eq.${data.id},bowler_b_id.eq.${data.id}`);
     if (refs.error) throw new Error(refs.error.message);
     if ((refs.count ?? 0) > 0) {
