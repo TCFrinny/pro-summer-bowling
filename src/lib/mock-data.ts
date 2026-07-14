@@ -85,6 +85,36 @@ export type LanePair = (typeof LANE_PAIRS)[number];
 
 export type MatchStatus = "scheduled" | "completed";
 
+export type ParticipationStatus = "rostered" | "substitute" | "absent";
+
+/**
+ * Per-side participation record. `scheduledId` is the roster bowler slotted
+ * on the schedule; `actualId` is the roster bowler who actually rolled (null
+ * for an off-roster substitute or when absent). `actualName` supplies a
+ * display label — for absent sides it is typically the scheduled bowler's
+ * name; for subs it is the sub's display name.
+ */
+export interface SideParticipation {
+  scheduledId: BowlerId;
+  status: ParticipationStatus;
+  actualId: BowlerId | null;
+  actualName: string;
+}
+
+/**
+ * Manual W-L override, applied per match. When enabled it REPLACES the
+ * frame-derived W-L for standings and public display, while any real
+ * linescore rolled by a side is preserved for scratch/advanced stats.
+ * `pointsA` and `pointsB` must each be a multiple of 0.5 in [0, 7], and
+ * their sum must be ≤ 7 (may be less for absence or exceptional rulings).
+ */
+export interface PointsOverride {
+  enabled: true;
+  pointsA: number;
+  pointsB: number;
+  reason: string;
+}
+
 export interface Match {
   id: string;
   week: number;
@@ -141,12 +171,16 @@ export interface MatchResult {
   isSubB: boolean;
   subA?: string;
   subB?: string;
+  /** Per-side participation (rostered / substitute / absent). */
+  participationA: SideParticipation;
+  participationB: SideParticipation;
   entryAverageA: number;
   entryAverageB: number;
   handicapA: number;
   handicapB: number;
-  linescoreA: BowlerMatchLinescore;
-  linescoreB: BowlerMatchLinescore;
+  /** null when the side was absent (no linescore recorded). */
+  linescoreA: BowlerMatchLinescore | null;
+  linescoreB: BowlerMatchLinescore | null;
   gamesA: [number, number, number];
   gamesB: [number, number, number];
   handicapGamesA: [number, number, number];
@@ -161,52 +195,120 @@ export interface MatchResult {
   gamePointsB: number;
   setPointA: SetAward;
   setPointB: SetAward;
+  /** Frame-derived W (before any override). */
   totalPointsA: number;
   totalPointsB: number;
+  /** Optional manual override — replaces final W-L when enabled. */
+  pointsOverride: PointsOverride | null;
   winner: "A" | "B" | "T";
 }
+
+/**
+ * SHARED helper: single source of truth for a match's final awarded points.
+ * Standings, weekly results, profiles, and leaderboards MUST call this — never
+ * read `totalPointsA/B` directly for final points.
+ */
+export interface AwardedPoints {
+  pointsA: number;
+  pointsB: number;
+  overridden: boolean;
+  reason?: string;
+}
+export function getAwardedPoints(r: MatchResult): AwardedPoints {
+  if (r.pointsOverride && r.pointsOverride.enabled) {
+    return {
+      pointsA: r.pointsOverride.pointsA,
+      pointsB: r.pointsOverride.pointsB,
+      overridden: true,
+      reason: r.pointsOverride.reason,
+    };
+  }
+  return { pointsA: r.totalPointsA, pointsB: r.totalPointsB, overridden: false };
+}
+
+/** Half-point increment check used by override validation. */
+function isHalfPointIncrement(n: number): boolean {
+  return Number.isFinite(n) && Math.abs(n * 2 - Math.round(n * 2)) < 1e-9;
+}
+
+export function validatePointsOverride(
+  o: PointsOverride,
+): { ok: true } | { ok: false; error: string } {
+  const { pointsA, pointsB, reason } = o;
+  if (!isHalfPointIncrement(pointsA) || !isHalfPointIncrement(pointsB))
+    return { ok: false, error: "Points must be in 0.5-point increments." };
+  if (pointsA < 0 || pointsA > 7 || pointsB < 0 || pointsB > 7)
+    return { ok: false, error: "Each side must be between 0 and 7." };
+  if (pointsA + pointsB > 7 + 1e-9)
+    return { ok: false, error: "Combined awarded points cannot exceed 7." };
+  if (!reason || reason.trim().length === 0)
+    return { ok: false, error: "A reason/note is required for overrides." };
+  return { ok: true };
+}
+
 
 export function assertMatchResult(m: Match, r: MatchResult): void {
   const id = m.id;
   const check = (cond: boolean, msg: string) => {
     if (!cond) throw new Error(`Match ${id}: ${msg}`);
   };
-  for (let i = 0; i < 3; i++) {
-    check(r.gameAwardsA[i] + r.gameAwardsB[i] === 2, `game ${i + 1} awards must sum to 2`);
-    check(r.handicapGamesA[i] === r.gamesA[i] + r.handicapA, `handicap game A${i + 1} mismatch`);
-    check(r.handicapGamesB[i] === r.gamesB[i] + r.handicapB, `handicap game B${i + 1} mismatch`);
-    check(r.linescoreA.games[i].scratchTotal === r.gamesA[i],
-      `frame-derived A${i + 1} total ${r.linescoreA.games[i].scratchTotal} ≠ recorded ${r.gamesA[i]}`);
-    check(r.linescoreB.games[i].scratchTotal === r.gamesB[i],
-      `frame-derived B${i + 1} total ${r.linescoreB.games[i].scratchTotal} ≠ recorded ${r.gamesB[i]}`);
+  const bowledA = r.participationA.status !== "absent" && r.linescoreA != null;
+  const bowledB = r.participationB.status !== "absent" && r.linescoreB != null;
+
+  if (bowledA && bowledB && !r.pointsOverride) {
+    for (let i = 0; i < 3; i++) {
+      check(r.gameAwardsA[i] + r.gameAwardsB[i] === 2, `game ${i + 1} awards must sum to 2`);
+    }
+    check(r.setPointA + r.setPointB === 1, "set points must sum to 1");
+    check(r.totalPointsA + r.totalPointsB === 7,
+      `match must distribute exactly 7 points (got ${r.totalPointsA}+${r.totalPointsB})`);
   }
-  const scratchA = r.gamesA[0] + r.gamesA[1] + r.gamesA[2];
-  const scratchB = r.gamesB[0] + r.gamesB[1] + r.gamesB[2];
-  check(scratchA === r.scratchTotalA, "scratchTotalA mismatch");
-  check(scratchB === r.scratchTotalB, "scratchTotalB mismatch");
-  check(r.handicapTotalA === scratchA + r.handicapA * 3, "handicapTotalA mismatch");
-  check(r.handicapTotalB === scratchB + r.handicapB * 3, "handicapTotalB mismatch");
-  check(r.setPointA + r.setPointB === 1, "set points must sum to 1");
-  check(r.totalPointsA + r.totalPointsB === 7,
-    `match must distribute exactly 7 points (got ${r.totalPointsA}+${r.totalPointsB})`);
-  for (let i = 0; i < 3; i++) {
-    validateGame(r.linescoreA.games[i], `${id} sideA game ${i + 1}`);
-    validateGame(r.linescoreB.games[i], `${id} sideB game ${i + 1}`);
+
+  if (bowledA && r.linescoreA) {
+    const lsA = r.linescoreA;
+    for (let i = 0; i < 3; i++) {
+      check(r.handicapGamesA[i] === r.gamesA[i] + r.handicapA, `handicap game A${i + 1} mismatch`);
+      check(lsA.games[i].scratchTotal === r.gamesA[i],
+        `frame-derived A${i + 1} total ${lsA.games[i].scratchTotal} ≠ recorded ${r.gamesA[i]}`);
+      validateGame(lsA.games[i], `${id} sideA game ${i + 1}`);
+    }
+    const scratchA = r.gamesA[0] + r.gamesA[1] + r.gamesA[2];
+    check(scratchA === r.scratchTotalA, "scratchTotalA mismatch");
+    check(r.handicapTotalA === scratchA + r.handicapA * 3, "handicapTotalA mismatch");
+    const sA = lsA.segments;
+    const gsA = lsA.games;
+    const sum = (fn: (g: GameLinescore) => number, arr: GameLinescore[]) => arr.reduce((s, g) => s + fn(g), 0);
+    check(sA.first5 === sum((g) => g.segments.first5, gsA), "A First5 mismatch");
+    check(sA.last5 === sum((g) => g.segments.last5, gsA), "A Last5 mismatch");
+    check(sA.bigOpening === sum((g) => g.segments.bigOpening, gsA), "A BigOpening mismatch");
+    check(sA.bigFinish === sum((g) => g.segments.bigFinish, gsA), "A BigFinish mismatch");
+    check(sA.clutchMarks === sum((g) => g.segments.clutchMarks, gsA), "A Clutch marks mismatch");
   }
-  // Match segments reconcile with sums of game segments.
-  const sA = r.linescoreA.segments, sB = r.linescoreB.segments;
-  const gsA = r.linescoreA.games, gsB = r.linescoreB.games;
-  const sum = (fn: (g: GameLinescore) => number, arr: GameLinescore[]) => arr.reduce((s, g) => s + fn(g), 0);
-  check(sA.first5 === sum((g) => g.segments.first5, gsA), "A First5 mismatch");
-  check(sA.last5 === sum((g) => g.segments.last5, gsA), "A Last5 mismatch");
-  check(sA.bigOpening === sum((g) => g.segments.bigOpening, gsA), "A BigOpening mismatch");
-  check(sA.bigFinish === sum((g) => g.segments.bigFinish, gsA), "A BigFinish mismatch");
-  check(sA.clutchMarks === sum((g) => g.segments.clutchMarks, gsA), "A Clutch marks mismatch");
-  check(sB.first5 === sum((g) => g.segments.first5, gsB), "B First5 mismatch");
-  check(sB.last5 === sum((g) => g.segments.last5, gsB), "B Last5 mismatch");
-  check(sB.bigOpening === sum((g) => g.segments.bigOpening, gsB), "B BigOpening mismatch");
-  check(sB.bigFinish === sum((g) => g.segments.bigFinish, gsB), "B BigFinish mismatch");
-  check(sB.clutchMarks === sum((g) => g.segments.clutchMarks, gsB), "B Clutch marks mismatch");
+  if (bowledB && r.linescoreB) {
+    const lsB = r.linescoreB;
+    for (let i = 0; i < 3; i++) {
+      check(r.handicapGamesB[i] === r.gamesB[i] + r.handicapB, `handicap game B${i + 1} mismatch`);
+      check(lsB.games[i].scratchTotal === r.gamesB[i],
+        `frame-derived B${i + 1} total ${lsB.games[i].scratchTotal} ≠ recorded ${r.gamesB[i]}`);
+      validateGame(lsB.games[i], `${id} sideB game ${i + 1}`);
+    }
+    const scratchB = r.gamesB[0] + r.gamesB[1] + r.gamesB[2];
+    check(scratchB === r.scratchTotalB, "scratchTotalB mismatch");
+    check(r.handicapTotalB === scratchB + r.handicapB * 3, "handicapTotalB mismatch");
+    const sB = lsB.segments;
+    const gsB = lsB.games;
+    const sum = (fn: (g: GameLinescore) => number, arr: GameLinescore[]) => arr.reduce((s, g) => s + fn(g), 0);
+    check(sB.first5 === sum((g) => g.segments.first5, gsB), "B First5 mismatch");
+    check(sB.last5 === sum((g) => g.segments.last5, gsB), "B Last5 mismatch");
+    check(sB.bigOpening === sum((g) => g.segments.bigOpening, gsB), "B BigOpening mismatch");
+    check(sB.bigFinish === sum((g) => g.segments.bigFinish, gsB), "B BigFinish mismatch");
+    check(sB.clutchMarks === sum((g) => g.segments.clutchMarks, gsB), "B Clutch marks mismatch");
+  }
+
+  if (r.pointsOverride) {
+    const chk = validatePointsOverride(r.pointsOverride);
+    check(chk.ok, chk.ok ? "" : chk.error);
+  }
 }
 
 export interface WeekSummary {
@@ -394,6 +496,18 @@ function buildWeekMatches(week: number): Match[] {
           actualNameA: lsA.actualName, actualNameB: lsB.actualName,
           isSubA, isSubB,
           subA: subNameA ?? undefined, subB: subNameB ?? undefined,
+          participationA: {
+            scheduledId: a.id,
+            status: isSubA ? "substitute" : "rostered",
+            actualId: isSubA ? null : a.id,
+            actualName: isSubA ? (subNameA ?? "Substitute") : a.name,
+          },
+          participationB: {
+            scheduledId: b.id,
+            status: isSubB ? "substitute" : "rostered",
+            actualId: isSubB ? null : b.id,
+            actualName: isSubB ? (subNameB ?? "Substitute") : b.name,
+          },
           entryAverageA: a.entryAverage, entryAverageB: b.entryAverage,
           handicapA: a.handicap, handicapB: b.handicap,
           linescoreA: lsA, linescoreB: lsB,
@@ -405,6 +519,7 @@ function buildWeekMatches(week: number): Match[] {
           gamePointsA: gpA, gamePointsB: gpB,
           setPointA, setPointB,
           totalPointsA, totalPointsB,
+          pointsOverride: null,
           winner: totalPointsA > totalPointsB ? "A" : totalPointsB > totalPointsA ? "B" : "T",
         };
         assertMatchResult(match, match.result);
@@ -431,25 +546,32 @@ const MATCHES_BY_WEEK: Record<number, Match[]> = Object.fromEntries(
       if (!r) continue;
       const a = BOWLERS_BY_ID[m.bowlerA];
       const b = BOWLERS_BY_ID[m.bowlerB];
+      const awarded = getAwardedPoints(r);
 
       a.matchesPlayed += 1; a.gamesPlayed += 3;
       a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
-      a.points += r.totalPointsA; a.pointsLost += 7 - r.totalPointsA;
+      a.points += awarded.pointsA;
+      // L = opponent's ACTUAL awarded points (not 7 - W), so override matches
+      // may leave W + L < 7.
+      a.pointsLost += awarded.pointsB;
       a.handicapPinfall += r.handicapTotalA;
 
       b.matchesPlayed += 1; b.gamesPlayed += 3;
       b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
-      b.points += r.totalPointsB; b.pointsLost += 7 - r.totalPointsB;
+      b.points += awarded.pointsB;
+      b.pointsLost += awarded.pointsA;
       b.handicapPinfall += r.handicapTotalB;
 
-      if (!r.isSubA) {
+      const lsA = r.linescoreA;
+      if (lsA && !lsA.isSub && r.participationA.status !== "absent") {
         a.actualGamesRolled += 3;
         a.actualScratchPinfall += r.scratchTotalA;
         a.scratchPinfall += r.scratchTotalA;
         for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
         if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
       }
-      if (!r.isSubB) {
+      const lsB = r.linescoreB;
+      if (lsB && !lsB.isSub && r.participationB.status !== "absent") {
         b.actualGamesRolled += 3;
         b.actualScratchPinfall += r.scratchTotalB;
         b.scratchPinfall += r.scratchTotalB;
@@ -506,11 +628,13 @@ export interface BowlerHistoryRow {
   setPoint: SetAward;
   totalPoints: number;
   pointsLost: number;
+  pointsOverridden: boolean;
+  overrideReason?: string;
   poaSet: number;
   poaBestGame: number;
   result: "W" | "L" | "T";
   linescore: BowlerMatchLinescore;
-  opponentLinescore: BowlerMatchLinescore;
+  opponentLinescore: BowlerMatchLinescore | null;
   weekStrikes: number;
   weekSpares: number;
   weekOpens: number;
@@ -550,11 +674,18 @@ export function getBowlerHistory(id: BowlerId): BowlerHistoryRow[] {
       const hdcpTotal = isA ? res.handicapTotalA : res.handicapTotalB;
       const gp = isA ? res.gamePointsA : res.gamePointsB;
       const sp = isA ? res.setPointA : res.setPointB;
-      const tp = isA ? res.totalPointsA : res.totalPointsB;
+      const awarded = getAwardedPoints(res);
+      const tp = isA ? awarded.pointsA : awarded.pointsB;
+      const lostPts = isA ? awarded.pointsB : awarded.pointsA;
       const awards = isA ? res.gameAwardsA : res.gameAwardsB;
       const isSub = isA ? res.isSubA : res.isSubB;
       const ls = isA ? res.linescoreA : res.linescoreB;
       const oppLs = isA ? res.linescoreB : res.linescoreA;
+      const participation = isA ? res.participationA : res.participationB;
+      // Skip generating a full frame-derived row when this bowler was absent
+      // (no linescore). Admin data may include absent sides; the UI treats
+      // history rows as bowled-and-rolled events only.
+      if (!ls || participation.status === "absent") continue;
       const poaSet = scratchTotal - 3 * self.entryAverage;
       const poaBest = Math.max(...scores.map((g) => g - self.entryAverage));
       const frames = ls.framesRolled;
@@ -571,7 +702,9 @@ export function getBowlerHistory(id: BowlerId): BowlerHistoryRow[] {
         opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
         opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
         gameAwards: awards, gamePoints: gp, setPoint: sp,
-        totalPoints: tp, pointsLost: 7 - tp,
+        totalPoints: tp, pointsLost: lostPts,
+        pointsOverridden: awarded.overridden,
+        overrideReason: awarded.reason,
         poaSet, poaBestGame: poaBest,
         result:
           res.winner === "T" ? "T"
@@ -656,7 +789,7 @@ function collectFrameStats(id: BowlerId, weekFilter?: number): RosterFrameStats 
       const isB = m.bowlerB === id;
       if (!isA && !isB) continue;
       const ls = isA ? res.linescoreA : res.linescoreB;
-      if (ls.isSub) continue; // roster-only
+      if (!ls || ls.isSub) continue; // roster-only, requires actual linescore
       out.strikes += ls.strikes;
       out.spares += ls.spares;
       out.opens += ls.opens;
@@ -850,6 +983,7 @@ function buildLeaderboardsForScope(
     const oppNameA = schedB.name;
     const oppNameB = schedA.name;
 
+    const awarded = getAwardedPoints(r);
     for (const side of ["A", "B"] as const) {
       const isA = side === "A";
       const sched = isA ? schedA : schedB;
@@ -859,7 +993,8 @@ function buildLeaderboardsForScope(
       const hdcpTot = isA ? r.handicapTotalA : r.handicapTotalB;
       const hdcpGamesArr = isA ? r.handicapGamesA : r.handicapGamesB;
       const scratchGamesArr = isA ? r.gamesA : r.gamesB;
-      const totalPts = isA ? r.totalPointsA : r.totalPointsB;
+      const awardedForSide = isA ? awarded.pointsA : awarded.pointsB;
+      const awardedForOpp = isA ? awarded.pointsB : awarded.pointsA;
 
       // CREDITED — scheduled bowler + actual scratch rolled + scheduled hdcp.
       for (let i = 0; i < 3; i++) {
@@ -879,12 +1014,12 @@ function buildLeaderboardsForScope(
         seasonRow = { bowlerId: sched.id, bowlerName: sched.name, points: 0, pointsLost: 0, matches: 0 };
         creditedSeason.set(sched.id, seasonRow);
       }
-      seasonRow.points += totalPts;
-      seasonRow.pointsLost += 7 - totalPts;
+      seasonRow.points += awardedForSide;
+      seasonRow.pointsLost += awardedForOpp;
       seasonRow.matches += 1;
 
       // ROSTER-ONLY — actual bowler, only if roster member.
-      if (!ls.isSub && ls.actualId) {
+      if (ls && !ls.isSub && ls.actualId) {
         const rosterId = ls.actualId;
         const rosterName = getBowler(rosterId)?.name ?? ls.actualName;
         for (let i = 0; i < 3; i++) {
@@ -1070,6 +1205,14 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
       actualNameA: subLs.actualName, actualNameB: opponent.name,
       isSubA: true, isSubB: false,
       subA: fakeSubName,
+      participationA: {
+        scheduledId: scheduled.id, status: "substitute",
+        actualId: null, actualName: subLs.actualName,
+      },
+      participationB: {
+        scheduledId: opponent.id, status: "rostered",
+        actualId: opponent.id, actualName: opponent.name,
+      },
       entryAverageA: 100, entryAverageB: opponent.entryAverage,
       handicapA: scheduled.handicap, handicapB: opponent.handicap,
       linescoreA: subLs, linescoreB: oppLs,
@@ -1082,6 +1225,7 @@ const WEEK_BOARDS: Record<number, ReturnType<typeof buildLeaderboardsForScope>> 
       gamePointsA: 6, gamePointsB: 0,
       setPointA: 1, setPointB: 0,
       totalPointsA: 7, totalPointsB: 0,
+      pointsOverride: null,
       winner: "A",
     },
   };

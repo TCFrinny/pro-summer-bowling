@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Lock, Info } from "lucide-react";
+import { Lock, Info, ArrowRight } from "lucide-react";
 
 export const Route = createFileRoute("/admin-login")({
   head: () => ({
@@ -70,6 +70,32 @@ function AdminLogin() {
                 </span>
               </div>
             </form>
+
+            <div className="mt-6 border-t border-border pt-4">
+              <div className="mb-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+                Phase 1 Admin Preview (no auth)
+              </div>
+              <div className="grid gap-2">
+                <Link
+                  to="/admin/schedule"
+                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
+                >
+                  <span>Manual Schedule Editor</span>
+                  <ArrowRight className="h-4 w-4 text-gold" />
+                </Link>
+                <Link
+                  to="/admin/results"
+                  className="flex items-center justify-between rounded-md border border-border bg-accent/40 px-3 py-2 text-sm hover:bg-accent"
+                >
+                  <span>Weekly Result Entry</span>
+                  <ArrowRight className="h-4 w-4 text-gold" />
+                </Link>
+              </div>
+              <p className="mt-2 text-[10px] text-muted-foreground">
+                Local-only mock state. Changes are not persisted and no admin
+                data is visible on public routes.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
