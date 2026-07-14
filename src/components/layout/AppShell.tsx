@@ -3,6 +3,7 @@ import { LEAGUE_NAME, SEASON_LABEL, VENUE_NAME } from "@/lib/mock-data";
 import { Menu, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/hooks/use-session";
 
 const NAV = [
   { to: "/", label: "Home" },
@@ -14,7 +15,6 @@ const NAV = [
   { to: "/statistics", label: "Statistics" },
   { to: "/lane-data", label: "Lane Data" },
   { to: "/elimination", label: "Elimination" },
-  { to: "/admin-login", label: "Admin Login" },
 ] as const;
 
 function DuckpinBallMark({ className }: { className?: string }) {
