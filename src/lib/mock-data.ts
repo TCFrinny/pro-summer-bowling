@@ -30,7 +30,7 @@ import {
   type GameLinescore,
   type GameSegments,
 } from "./duckpin";
-import { computeElimination } from "./elimination";
+import { computeEliminationBounds } from "./elimination-bounds";
 
 export {
   classifyFrame,
