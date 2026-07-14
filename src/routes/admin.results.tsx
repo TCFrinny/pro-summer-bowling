@@ -577,6 +577,7 @@ function SidePanel({
           disabled={disabled}
           state={side.linescore}
           onChange={(next) => onChange({ linescore: next })}
+          testPrefix={testId}
         />
 
         {disabled && (

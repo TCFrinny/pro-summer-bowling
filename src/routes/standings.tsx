@@ -337,7 +337,16 @@ function StandingsPage() {
           </thead>
           <tbody className="divide-y divide-border">
             {displayed.map((r) => (
-              <tr key={r.bowler.id} className="hover:bg-accent/30">
+              <tr
+                key={r.bowler.id}
+                className="hover:bg-accent/30"
+                data-testid={`standings-row-${r.bowler.id}`}
+                data-w={r.bowler.points}
+                data-l={r.bowler.pointsLost}
+                data-hcp-pinfall={r.bowler.handicapPinfall}
+                data-scratch-pinfall={r.bowler.scratchPinfall}
+                data-games={r.bowler.gamesPlayed}
+              >
                 <td className="px-3 py-2.5">
                   <span
                     className={cn(

@@ -57,10 +57,13 @@ export interface SideLinescoreEditorProps {
   disabled?: boolean;
   state: SideEditorState;
   onChange: (next: SideEditorState) => void;
+  /** Test prefix used by the child GameEditors. e.g. `side-A` produces
+   *  `side-A-g1-mark-0` through `side-A-g3-cum-9`. */
+  testPrefix?: string;
 }
 
 export function SideLinescoreEditor({
-  label, handicap, disabled, state, onChange,
+  label, handicap, disabled, state, onChange, testPrefix,
 }: SideLinescoreEditorProps) {
   const [, force] = useState(0);
   const set = useCallback(
@@ -104,6 +107,7 @@ export function SideLinescoreEditor({
           label={`Game ${i + 1}`}
           value={state.games[i]}
           onChange={(next) => set(i, next)}
+          testPrefix={testPrefix ? `${testPrefix}-g${i + 1}` : undefined}
         />
       ))}
     </div>

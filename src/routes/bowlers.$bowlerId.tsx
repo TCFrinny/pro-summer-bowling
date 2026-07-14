@@ -191,7 +191,16 @@ function BowlerProfile() {
 function WeekRow({ h }: { h: BowlerHistoryRow }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-md border border-border/60 bg-background/40">
+    <div
+      className="rounded-md border border-border/60 bg-background/40"
+      data-testid={`history-week-${h.week}`}
+      data-scores={h.absent ? "" : h.scores.join(",")}
+      data-scratch-total={h.scratchTotal}
+      data-handicap-total={h.handicapTotal}
+      data-total-points={h.totalPoints}
+      data-result={h.result}
+      data-absent={h.absent ? "1" : "0"}
+    >
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent/40"

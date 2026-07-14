@@ -26,9 +26,13 @@ export interface GameEditorProps {
   value: GameEditorState;
   onChange: (next: GameEditorState) => void;
   onResult?: (result: GameBuildResult) => void;
+  /** Stable prefix for data-testids, e.g. `side-A-g1`. Each frame's mark
+   *  input becomes `${testPrefix}-mark-${i}` and cumulative
+   *  `${testPrefix}-cum-${i}` where `i` is 0..9. */
+  testPrefix?: string;
 }
 
-export function GameEditor({ label, value, onChange, onResult }: GameEditorProps) {
+export function GameEditor({ label, value, onChange, onResult, testPrefix }: GameEditorProps) {
   const result = useMemo(() => {
     // Only attempt to build when every field has content — otherwise we'd
     // spam errors while the admin is still typing.
@@ -87,6 +91,7 @@ export function GameEditor({ label, value, onChange, onResult }: GameEditorProps
             className="h-8 px-1 text-center text-xs uppercase"
             placeholder={i === 9 ? "XXX" : "X"}
             aria-label={`Frame ${i + 1} mark`}
+            data-testid={testPrefix ? `${testPrefix}-mark-${i}` : undefined}
           />
         ))}
         {Array.from({ length: 10 }).map((_, i) => (
@@ -98,6 +103,7 @@ export function GameEditor({ label, value, onChange, onResult }: GameEditorProps
             className={cn("h-8 px-1 text-center text-xs")}
             placeholder="0"
             aria-label={`Frame ${i + 1} running total`}
+            data-testid={testPrefix ? `${testPrefix}-cum-${i}` : undefined}
           />
         ))}
       </div>

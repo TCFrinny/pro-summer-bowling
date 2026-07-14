@@ -281,6 +281,13 @@ export function migrateV2ToV3(raw: unknown): LeagueDatabase | null {
 let state: StoreState = null as unknown as StoreState;
 _installSnapshotProvider(() => (state ? state.snapshot : ({} as PublicSnapshot)));
 state = buildStoreState(loadInitialDb());
+// Non-production test hook: expose a stable getter for the current DB.
+// The Playwright suite reads scheduled-match metadata immediately after
+// wiping localStorage, before any mutation has triggered `persist()`.
+if (typeof window !== "undefined") {
+  (window as unknown as { __pssStore?: { getDb: () => LeagueDatabase } }).__pssStore =
+    { getDb: () => state.db };
+}
 const listeners = new Set<() => void>();
 
 function persist() {
