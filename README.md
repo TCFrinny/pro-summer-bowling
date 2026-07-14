@@ -37,32 +37,42 @@ Every matchup distributes **exactly 7 points**:
   matches. Set Points are still awarded as part of the 7-point match
   total but are **not** shown as a separate standings column.
 
-## Source of truth: frame-by-frame duckpin linescores
+## Source of truth: frame result + running cumulative
 
-Every completed match stores full **ball-by-ball / frame-by-frame** linescores
-in `src/lib/duckpin.ts` + `src/lib/mock-data.ts`. Each side is a
-`BowlerMatchLinescore` with three `GameLinescore`s of 10 `Frame`s. Every game
-total, scratch set, handicap total, per-game award, standings, statistic, and
-leaderboard is **derived** from those frames at module load. Nothing is
-hand-entered — high game, high set, strikes/spares/opens/marks, mark %, and
-POA all reconcile with the underlying frame rows.
+Every completed match stores a **result + cumulative-only** linescore in
+`src/lib/duckpin.ts` + `src/lib/mock-data.ts`. Each side is a
+`BowlerMatchLinescore` with three `GameLinescore`s of 10 `FrameLinescore`
+rows. A `FrameLinescore` carries ONLY:
 
-Duckpin rules encoded (`src/lib/duckpin.ts`): frames 1–9 allow up to three
-balls, strike/spare end the frame early, 10th frame supports the standard
-XXX, XX, X/, /X, X, /, and open combinations with the correct bonus
-deliveries. Strike bonus = next 2 balls; spare bonus = next 1 ball;
-cumulative frame scores are computed from rolls, never typed. Development-
-time validators enforce legal per-ball pin counts, early termination,
-tenth-frame bonus legality, monotonic cumulative scores, matching scratch
-totals, correct handicap sums, and exactly-7-point match distribution.
+- `frameNumber` (1–10)
+- `mark` — the score-sheet notation
+  (frames 1–9: `X` / `/` / `-`; frame 10: valid combos such as `XXX`, `XX/`,
+  `X/`, `/X`, `/-`, `-8`, `-`, etc.)
+- `cumulativeScore` — the running scratch total through that frame
+
+**No individual ball information is stored, displayed, required, or
+validated anywhere in the public model.** This mirrors the admin input
+model: 10 marks + 10 cumulative totals per game.
+
+Classification (used for strikes/spares/opens counts and derived %):
+frames 1–9 by the mark itself; frame 10 by the **initial** mark character
+only. Tenth-frame bonus marks are display notation and never inflate frame,
+strike, spare, or denominator counts.
+
+Development-time validators enforce: exactly 10 frames per game, legal mark
+notation, non-negative and non-decreasing cumulative totals, open-frame
+contribution in 0–9, spare-frame contribution in 10–20, strike-frame
+contribution in 10–30, `First5 + Last5 = final`, `BigOpening = cumulative
+after frame 3`, `BigFinish = final − cumulative after frame 7`, matching
+scratch/handicap totals, and exactly-7-point match distribution.
 
 ## Substitutes: roster-only vs credited
 
-- **Scratch** performance, averages, strikes/spares/opens, marks, and all
-  advanced percentages belong to the **actual** bowler who rolled and are
-  **roster-only** — off-roster substitute performances are excluded.
+- **Scratch** performance, averages, strikes/spares/opens, marks, segments,
+  and all advanced percentages belong to the **actual** bowler who rolled
+  and are **roster-only** — off-roster substitutes are excluded.
 - **League points** and **handicap pinfall** are **credited** to the
-  **scheduled** (rostered) bowler regardless of who rolled the set.
+  **scheduled** (rostered) bowler regardless of who rolled.
 - Boards label this distinction ("Scratch roster-only · Points/HCP credited").
 
 ## Leaderboards (`/leaderboards`, `/leaderboards/advanced`)
@@ -77,20 +87,26 @@ Standard boards (Season or any completed week):
 
 Advanced boards (roster-only, subs excluded):
 
-- **Mark %** = `(Strikes + Spares) / Frames × 100`
-- **Strike %** = `Strikes / Frames × 100`
-- **Spare Conversion %** = `Spares / (Spares + Opens) × 100`
-- **Open %** = `Opens / Frames × 100` (lower is better)
-- **Pins Lost** = average pins standing on open frames after ball 3 (lower
-  is better)
-- **Consistency** = std. dev. of scratch game scores (lower is better;
-  Season view only, minimum 6 games)
+- **Mark %** = `(Strikes + Spares) / Frames`
+- **Strike %** = `Strikes / Frames`
+- **Spare Conversion %** = `Spares / (Spares + Opens)`
+- **Open %** = `Opens / Frames` (lower is better)
+- **Pins Lost** = `Σ(10 − openPinfall) / #openFrames`, where openPinfall is
+  derived from the cumulative-score diff for that open frame (lower is
+  better)
+- **Consistency** = population std. dev. of scratch game scores (lower is
+  better; Season view only, minimum 6 games)
+- **First 5**, **Last 5**, **Big Opening** (frames 1–3), **Big Finish**
+  (frames 8–10) — Season ranks by average PINS PER 3-GAME MATCH personally
+  rolled; single-week ranks by that week's match total.
+- **Clutch %** — marks in frames 9–10 across the scope (aggregate mark
+  percentage).
 - **Total Marks**, plus raw strike / spare counts.
 
 Eligibility: percentage boards require ≥ 3 games in the selected scope;
 consistency requires ≥ 6 games and is hidden for single-week views. Frame
-denominators use **regulation frames only** — the tenth-frame bonus balls
-do not inflate the count.
+denominators use **regulation frames only** — tenth-frame bonus marks do
+not inflate the count.
 
 
 

@@ -1,15 +1,15 @@
-import type { Frame, GameLinescore as GameLinescoreT } from "@/lib/duckpin";
+import type { FrameLinescore, GameLinescore as GameLinescoreT } from "@/lib/duckpin";
+import { classifyFrame } from "@/lib/duckpin";
 import { cn } from "@/lib/utils";
 
 /**
- * A single 10-frame duckpin game card, matching the reference site style:
- *   header  : "Game N • Scratch NNN"
- *   frames  : row of 10 boxes. Each box shows
- *               top    : per-ball glyphs (X / - digit)
- *               bottom : cumulative scratch score through that frame
- *   frame 10 is wider to fit the third bonus delivery.
- *
- * Horizontally scrollable on narrow screens — we never crush the boxes.
+ * A single 10-frame duckpin game card. Displays ONLY the saved data:
+ *   - frame number
+ *   - frame mark (X / spare / open, plus tenth-frame combo)
+ *   - running cumulative scratch score
+ * No individual ball boxes or pin counts — the saved model contains none.
+ * Frame 10 is wider to fit the tenth-frame mark string. Horizontally
+ * scrollable on narrow screens.
  */
 export function GameLinescore({
   game,
@@ -47,13 +47,14 @@ export function GameLinescore({
   );
 }
 
-function FrameBox({ frame }: { frame: Frame }) {
+function FrameBox({ frame }: { frame: FrameLinescore }) {
   const isTenth = frame.frameNumber === 10;
+  const cls = classifyFrame(frame.frameNumber, frame.mark);
   return (
     <div
       className={cn(
         "flex flex-col overflow-hidden rounded-sm border border-border bg-background/70 text-center",
-        isTenth ? "w-[68px]" : "w-11 sm:w-12",
+        isTenth ? "w-[72px]" : "w-11 sm:w-12",
       )}
     >
       <div className="border-b border-border/60 bg-accent/40 py-[1px] text-[9px] uppercase tracking-widest text-muted-foreground">
@@ -61,26 +62,16 @@ function FrameBox({ frame }: { frame: Frame }) {
       </div>
       <div
         className={cn(
-          "flex items-center justify-center gap-0.5 border-b border-border/60 px-1 py-1 font-display text-sm leading-none tabular-nums",
-          frame.isStrike && "text-primary",
-          frame.isSpare && "text-gold",
-          frame.isOpen && "text-foreground",
+          "flex items-center justify-center border-b border-border/60 px-1 py-1 font-display text-sm leading-none tabular-nums",
+          cls === "strike" && "text-primary",
+          cls === "spare" && "text-gold",
+          cls === "open" && "text-muted-foreground",
         )}
       >
-        {frame.ballDisplay.map((glyph, i) => (
-          <span
-            key={i}
-            className={cn(
-              "inline-flex h-4 min-w-[10px] items-center justify-center",
-              glyph === "-" && "text-muted-foreground",
-            )}
-          >
-            {glyph}
-          </span>
-        ))}
+        {frame.mark}
       </div>
       <div className="py-1 font-display text-sm tabular-nums text-foreground/90">
-        {frame.cumulative}
+        {frame.cumulativeScore}
       </div>
     </div>
   );

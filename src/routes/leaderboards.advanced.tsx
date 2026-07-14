@@ -25,7 +25,7 @@ export const Route = createFileRoute("/leaderboards/advanced")({
       {
         name: "description",
         content:
-          "Mark %, strike %, spare conversion %, pins-lost, and consistency — computed from every saved frame linescore.",
+          "Mark %, strike %, spare conversion %, pins lost, consistency, and segment metrics — computed from every saved frame mark + cumulative total.",
       },
     ],
   }),
@@ -37,12 +37,14 @@ function AdvancedLeaderboardsPage() {
   const boards = getAdvancedLeaderboards(scope);
   const completed = WEEKS.filter((w) => w.completed);
   const rows = boards.rows;
+  const isSeason = !boards.singleWeek;
+  const perMatchLabel = isSeason ? "Pins / match" : "Match total";
 
   return (
     <AppShell>
       <PageHeader
         title="Advanced Leaderboards"
-        subtitle="Roster-only · substitutes excluded · derived from frame records"
+        subtitle="Roster-only · substitutes excluded · derived from saved marks + cumulative totals"
       >
         <Select
           value={scope === "season" ? "season" : String(scope)}
@@ -69,51 +71,23 @@ function AdvancedLeaderboardsPage() {
       </PageHeader>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Board
-          title="Mark %"
-          help={`(Strikes + Spares) ÷ Frames × 100 · min ${boards.minGamesForPct} games`}
-        >
+        <Board title="Mark %" help={`(Strikes + Spares) ÷ Frames · min ${boards.minGamesForPct} games`}>
           <MetricTable rows={rows} pick={(r) => r.markPct} suffix="%" digits={1} />
         </Board>
-        <Board
-          title="Strike %"
-          help={`Strikes ÷ Frames × 100 · min ${boards.minGamesForPct} games`}
-        >
+        <Board title="Strike %" help={`Strikes ÷ Frames · min ${boards.minGamesForPct} games`}>
           <MetricTable rows={rows} pick={(r) => r.strikePct} suffix="%" digits={1} />
         </Board>
-        <Board
-          title="Spare Conversion %"
-          help={`Spares ÷ (Spares + Opens) × 100 · min ${boards.minGamesForPct} games`}
-        >
-          <MetricTable
-            rows={rows}
-            pick={(r) => r.spareConversionPct}
-            suffix="%"
-            digits={1}
-          />
+        <Board title="Spare Conversion %" help={`Spares ÷ (Spares + Opens) · min ${boards.minGamesForPct} games`}>
+          <MetricTable rows={rows} pick={(r) => r.spareConversionPct} suffix="%" digits={1} />
         </Board>
-        <Board
-          title="Open % (lower is better)"
-          help={`Opens ÷ Frames × 100 · min ${boards.minGamesForPct} games`}
-        >
-          <MetricTable
-            rows={rows}
-            pick={(r) => r.openPct}
-            suffix="%"
-            digits={1}
-            ascending
-          />
+        <Board title="Open % (lower is better)" help={`Opens ÷ Frames · min ${boards.minGamesForPct} games`}>
+          <MetricTable rows={rows} pick={(r) => r.openPct} suffix="%" digits={1} ascending />
         </Board>
         <Board
           title="Pins Lost (lower is better)"
-          help="Average pins standing on open frames after ball 3."
+          help="Average pins standing after an open frame — derived from cumulative diffs."
         >
-          <MetricTable
-            rows={rows}
-            pick={(r) => r.pinsLost}
-            digits={2}
-            ascending
-          />
+          <MetricTable rows={rows} pick={(r) => r.pinsLost} digits={2} ascending />
         </Board>
         <Board
           title="Consistency (lower is better)"
@@ -134,7 +108,40 @@ function AdvancedLeaderboardsPage() {
             <EmptyBoard label="Switch to Season view to rank consistency." />
           )}
         </Board>
-        <Board title="Total Marks" help="Strikes + Spares.">
+
+        <Board title={`First 5 (${perMatchLabel})`} help="Cumulative through frame 5, per 3-game match.">
+          <MetricTable
+            rows={rows}
+            pick={(r) => (isSeason ? r.first5PerMatch : r.first5Total)}
+            digits={isSeason ? 1 : 0}
+          />
+        </Board>
+        <Board title={`Last 5 (${perMatchLabel})`} help="Final score minus cumulative through frame 5, per match.">
+          <MetricTable
+            rows={rows}
+            pick={(r) => (isSeason ? r.last5PerMatch : r.last5Total)}
+            digits={isSeason ? 1 : 0}
+          />
+        </Board>
+        <Board title={`Big Opening (${perMatchLabel})`} help="Frames 1–3 pins, summed across the 3-game match.">
+          <MetricTable
+            rows={rows}
+            pick={(r) => (isSeason ? r.bigOpeningPerMatch : r.bigOpeningTotal)}
+            digits={isSeason ? 1 : 0}
+          />
+        </Board>
+        <Board title={`Big Finish (${perMatchLabel})`} help="Frames 8–10 pins, summed across the 3-game match.">
+          <MetricTable
+            rows={rows}
+            pick={(r) => (isSeason ? r.bigFinishPerMatch : r.bigFinishTotal)}
+            digits={isSeason ? 1 : 0}
+          />
+        </Board>
+        <Board title="Clutch (Frames 9–10 Mark %)" help="Marks in frames 9–10 across all games in scope.">
+          <MetricTable rows={rows} pick={(r) => r.clutchPct} suffix="%" digits={1} />
+        </Board>
+
+        <Board title="Total Marks" help="Strikes + Spares (volume).">
           <MetricTable rows={rows} pick={(r) => r.marks} digits={0} />
         </Board>
         <Board title="Raw Strikes" help="Total strikes (regulation frames).">
@@ -146,23 +153,17 @@ function AdvancedLeaderboardsPage() {
       </div>
 
       <p className="mt-6 text-[11px] text-muted-foreground">
-        All boards use regulation frames only — the tenth-frame bonus balls
-        never inflate the denominator. Substitute performances are excluded.
-        {" "}Metrics reconcile with the underlying frame rows for every match.
+        Every metric derives from the saved 10 marks + 10 cumulative totals per
+        game — no ball-level data is stored. Regulation frames only: tenth-frame
+        bonus marks never inflate the denominator. Substitute performances are
+        excluded from roster-only boards. Season First 5 / Last 5 / Big Opening
+        / Big Finish rank by average PINS PER 3-GAME MATCH personally rolled.
       </p>
     </AppShell>
   );
 }
 
-function Board({
-  title,
-  help,
-  children,
-}: {
-  title: string;
-  help: string;
-  children: ReactNode;
-}) {
+function Board({ title, help, children }: { title: string; help: string; children: ReactNode }) {
   return (
     <Card className="bg-card">
       <CardHeader className="pb-2">
@@ -201,9 +202,7 @@ function MetricTable({
       <tbody className="divide-y divide-border">
         {sorted.slice(0, 10).map((r, i) => (
           <tr key={r.bowlerId}>
-            <td className="py-1.5 w-6 text-xs text-muted-foreground">
-              {i + 1}.
-            </td>
+            <td className="py-1.5 w-6 text-xs text-muted-foreground">{i + 1}.</td>
             <td className="py-1.5">
               <Link
                 to="/bowlers/$bowlerId"
@@ -213,7 +212,7 @@ function MetricTable({
                 {r.bowlerName}
               </Link>
               <div className="text-[10px] uppercase text-muted-foreground">
-                {r.games} g · {r.frames} fr
+                {r.matches} match{r.matches === 1 ? "" : "es"} · {r.games} g · {r.frames} fr
               </div>
             </td>
             <td className="py-1.5 text-right font-display text-lg tabular-nums text-gold">
@@ -229,8 +228,6 @@ function MetricTable({
 
 function EmptyBoard({ label }: { label: string }) {
   return (
-    <div className="py-6 text-center text-xs text-muted-foreground">
-      {label}
-    </div>
+    <div className="py-6 text-center text-xs text-muted-foreground">{label}</div>
   );
 }
