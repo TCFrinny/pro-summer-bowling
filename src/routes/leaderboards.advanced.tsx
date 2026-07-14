@@ -150,6 +150,12 @@ function AdvancedLeaderboardsPage() {
         <Board title="Raw Spares" help="Total spares (regulation frames).">
           <MetricTable rows={rows} pick={(r) => r.spares} digits={0} />
         </Board>
+        <Board title="Raw Opens (lower is better)" help="Total open regulation frames.">
+          <MetricTable rows={rows} pick={(r) => r.opens} digits={0} ascending />
+        </Board>
+        <Board title="Frames Rolled" help="Regulation frames counted (30 per completed match).">
+          <MetricTable rows={rows} pick={(r) => r.frames} digits={0} />
+        </Board>
       </div>
 
       <p className="mt-6 text-[11px] text-muted-foreground">

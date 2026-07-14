@@ -22,11 +22,12 @@ export interface FrameLinescore {
   /** 1..10 */
   frameNumber: number;
   /**
-   * Score-sheet mark string.
+   * Score-sheet mark string. NO individual ball counts are stored.
    *   frames 1–9 : "X" | "/" | "-"
-   *   frame 10   : e.g. "XXX", "XX8", "X/", "/X", "X", "9/-", "-8", "-",
-   *                any valid combination. Only the leading character is used
-   *                for strike/spare/open classification.
+   *   frame 10   : one of the seven allowed saved combos —
+   *                "XXX" | "XX" | "X/" | "/X" | "X" | "/" | "-"
+   * Only the LEADING character is used to classify the tenth as one
+   * regulation strike / spare / open frame (max one mark).
    */
   mark: string;
   /** Running cumulative scratch total through this frame. Non-negative, non-decreasing. */
@@ -69,11 +70,9 @@ export function classifyFrame(frameNumber: number, mark: string): FrameClass {
   if (first === "X") return "strike";
   if (first === "/") return "spare";
   if (frameNumber >= 1 && frameNumber <= 9) {
-    // frames 1-9: mark is one character, exactly X / - .
     if (mark === "/") return "spare";
     return "open";
   }
-  // frame 10: initial mark not X/'/' → open
   return "open";
 }
 
@@ -82,15 +81,22 @@ export function classifyFrame(frameNumber: number, mark: string): FrameClass {
 // ---------------------------------------------------------------------------
 
 const REG_MARK = /^(X|\/|-)$/; // frames 1..9
-// Frame 10 valid initial + optional bonus notation. Allow standard tenth-frame
-// combos: initial 'X' | '/' | '-'; bonuses may be X, /, - .
-const TEN_MARK = /^(X|\/|-)([X/\-]{0,2})$/;
+/** Exact allowed set of saved tenth-frame result strings. */
+export const TENTH_MARK_SET: ReadonlySet<string> = new Set([
+  "XXX",
+  "XX",
+  "X/",
+  "/X",
+  "X",
+  "/",
+  "-",
+]);
 
 export function isValidRegulationMark(mark: string): boolean {
   return REG_MARK.test(mark);
 }
 export function isValidTenthMark(mark: string): boolean {
-  return TEN_MARK.test(mark);
+  return TENTH_MARK_SET.has(mark);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,30 +243,29 @@ function pickMarkClass(rand: () => number, skill: number): FrameClass {
   return "open";
 }
 
-function tenthMarkString(
-  first: FrameClass,
+function generateTenth(
   rand: () => number,
   skill: number,
-): string {
-  if (first === "strike") {
-    // 2 bonus balls: possible "XXX", "XX{digit or -}", "X{digit or -}{digit or - or /}"
-    const b1 = pickMarkClass(rand, skill);
-    if (b1 === "strike") {
-      const b2 = pickMarkClass(rand, skill);
-      if (b2 === "strike") return "XXX";
-      if (b2 === "spare") return "XX/"; // 2nd bonus is spare-close — allowed
-      return "XX-";
-    }
-    // b1 is not strike: pin count on fresh rack; represent via - or / for simplicity.
-    const b2 = rand() < 0.3 + skill * 0.3 ? "/" : "-";
-    return `X-${b2 === "/" ? "/" : "-"}`;
+): { mark: string; contribution: number } {
+  const first = pickMarkClass(rand, skill);
+  if (first === "open") {
+    return { mark: "-", contribution: pickInRange(0, 9, rand, skill) };
   }
   if (first === "spare") {
-    // 1 bonus ball on fresh rack
-    const b = pickMarkClass(rand, skill);
-    return b === "strike" ? "/X" : "/-";
+    // bonus ball on fresh rack: strike → "/X", otherwise "/"
+    if (rand() < 0.2 + skill * 0.25) return { mark: "/X", contribution: 20 };
+    return { mark: "/", contribution: 10 + pickInRange(0, 9, rand, skill) };
   }
-  return "-";
+  // strike
+  const b1 = pickMarkClass(rand, skill);
+  if (b1 === "strike") {
+    const b2 = pickMarkClass(rand, skill);
+    if (b2 === "strike") return { mark: "XXX", contribution: 30 };
+    return { mark: "XX", contribution: 20 + pickInRange(0, 9, rand, skill) };
+  }
+  // 1st bonus not a strike: 2nd bonus may complete a spare
+  if (rand() < 0.3 + skill * 0.3) return { mark: "X/", contribution: 20 };
+  return { mark: "X", contribution: 10 + pickInRange(0, 9, rand, skill) };
 }
 
 export function rollMockGame(rand: () => number, skill: number): GameLinescore {
@@ -268,10 +273,8 @@ export function rollMockGame(rand: () => number, skill: number): GameLinescore {
   let cum = 0;
 
   // Frames 1..9
-  const classes: FrameClass[] = [];
   for (let i = 1; i <= 9; i++) {
     const cls = pickMarkClass(rand, skill);
-    classes.push(cls);
     const mark = cls === "strike" ? "X" : cls === "spare" ? "/" : "-";
     let contribution: number;
     if (cls === "open") contribution = pickInRange(0, 9, rand, skill);
@@ -281,18 +284,9 @@ export function rollMockGame(rand: () => number, skill: number): GameLinescore {
     frames.push({ frameNumber: i, mark, cumulativeScore: cum });
   }
   // Frame 10
-  const cls10 = pickMarkClass(rand, skill);
-  const mark10 = cls10 === "open"
-    ? "-"
-    : cls10 === "spare"
-      ? tenthMarkString("spare", rand, skill)
-      : tenthMarkString("strike", rand, skill);
-  const contribution10 =
-    cls10 === "open"
-      ? pickInRange(0, 9, rand, skill)
-      : pickInRange(10, 30, rand, skill);
-  cum += contribution10;
-  frames.push({ frameNumber: 10, mark: mark10, cumulativeScore: cum });
+  const tenth = generateTenth(rand, skill);
+  cum += tenth.contribution;
+  frames.push({ frameNumber: 10, mark: tenth.mark, cumulativeScore: cum });
 
   return summarizeGame(frames);
 }

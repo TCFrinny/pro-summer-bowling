@@ -46,8 +46,8 @@ rows. A `FrameLinescore` carries ONLY:
 
 - `frameNumber` (1–10)
 - `mark` — the score-sheet notation
-  (frames 1–9: `X` / `/` / `-`; frame 10: valid combos such as `XXX`, `XX/`,
-  `X/`, `/X`, `/-`, `-8`, `-`, etc.)
+  (frames 1–9: `X` / `/` / `-`; frame 10: one of the seven allowed saved
+  combos — `XXX`, `XX`, `X/`, `/X`, `X`, `/`, `-`)
 - `cumulativeScore` — the running scratch total through that frame
 
 **No individual ball information is stored, displayed, required, or
