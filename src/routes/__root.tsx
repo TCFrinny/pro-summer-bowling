@@ -12,6 +12,11 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "@/components/layout/AppShell";
+import {
+  RootPublicGate,
+  snapshotQueryOptions,
+  useSnapshotRealtime,
+} from "@/lib/public-snapshot";
 
 function NotFoundComponent() {
   return (
