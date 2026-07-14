@@ -2,9 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, EmptyState, PageHeader } from "@/components/layout/AppShell";
 import {
   WEEKS,
+  formatPoints,
   getBowler,
   getMatchesForWeek,
+  type GameAward,
   type Match,
+  type SetAward,
 } from "@/lib/mock-data";
 import { useState } from "react";
 import {
@@ -25,7 +28,7 @@ export const Route = createFileRoute("/weekly-results")({
       {
         name: "description",
         content:
-          "Match-by-match results for the Pro Summer Singles duckpin league: scratch games, handicap, game points, and set points.",
+          "Match cards for the Pro Summer Singles duckpin league: per-game points, set points, and total points on the 7-point system.",
       },
     ],
   }),
@@ -43,12 +46,9 @@ function WeeklyResultsPage() {
     <AppShell>
       <PageHeader
         title="Weekly Results"
-        subtitle="Each card is a saved match result — nothing is recomputed here."
+        subtitle="Each card is a saved match on the 7-point system (2+2+2 games + 1 set). Nothing is recomputed here."
       >
-        <Select
-          value={String(week)}
-          onValueChange={(v) => setWeek(Number(v))}
-        >
+        <Select value={String(week)} onValueChange={(v) => setWeek(Number(v))}>
           <SelectTrigger className="w-40">
             <SelectValue />
           </SelectTrigger>
@@ -98,19 +98,29 @@ function MatchCard({ m }: { m: Match }) {
           sub={r.subA}
           games={r.gamesA}
           hdcp={r.handicapA}
+          awards={r.gameAwardsA}
           gp={r.gamePointsA}
           sp={r.setPointA}
+          hdcpTotal={r.handicapTotalA}
           total={r.totalPointsA}
           winner={aWin}
         />
-        <div className="my-2 border-t border-dashed border-border" />
+        <div className="my-2 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          <span>
+            Final {formatPoints(r.totalPointsA)}–{formatPoints(r.totalPointsB)}
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
         <Side
           name={b.name}
           sub={r.subB}
           games={r.gamesB}
           hdcp={r.handicapB}
+          awards={r.gameAwardsB}
           gp={r.gamePointsB}
           sp={r.setPointB}
+          hdcpTotal={r.handicapTotalB}
           total={r.totalPointsB}
           winner={bWin}
         />
@@ -124,8 +134,10 @@ function Side({
   sub,
   games,
   hdcp,
+  awards,
   gp,
   sp,
+  hdcpTotal,
   total,
   winner,
 }: {
@@ -133,8 +145,10 @@ function Side({
   sub?: string;
   games: [number, number, number];
   hdcp: number;
+  awards: [GameAward, GameAward, GameAward];
   gp: number;
-  sp: number;
+  sp: SetAward;
+  hdcpTotal: number;
   total: number;
   winner: boolean;
 }) {
@@ -155,32 +169,65 @@ function Side({
             </span>
           )}
         </div>
-        <span className="font-display text-lg text-gold">{total}</span>
+        <span className="font-display text-lg text-gold">
+          {formatPoints(total)}
+        </span>
       </div>
       <div className="mt-1.5 grid grid-cols-6 gap-1 text-center text-xs tabular-nums">
         {games.map((g, i) => (
-          <div key={i} className="rounded bg-accent/60 py-1">
+          <div
+            key={i}
+            className={cn(
+              "rounded py-1",
+              awards[i] === 2
+                ? "bg-primary/25 ring-1 ring-primary/40"
+                : awards[i] === 1
+                  ? "bg-gold/25"
+                  : "bg-accent/60",
+            )}
+          >
             <div className="text-[10px] uppercase text-muted-foreground">
               G{i + 1}
             </div>
             <div className="font-semibold">{g}</div>
+            <div className="text-[10px] font-semibold text-gold">
+              +{awards[i]}
+            </div>
           </div>
         ))}
         <div className="rounded bg-accent/60 py-1">
           <div className="text-[10px] uppercase text-muted-foreground">Hdcp</div>
           <div className="font-semibold">{hdcp}</div>
         </div>
-        <div className="rounded bg-accent/60 py-1">
+        <div
+          className={cn(
+            "rounded py-1",
+            sp === 1
+              ? "bg-primary/25 ring-1 ring-primary/40"
+              : sp === 0.5
+                ? "bg-gold/25"
+                : "bg-accent/60",
+          )}
+          title={`Handicap total ${hdcpTotal}`}
+        >
+          <div className="text-[10px] uppercase text-muted-foreground">
+            Set
+          </div>
+          <div className="font-semibold">{hdcpTotal}</div>
+          <div className="text-[10px] font-semibold text-gold">
+            +{formatPoints(sp)}
+          </div>
+        </div>
+        <div className="rounded bg-primary/25 py-1 ring-1 ring-primary/40">
           <div className="text-[10px] uppercase text-muted-foreground">
             GP · SP
           </div>
           <div className="font-semibold">
-            {gp}·{sp}
+            {gp}·{formatPoints(sp)}
           </div>
-        </div>
-        <div className="rounded bg-primary/20 py-1">
-          <div className="text-[10px] uppercase text-muted-foreground">Pts</div>
-          <div className="font-semibold text-gold">{total}</div>
+          <div className="text-[10px] font-semibold text-gold">
+            ={formatPoints(total)}
+          </div>
         </div>
       </div>
     </div>
