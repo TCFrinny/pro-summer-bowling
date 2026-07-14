@@ -219,19 +219,26 @@ function AdminResultsPage() {
 
   const eitherAbsent = draft.sideA.status === "absent" || draft.sideB.status === "absent";
 
-  const subHandicapFromAvg = (raw: string): number | null => {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return null;
-    return computeHandicap(n);
-  };
-  // LEAGUE RULE: substitutes bowl on the SCHEDULED bowler's handicap.
-  // The sub's own starting-average handicap is informational only.
-  const effHandicapA = currentMatch ? computeHandicap(currentMatch.bowlerA.entryAverage) : 0;
-  const effHandicapB = currentMatch ? computeHandicap(currentMatch.bowlerB.entryAverage) : 0;
-  // Kept for the (removed) previous per-side sub-hcp preview; retained
-  // as a no-op reference so the SidePanel can still show the sub's
-  // informational handicap next to their starting average.
-  void subHandicapFromAvg;
+  // Effective per-side handicap for the LIVE PREVIEW. League rule v6:
+  // substitutes score on the SUB'S handicap (from their Starting Average);
+  // rostered/absent use the scheduled bowler's handicap. When a substitute
+  // Starting Average is blank/invalid the preview shows 0 (pending) rather
+  // than silently falling back to the scheduled handicap — validation
+  // blocks saving in that state.
+  const effHandicapA = currentMatch
+    ? effectiveHandicapForUi({
+        status: draft.sideA.status,
+        scheduledEntryAverage: currentMatch.bowlerA.entryAverage,
+        subStartAvgRaw: draft.sideA.subStartAvg,
+      })
+    : 0;
+  const effHandicapB = currentMatch
+    ? effectiveHandicapForUi({
+        status: draft.sideB.status,
+        scheduledEntryAverage: currentMatch.bowlerB.entryAverage,
+        subStartAvgRaw: draft.sideB.subStartAvg,
+      })
+    : 0;
 
   const derivedA = useMemo(
     () => computeSideDerived(draft.sideA.linescore, effHandicapA),
