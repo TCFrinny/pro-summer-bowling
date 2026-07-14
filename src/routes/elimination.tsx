@@ -5,7 +5,6 @@ import {
   getEliminationSnapshot,
   getStandingsSnapshot,
   type EliminationStatus,
-  type EliminationRow,
 } from "@/lib/mock-data";
 import { sortEliminationRowsByStandings } from "@/lib/elimination-order";
 import { useLeagueSnapshot } from "@/lib/league-store";
