@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import {
   formatPoints,
@@ -8,7 +8,6 @@ import {
   type EliminationRow,
   type EliminationSnapshot,
   type EliminationStatus,
-  type PublicSnapshot,
 } from "@/lib/mock-data";
 import { sortEliminationRowsByStandings } from "@/lib/elimination-order";
 import { useLeagueSnapshot } from "@/lib/league-store";
@@ -18,6 +17,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { saveFullEliminationResult } from "@/lib/elimination-repo.functions";
 import { useSession } from "@/hooks/use-session";
 import { getIsAdmin } from "@/lib/auth.functions";
+import {
+  boundsNoticeCopy,
+  countByStatus,
+  displayLabelForStatus,
+  shouldAutoRunFull,
+  type CalculationMode,
+  type RunPhase,
+} from "@/lib/elimination-auto-run";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CheckCircle2, XCircle, Circle, HelpCircle, Loader2, Scale, PlayCircle, AlertTriangle,
@@ -80,18 +87,17 @@ type RunState =
   | { kind: "error"; message: string; stale: boolean }
   | { kind: "success" };
 
+function phaseOf(state: RunState): RunPhase {
+  return state.kind;
+}
+
 function EliminationPage() {
   useLeagueSnapshot(); // re-render when snapshot refreshes
   const snap = getEliminationSnapshot();
   const standings = getStandingsSnapshot();
   const orderedRows = sortEliminationRowsByStandings(snap.rows, standings);
-
-  const counts = snap.rows.reduce(
-    (acc, r) => { acc[r.status] = (acc[r.status] ?? 0) + 1; return acc; },
-    {} as Record<EliminationStatus, number>,
-  );
-
-  const mode = snap.calculationMode ?? "bounds_only";
+  const counts = countByStatus(snap.rows);
+  const mode: CalculationMode = snap.calculationMode ?? "bounds_only";
 
   return (
     <AppShell>
@@ -100,8 +106,7 @@ function EliminationPage() {
         subtitle="Displays the last saved elimination proof set. Recalculation only runs when the admin publishes new results."
       />
 
-      <ModeNotice mode={mode} lastCalculatedAt={snap.lastCalculatedAt} />
-      <AdminRunControls />
+      <AdminAutoRun mode={mode} lastCalculatedAt={snap.lastCalculatedAt} />
 
       <Card className="mb-6 bg-card">
         <CardHeader>
@@ -117,7 +122,7 @@ function EliminationPage() {
           {(Object.keys(STATUS) as EliminationStatus[]).map((s) => (
             <div key={s} className={`rounded-md p-3 text-sm ${STATUS[s].className}`}>
               <div className="flex items-center gap-2 text-xs uppercase tracking-widest opacity-90">
-                {STATUS[s].icon} {STATUS[s].label}
+                {STATUS[s].icon} {displayLabelForStatus(s, mode, STATUS[s].label)}
               </div>
               <div className="font-display text-2xl">{counts[s] ?? 0}</div>
             </div>
@@ -144,7 +149,8 @@ function EliminationPage() {
                 </td>
                 <td className="px-3 py-2">
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${STATUS[r.status].className}`}>
-                    {STATUS[r.status].icon} {STATUS[r.status].label}
+                    {STATUS[r.status].icon}{" "}
+                    {displayLabelForStatus(r.status, mode, STATUS[r.status].label)}
                   </span>
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground">
@@ -166,62 +172,56 @@ function EliminationPage() {
   );
 }
 
-function ModeNotice({ mode, lastCalculatedAt }: { mode: "bounds_only" | "full"; lastCalculatedAt: string }) {
-  const bounds = mode === "bounds_only";
-  return (
-    <div className={`mb-4 flex items-start gap-2 rounded-md border p-3 text-xs ${bounds ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
-      {bounds ? <AlertTriangle className="mt-0.5 h-4 w-4" /> : <CheckCircle2 className="mt-0.5 h-4 w-4" />}
-      <div>
-        <div className="font-semibold">
-          {bounds ? "Full calculation pending." : "Full schedule calculation completed."}
-        </div>
-        <div className="opacity-80">
-          {bounds
-            ? "Proven clinches/eliminations shown; other statuses remain Not Proven until an admin runs the full calculation."
-            : `Result computed ${new Date(lastCalculatedAt).toLocaleString()}.`}
-        </div>
-      </div>
-    </div>
-  );
+// ---------------------------------------------------------------------------
+// Notice + admin auto-run controls
+// ---------------------------------------------------------------------------
+
+interface AdminAutoRunProps {
+  mode: CalculationMode;
+  lastCalculatedAt: string;
 }
 
-// ---------------------------------------------------------------------------
-// Admin-only: run full solver in a Web Worker and persist the result.
-// ---------------------------------------------------------------------------
-
-function AdminRunControls() {
-  const { session, loading } = useSession();
+function AdminAutoRun({ mode, lastCalculatedAt }: AdminAutoRunProps) {
+  const { session, loading: sessionLoading } = useSession();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCheckPending, setAdminCheckPending] = useState(true);
+
   useEffect(() => {
     let cancelled = false;
-    if (loading || !session) { setIsAdmin(false); return; }
-    getIsAdmin().then((r) => { if (!cancelled) setIsAdmin(!!r.isAdmin); })
-      .catch(() => { if (!cancelled) setIsAdmin(false); });
+    if (sessionLoading) { setAdminCheckPending(true); return; }
+    if (!session) {
+      setIsAdmin(false); setAdminCheckPending(false); return;
+    }
+    setAdminCheckPending(true);
+    getIsAdmin()
+      .then((r) => { if (!cancelled) { setIsAdmin(!!r.isAdmin); setAdminCheckPending(false); } })
+      .catch(() => { if (!cancelled) { setIsAdmin(false); setAdminCheckPending(false); } });
     return () => { cancelled = true; };
-  }, [session, loading]);
+  }, [session, sessionLoading]);
 
   const queryClient = useQueryClient();
   const { data: snapshot } = useQuery(snapshotQueryOptions);
   const saveFn = useServerFn(saveFullEliminationResult);
   const [state, setState] = useState<RunState>({ kind: "idle" });
   const workerRef = useRef<Worker | null>(null);
+  const lastAutoRunBuiltAtRef = useRef<number | null>(null);
 
   useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null; }, []);
 
-  if (!isAdmin || !snapshot) return null;
-
-  const running = state.kind === "running" || state.kind === "saving";
-
-  async function runFull() {
+  const runFull = useCallback(async () => {
     if (!snapshot) return;
     setState({ kind: "running", note: "Starting calculation…" });
     try {
-      const worker = new Worker(new URL("../lib/elimination.worker.ts", import.meta.url), { type: "module" });
+      const worker = new Worker(
+        new URL("../lib/elimination.worker.ts", import.meta.url),
+        { type: "module" },
+      );
       workerRef.current = worker;
-      const activeBowlers = snapshot.bowlers;
       const totalWeeks = Math.max(snapshot.weeks.length, 11);
       const result = await new Promise<EliminationSnapshot>((resolve, reject) => {
-        worker.onmessage = (evt: MessageEvent<{ kind: "result"; snapshot: EliminationSnapshot } | { kind: "error"; error: string }>) => {
+        worker.onmessage = (evt: MessageEvent<
+          { kind: "result"; snapshot: EliminationSnapshot } | { kind: "error"; error: string }
+        >) => {
           if (evt.data.kind === "result") resolve(evt.data.snapshot);
           else reject(new Error(evt.data.error));
         };
@@ -229,7 +229,7 @@ function AdminRunControls() {
         worker.postMessage({
           kind: "run",
           input: {
-            activeBowlers,
+            activeBowlers: snapshot.bowlers,
             weeks: snapshot.weeks,
             matchesByWeek: snapshot.matchesByWeek,
             totalWeeks,
@@ -267,33 +267,78 @@ function AdminRunControls() {
       const stale = /League data changed/i.test(msg);
       setState({ kind: "error", message: msg, stale });
     }
-  }
+  }, [snapshot, saveFn, queryClient]);
 
-  // Guard against unused-var warnings in the closure.
-  void ({} as PublicSnapshot);
+  // Auto-run: once per builtAt when eligible. The ref guard prevents
+  // re-launch loops when React double-invokes effects in dev, when the
+  // query object changes identity, or when a successful save invalidates
+  // the query and returns a `full`-mode snapshot (that path fails the
+  // mode guard anyway, but the ref keeps the invariant explicit).
+  useEffect(() => {
+    const builtAt = snapshot?.builtAt ?? null;
+    const eligible = shouldAutoRunFull({
+      isAdmin,
+      adminCheckPending,
+      mode,
+      builtAt,
+      lastAutoRunBuiltAt: lastAutoRunBuiltAtRef.current,
+      phase: phaseOf(state),
+    });
+    if (!eligible || builtAt === null) return;
+    lastAutoRunBuiltAtRef.current = builtAt;
+    void runFull();
+  }, [snapshot, isAdmin, adminCheckPending, mode, state, runFull]);
+
+  const phase = phaseOf(state);
+  const notice = boundsNoticeCopy({ mode, isAdmin, phase, lastCalculatedAt });
+  const running = phase === "running" || phase === "saving";
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-border bg-accent/30 p-3 text-xs">
-      <button
-        onClick={runFull}
-        disabled={running}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-60"
+    <>
+      <div
+        className={`mb-4 flex items-start gap-2 rounded-md border p-3 text-xs ${
+          mode === "bounds_only"
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+        }`}
       >
-        {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
-        Run Full Calculation
-      </button>
-      {state.kind === "running" && (
-        <span className="text-muted-foreground">Working in your browser — this can take a moment…</span>
+        {mode === "bounds_only" ? (
+          <AlertTriangle className="mt-0.5 h-4 w-4" />
+        ) : (
+          <CheckCircle2 className="mt-0.5 h-4 w-4" />
+        )}
+        <div>
+          <div className="font-semibold">{notice.heading}</div>
+          <div className="opacity-80">{notice.detail}</div>
+        </div>
+      </div>
+
+      {isAdmin && snapshot && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-border bg-accent/30 p-3 text-xs">
+          <button
+            onClick={runFull}
+            disabled={running}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-60"
+          >
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+            Run Full Calculation
+          </button>
+          {phase === "running" && (
+            <span className="text-muted-foreground">
+              Calculating full schedule scenarios in your browser…
+            </span>
+          )}
+          {phase === "saving" && <span className="text-muted-foreground">Saving results…</span>}
+          {state.kind === "success" && <span className="text-emerald-300">Full calculation saved.</span>}
+          {state.kind === "error" && (
+            <span className="text-destructive">
+              {state.stale
+                ? "League data changed while the calculation was running. Please run it again."
+                : `Failed: ${state.message}`}
+            </span>
+          )}
+        </div>
       )}
-      {state.kind === "saving" && <span className="text-muted-foreground">Saving results…</span>}
-      {state.kind === "success" && <span className="text-emerald-300">Full calculation saved.</span>}
-      {state.kind === "error" && (
-        <span className="text-destructive">
-          {state.stale
-            ? "League data changed while the calculation was running. Please run it again."
-            : `Failed: ${state.message}`}
-        </span>
-      )}
-    </div>
+    </>
   );
 }
