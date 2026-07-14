@@ -46,8 +46,9 @@ function assert(cond: unknown, msg: string): asserts cond {
   // Inactive bowler filtered from PUBLIC boards.
   assert(!snap.bowlers.some((b) => b.id === inactiveId), "inactive bowler must not appear in snapshot.bowlers");
   assert(!snap.standings.some((r) => r.bowler.id === inactiveId), "inactive bowler must not appear in standings");
-  assert(!snap.elimination.rows?.some?.((r: { bowler?: { id?: string } }) => r.bowler?.id === inactiveId)
-    ?? true, "inactive bowler must not appear in elimination");
+  assert(!snap.elimination.rows.some((r) => r.bowler.id === inactiveId),
+    "inactive bowler must not appear in elimination");
+
 
   // But identity + aggregates still resolvable for history/opponent lookups.
   const historical = snap.bowlersById[inactiveId!];
