@@ -123,3 +123,32 @@ bun run test:deterministic
 bun run build
 # optional: npx wrangler dev  (from repo root — reads .wrangler/deploy/config.json)
 ```
+
+## `keep_vars: true` — why the post-build patch exists
+
+Wrangler treats its config file as the source of truth for a Worker's
+environment. Without `keep_vars: true`, every `wrangler deploy` **removes
+any dashboard-managed text environment variable** that is not also listed
+in the config. Encrypted secrets (added via `wrangler secret put` or the
+dashboard's Secret type) survive, but plain text vars — including
+`SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` — get wiped on the next
+deploy. The browser can still sign in (VITE_* values are baked into the
+client bundle at build time), but server functions like `getIsAdmin()`
+then fail because their `process.env.SUPABASE_URL` is undefined, and the
+admin UI incorrectly falls back to a "Not authorized" screen.
+
+Nitro's `cloudflare-module` preset does not emit `keep_vars`. To fix this
+without hand-editing generated output, `scripts/patch-cloudflare-config.mjs`
+runs after every `vite build` (production and `build:dev`) and adds
+`"keep_vars": true` at the top level of `dist/server/wrangler.json`. The
+patch preserves every other generated field and fails the build if the
+file is missing, malformed, or fails post-write verification. A
+deterministic self-test (`tests/patch-cloudflare-config.test.mjs`) covers
+the patcher.
+
+**Recovery note:** deploys made before this fix landed likely stripped
+dashboard text variables. After the first deploy carrying `keep_vars`, go
+to Cloudflare → Worker → Settings → Variables and re-add any missing
+text variables (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and any others
+listed in the "Environment variables" section above). Future deploys will
+then keep them intact.

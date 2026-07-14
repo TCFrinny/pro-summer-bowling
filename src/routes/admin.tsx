@@ -18,6 +18,7 @@ type GateState =
   | { kind: "loading" }
   | { kind: "signed-out" }
   | { kind: "not-admin"; email: string | undefined }
+  | { kind: "check-failed"; email: string | undefined }
   | { kind: "admin" };
 
 function AdminLayout() {
@@ -54,9 +55,13 @@ function AdminLayout() {
         setGate({ kind: "admin" });
       })
       .catch((err) => {
-        console.error(err);
+        console.error("getIsAdmin threw", err);
         if (cancelled) return;
-        setGate({ kind: "not-admin", email: session.user.email });
+        // A thrown exception (network failure, missing SUPABASE_* runtime
+        // variables on the Worker, RPC error) is NOT the same as a legitimate
+        // { isAdmin: false } response. Surface a distinct state so admins can
+        // tell "you lack the role" apart from "the server can't tell right now".
+        setGate({ kind: "check-failed", email: session.user.email });
       });
     return () => {
       cancelled = true;
@@ -74,16 +79,29 @@ function AdminLayout() {
     );
   }
 
-  if (gate.kind === "not-admin") {
+  if (gate.kind === "not-admin" || gate.kind === "check-failed") {
+    const isFailure = gate.kind === "check-failed";
     return (
       <AppShell>
         <div className="mx-auto max-w-md rounded-lg border border-destructive/40 bg-destructive/5 p-6 text-center">
           <ShieldAlert className="mx-auto mb-3 h-8 w-8 text-destructive" />
-          <h1 className="font-display text-xl font-semibold">Not authorized</h1>
+          <h1 className="font-display text-xl font-semibold">
+            {isFailure ? "Admin verification unavailable" : "Not authorized"}
+          </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            You're signed in as <span className="font-mono">{gate.email ?? "unknown"}</span>,
-            but that account doesn't have the admin role. Ask a league
-            administrator to grant your account access.
+            {isFailure ? (
+              <>
+                The server could not verify your admin access. Check the
+                Cloudflare runtime variables and try again. You're signed in
+                as <span className="font-mono">{gate.email ?? "unknown"}</span>.
+              </>
+            ) : (
+              <>
+                You're signed in as <span className="font-mono">{gate.email ?? "unknown"}</span>,
+                but that account doesn't have the admin role. Ask a league
+                administrator to grant your account access.
+              </>
+            )}
           </p>
           <button
             onClick={async () => {

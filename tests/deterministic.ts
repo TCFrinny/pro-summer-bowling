@@ -12,6 +12,8 @@ import "./week-patch-preservation";
 import "./absent-scoring";
 import "./elimination";
 import "./frame-input-messages";
+// @ts-expect-error - JS module without types
+import "./patch-cloudflare-config.test.mjs";
 
 
 // eslint-disable-next-line no-console
