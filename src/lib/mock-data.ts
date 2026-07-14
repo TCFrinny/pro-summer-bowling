@@ -812,6 +812,9 @@ function buildLeaderboardsForScope(
   // Roster-only per-game and per-set rows (scratch performance stays with actual bowler).
   const scratchGames: ScratchGameRow[] = [];
   const scratchSets: ScratchSetRow[] = [];
+
+  // Credited per-game and per-set rows — HCP boards credit the SCHEDULED bowler
+  // and use the scratch actually rolled + that bowler's weekly handicap.
   const hcpGames: ScratchGameRow[] = [];
   const hcpSets: ScratchSetRow[] = [];
 
@@ -842,9 +845,7 @@ function buildLeaderboardsForScope(
     return a;
   };
 
-  // Credited (points/hcp) rows always tie to the SCHEDULED bowler.
-  const creditedGames: ScratchGameRow[] = [];
-  const creditedSets: ScratchSetRow[] = [];
+  // Credited season points/matches also tie to the SCHEDULED bowler.
   const creditedSeason = new Map<BowlerId, CreditedSeasonRow>();
 
   for (const m of matches) {
@@ -863,19 +864,20 @@ function buildLeaderboardsForScope(
       const opp = isA ? oppNameA : oppNameB;
       const scratchTot = isA ? r.scratchTotalA : r.scratchTotalB;
       const hdcpTot = isA ? r.handicapTotalA : r.handicapTotalB;
-      const hdcpGames = isA ? r.handicapGamesA : r.handicapGamesB;
+      const hdcpGamesArr = isA ? r.handicapGamesA : r.handicapGamesB;
       const scratchGamesArr = isA ? r.gamesA : r.gamesB;
       const totalPts = isA ? r.totalPointsA : r.totalPointsB;
 
-      // CREDITED (to scheduled bowler)
+      // CREDITED (points/hcp always attributed to the SCHEDULED bowler,
+      // using the scratch actually rolled + that bowler's weekly handicap).
       for (let i = 0; i < 3; i++) {
-        creditedGames.push({
+        hcpGames.push({
           bowlerId: sched.id, bowlerName: sched.name,
           week: m.week, matchId: m.id, opponent: opp,
-          scratch: scratchGamesArr[i], handicap: hdcpGames[i],
+          scratch: scratchGamesArr[i], handicap: hdcpGamesArr[i],
         });
       }
-      creditedSets.push({
+      hcpSets.push({
         bowlerId: sched.id, bowlerName: sched.name,
         week: m.week, matchId: m.id, opponent: opp,
         scratchSet: scratchTot, handicapSet: hdcpTot,
@@ -892,7 +894,8 @@ function buildLeaderboardsForScope(
       seasonRow.pointsLost += 7 - totalPts;
       seasonRow.matches += 1;
 
-      // ROSTER-ONLY (actual bowler only, and only if roster member)
+      // ROSTER-ONLY (actual bowler only, and only if roster member).
+      // Scratch high game/series, averages, strikes/spares/opens, advanced.
       if (!ls.isSub && ls.actualId) {
         const rosterId = ls.actualId;
         const rosterName = getBowler(rosterId)?.name ?? ls.actualName;
@@ -904,19 +907,8 @@ function buildLeaderboardsForScope(
             scratch: g.scratchTotal,
             handicap: g.scratchTotal + ls.handicap,
           });
-          hcpGames.push({
-            bowlerId: rosterId, bowlerName: rosterName,
-            week: m.week, matchId: m.id, opponent: opp,
-            scratch: g.scratchTotal,
-            handicap: g.scratchTotal + ls.handicap,
-          });
         }
         scratchSets.push({
-          bowlerId: rosterId, bowlerName: rosterName,
-          week: m.week, matchId: m.id, opponent: opp,
-          scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
-        });
-        hcpSets.push({
           bowlerId: rosterId, bowlerName: rosterName,
           week: m.week, matchId: m.id, opponent: opp,
           scratchSet: ls.scratchSet, handicapSet: ls.handicapSet,
@@ -933,6 +925,7 @@ function buildLeaderboardsForScope(
       }
     }
   }
+
 
   const topN = <T>(arr: T[], key: (x: T) => number, n: number, asc = false): T[] =>
     [...arr].sort((x, y) => (asc ? key(x) - key(y) : key(y) - key(x))).slice(0, n);
