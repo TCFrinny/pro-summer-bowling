@@ -1156,15 +1156,16 @@ export function buildSnapshot(input: {
     const wb = weekLaneMaps[m.week]?.get(m.lanePair);
     for (const isA of [true, false]) {
       const ls = isA ? r.linescoreA : r.linescoreB;
-      const schedId = isA ? m.bowlerA : m.bowlerB;
-      const sched = bowlersById[schedId];
-      if (!ls || !sched) continue;
+      if (!ls) continue;
+      // Use FROZEN scheduled entry average from the result — editing a
+      // roster average later must not rewrite historical lane POA.
+      const frozenAvg = isA ? r.entryAverageA : r.entryAverageB;
       for (const g of ls.games) {
         lb.pins += g.scratchTotal; lb.games += 1;
-        lb.poaSum += g.scratchTotal - sched.entryAverage; lb.poaCount += 1;
+        lb.poaSum += g.scratchTotal - frozenAvg; lb.poaCount += 1;
         if (wb) {
           wb.pins += g.scratchTotal; wb.games += 1;
-          wb.poaSum += g.scratchTotal - sched.entryAverage; wb.poaCount += 1;
+          wb.poaSum += g.scratchTotal - frozenAvg; wb.poaCount += 1;
         }
       }
     }
