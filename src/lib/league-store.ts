@@ -100,11 +100,12 @@ interface StoreState {
   version: number;
 }
 
-const STORAGE_KEY = "pss.leagueStore.v4";
+const STORAGE_KEY = "pss.leagueStore.v5";
 const OLD_KEYS_TO_CLEAR = ["pss.leagueStore.v1"];
 const OLD_KEY_V2 = "pss.leagueStore.v2";
 const OLD_KEY_V3 = "pss.leagueStore.v3";
-const SCHEMA_VERSION = 4;
+const OLD_KEY_V4 = "pss.leagueStore.v4";
+const SCHEMA_VERSION = 5;
 
 /** Format a bowlerNumber for display. Never used to store the value.
  *  Values are kept verbatim; only trim() is applied on save. */
@@ -127,7 +128,18 @@ function slotsFromMatches(matches: Match[]): ScheduleSlot[] {
 function seedDb(): LeagueDatabase {
   const rawBowlers = seedBowlers();
   const rawWeeks = seedWeeks();
+  const rostered: RosteredBowlerRecord[] = rawBowlers.map((b, i) => ({
+    id: b.id, name: b.name, entryAverage: b.entryAverage,
+    handicap: b.handicap, active: true, archived: false,
+    // Seed IDs "01001".."01036" — unique, editable, 5 chars. Not
+    // used by any lookup; display-only on schedule pages.
+    bowlerNumber: `0${(1000 + i + 1).toString()}`,
+  }));
   const matches = seedMatchesByWeek(rawBowlers);
+  // seedMatchesByWeek returns Match rows without frozen IDs; freeze them
+  // now against the roster we just built so /schedule renders IDs on a
+  // clean localStorage reset without any admin action.
+  backfillMatchBowlerNumbers(matches, rostered);
   const schedulesByWeek: Record<number, WeekSchedule> = {};
   for (const w of rawWeeks) {
     schedulesByWeek[w.week] = {
@@ -139,13 +151,7 @@ function seedDb(): LeagueDatabase {
   }
   return {
     version: SCHEMA_VERSION,
-    rostered: rawBowlers.map((b, i) => ({
-      id: b.id, name: b.name, entryAverage: b.entryAverage,
-      handicap: b.handicap, active: true, archived: false,
-      // Seed IDs "01001".."01036" — unique, editable, 5 chars. Not
-      // used by any lookup; display-only on schedule pages.
-      bowlerNumber: `0${(1000 + i + 1).toString()}`,
-    })),
+    rostered,
     subs: [
       "Rick M.", "Terry L.", "Alicia P.", "Marco V.", "Dee K.", "Ronnie F.",
     ].map((name, i) => ({
@@ -159,6 +165,29 @@ function seedDb(): LeagueDatabase {
     matchesByWeek: matches,
     schedulesByWeek,
   };
+}
+
+/** Freeze roster bowlerNumbers into every Match's bowlerNumberA/B when
+ *  the field is missing. NEVER overwrites an already-set number — editing
+ *  a roster ID later must only affect matches saved AFTER that edit.
+ *  Mutates in place; returns nothing. Idempotent — safe to call on every
+ *  DB load, including already-v5 stores. */
+function backfillMatchBowlerNumbers(
+  matchesByWeek: Record<number, Match[]>,
+  rostered: RosteredBowlerRecord[],
+): void {
+  const byId = new Map(rostered.map((r) => [r.id, r.bowlerNumber]));
+  for (const wk of Object.keys(matchesByWeek)) {
+    const list = matchesByWeek[Number(wk)];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      const aNum = m.bowlerNumberA ?? byId.get(m.bowlerA);
+      const bNum = m.bowlerNumberB ?? byId.get(m.bowlerB);
+      if (aNum !== m.bowlerNumberA || bNum !== m.bowlerNumberB) {
+        list[i] = { ...m, bowlerNumberA: aNum, bowlerNumberB: bNum };
+      }
+    }
+  }
 }
 
 let __stateVersion = 0;
@@ -194,35 +223,56 @@ function loadInitialDb(): LeagueDatabase {
     if (raw) {
       const parsed = JSON.parse(raw) as LeagueDatabase;
       if (parsed && parsed.version === SCHEMA_VERSION && parsed.rostered && parsed.matchesByWeek && parsed.weeks) {
+        // Defensive: freeze any missing Match bowler IDs from the roster.
+        // Idempotent — never overwrites already-frozen values.
+        backfillMatchBowlerNumbers(parsed.matchesByWeek, parsed.rostered);
         return parsed;
       }
     }
-    // v3 → v4 migration first (recent installs). Preserves every match
-    // result and schedule verbatim; only injects new optional fields.
+    // v4 → v5 migration (recent installs). The v4 schema had rostered
+    // bowlerNumbers but its Match rows might still be missing frozen
+    // bowlerNumberA/B because seedDb() built matches before assigning
+    // roster IDs. v5 backfills them without touching any completed result.
+    const v4Raw = window.localStorage.getItem(OLD_KEY_V4);
+    if (v4Raw) {
+      try {
+        const v4 = JSON.parse(v4Raw) as unknown;
+        const migrated = migrateV4ToV5(v4);
+        if (migrated) {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+          window.localStorage.removeItem(OLD_KEY_V4);
+          return migrated;
+        }
+      } catch { /* fall through */ }
+      window.localStorage.removeItem(OLD_KEY_V4);
+    }
+    // v3 → v4 → v5 migration.
     const v3Raw = window.localStorage.getItem(OLD_KEY_V3);
     if (v3Raw) {
       try {
         const v3 = JSON.parse(v3Raw) as unknown;
-        const migrated = migrateV3ToV4(v3);
-        if (migrated) {
+        const v4Db = migrateV3ToV4(v3);
+        const v5Db = v4Db ? migrateV4ToV5(v4Db) : null;
+        if (v5Db) {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v5Db));
           window.localStorage.removeItem(OLD_KEY_V3);
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
-          return migrated;
+          return v5Db;
         }
       } catch { /* fall through */ }
       window.localStorage.removeItem(OLD_KEY_V3);
     }
-    // Older v2 store → migrate up through v3 then v4.
+    // Older v2 store → migrate up through v3, v4, v5.
     const legacy = window.localStorage.getItem(OLD_KEY_V2);
     if (legacy) {
       try {
         const v2 = JSON.parse(legacy) as unknown;
         const v3Db = migrateV2ToV3(v2);
         const v4Db = v3Db ? migrateV3ToV4(v3Db) : null;
-        if (v4Db) {
+        const v5Db = v4Db ? migrateV4ToV5(v4Db) : null;
+        if (v5Db) {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v5Db));
           window.localStorage.removeItem(OLD_KEY_V2);
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(v4Db));
-          return v4Db;
+          return v5Db;
         }
       } catch { /* fall through */ }
       window.localStorage.removeItem(OLD_KEY_V2);
@@ -231,6 +281,38 @@ function loadInitialDb(): LeagueDatabase {
   } catch {
     return seedDb();
   }
+}
+
+/**
+ * v4 → v5 migration.
+ *
+ * Lossless. Preserves every roster/sub record, schedule, completed match
+ * result, linescore, points override, participation entry, and week
+ * summary byte-for-byte. The ONLY change is that any Match still missing
+ * `bowlerNumberA` / `bowlerNumberB` (a v3→v4 rounding edge, or a v4 fresh
+ * seed created before the roster records existed) is frozen against the
+ * matching roster record's current `bowlerNumber`. Already-frozen Match
+ * IDs are left untouched, so editing a roster ID later never rewrites a
+ * saved/published schedule.
+ */
+export function migrateV4ToV5(raw: unknown): LeagueDatabase | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v4 = raw as LeagueDatabase;
+  if (!v4.rostered || !v4.matchesByWeek || !v4.weeks) return null;
+  // Clone matchesByWeek so we don't mutate the caller's structure.
+  const matchesByWeek: Record<number, Match[]> = {};
+  for (const [wk, matches] of Object.entries(v4.matchesByWeek)) {
+    matchesByWeek[Number(wk)] = matches.map((m) => ({ ...m }));
+  }
+  backfillMatchBowlerNumbers(matchesByWeek, v4.rostered);
+  return {
+    version: SCHEMA_VERSION,
+    rostered: v4.rostered,
+    subs: v4.subs ?? [],
+    weeks: v4.weeks,
+    matchesByWeek,
+    schedulesByWeek: v4.schedulesByWeek ?? {},
+  };
 }
 
 /**
@@ -245,7 +327,8 @@ function loadInitialDb(): LeagueDatabase {
  *     already-published schedules still display an ID cell)
  *
  * migrateV2ToV3 remains the shape guarantor for MatchResult; this pass
- * MUST NOT reshape or drop any completed result.
+ * MUST NOT reshape or drop any completed result. Returns a v4-shaped
+ * database (version === 4); chain into migrateV4ToV5 for a v5 result.
  */
 export function migrateV3ToV4(raw: unknown): LeagueDatabase | null {
   if (!raw || typeof raw !== "object") return null;
@@ -270,7 +353,7 @@ export function migrateV3ToV4(raw: unknown): LeagueDatabase | null {
     }));
   }
   return {
-    version: SCHEMA_VERSION,
+    version: 4,
     rostered, subs,
     weeks: v3.weeks,
     matchesByWeek,
@@ -948,10 +1031,105 @@ export function findSubRecord(id: string, s: StoreState = state): SubstituteReco
     }
   }
 
-  // #12 schema version bumped to v4.
-  check(db.version === SCHEMA_VERSION && SCHEMA_VERSION === 4,
-    "schema version must be v4");
+  // #12 schema version bumped to v5.
+  check(db.version === SCHEMA_VERSION && SCHEMA_VERSION === 5,
+    "schema version must be v5");
 
+  // #12a fresh seed: every scheduled Match has frozen bowler ID numbers
+  //      that match the current roster records for both sides. Public
+  //      /schedule must display IDs immediately on clean localStorage.
+  const rosterNumById = new Map(db.rostered.map((r) => [r.id, r.bowlerNumber]));
+  for (const wkMatches of Object.values(db.matchesByWeek)) {
+    for (const m of wkMatches) {
+      check(m.bowlerNumberA === rosterNumById.get(m.bowlerA),
+        `${m.id}: seed missing/incorrect bowlerNumberA`);
+      check(m.bowlerNumberB === rosterNumById.get(m.bowlerB),
+        `${m.id}: seed missing/incorrect bowlerNumberB`);
+    }
+  }
+
+  // #12b v4 → v5: missing Match IDs are backfilled AND already-frozen
+  //      Match IDs are preserved verbatim. Completed results and
+  //      linescores round-trip byte-for-byte.
+  {
+    // Simulate the exact bug this migration fixes: a v4 store where
+    // seedDb() built matches before assigning roster bowler numbers.
+    const srcCompleted = db.matchesByWeek[1].find((m) => m.result)!;
+    const srcScheduled = db.matchesByWeek[TOTAL_WEEKS].find((m) => !m.result)
+      ?? { ...srcCompleted, id: "v5-sched-clone", status: "scheduled" as const, result: undefined };
+    const stripped: Match = JSON.parse(JSON.stringify(srcCompleted));
+    delete (stripped as { bowlerNumberA?: string }).bowlerNumberA;
+    delete (stripped as { bowlerNumberB?: string }).bowlerNumberB;
+    stripped.id = "v5mig-missing";
+    // Also include a match with a pre-frozen custom ID that must survive.
+    const frozen: Match = JSON.parse(JSON.stringify(srcScheduled));
+    frozen.id = "v5mig-frozen";
+    frozen.bowlerA = db.rostered[0].id;
+    frozen.bowlerB = db.rostered[1].id;
+    frozen.bowlerNumberA = "CUSTOM-A";
+    frozen.bowlerNumberB = "CUSTOM-B";
+    const v4Sim: LeagueDatabase = {
+      version: 4,
+      rostered: db.rostered,
+      subs: db.subs,
+      weeks: db.weeks,
+      schedulesByWeek: db.schedulesByWeek,
+      matchesByWeek: { ...db.matchesByWeek, 42: [stripped, frozen] },
+    };
+    const v5 = migrateV4ToV5(v4Sim);
+    check(!!v5, "v4→v5 migration must return a database");
+    if (v5) {
+      check(v5.version === 5, "v4→v5 must set version to 5");
+      const wk42 = v5.matchesByWeek[42];
+      const backfilled = wk42.find((m) => m.id === "v5mig-missing")!;
+      const preserved = wk42.find((m) => m.id === "v5mig-frozen")!;
+      check(backfilled.bowlerNumberA === rosterNumById.get(backfilled.bowlerA),
+        "v4→v5 must backfill missing bowlerNumberA");
+      check(backfilled.bowlerNumberB === rosterNumById.get(backfilled.bowlerB),
+        "v4→v5 must backfill missing bowlerNumberB");
+      check(preserved.bowlerNumberA === "CUSTOM-A" && preserved.bowlerNumberB === "CUSTOM-B",
+        "v4→v5 must NOT overwrite already-frozen Match IDs");
+      // Completed result round-trip.
+      const roundTrip = v5.matchesByWeek[1].find((m) => m.id === srcCompleted.id)!;
+      check(JSON.stringify(roundTrip.result) === JSON.stringify(srcCompleted.result),
+        "v4→v5 must preserve completed results byte-for-byte");
+    }
+  }
+
+  // #12c editing a roster ID after a schedule is saved does not rewrite
+  //      the saved Match ID; a subsequently saved future schedule uses
+  //      the new ID. Simulated inline against the current DB.
+  {
+    const rosterCopy = db.rostered.map((r) => ({ ...r }));
+    const target = rosterCopy[0];
+    const originalNumber = target.bowlerNumber;
+    const savedMatch: Match = {
+      id: "edit-test-saved", week: 6, lanePair: "1-2", slot: 1,
+      status: "scheduled",
+      bowlerA: target.id, bowlerB: rosterCopy[1].id,
+      bowlerNumberA: originalNumber, bowlerNumberB: rosterCopy[1].bowlerNumber,
+    };
+    // Admin edits the roster ID; applyScheduleSlots-like path is invoked
+    // only for a NEW future week — the already-saved match must not be
+    // rewritten by any load-time backfill either.
+    target.bowlerNumber = "EDITED-NEW";
+    const matchesForBackfill: Record<number, Match[]> = { 6: [savedMatch] };
+    backfillMatchBowlerNumbers(matchesForBackfill, rosterCopy);
+    check(matchesForBackfill[6][0].bowlerNumberA === originalNumber,
+      "roster ID edit must NOT rewrite an already-frozen Match ID");
+    // A future match with NO frozen ID picks up the new value.
+    const futureMatch: Match = {
+      id: "edit-test-future", week: 7, lanePair: "1-2", slot: 1,
+      status: "scheduled",
+      bowlerA: target.id, bowlerB: rosterCopy[1].id,
+    };
+    backfillMatchBowlerNumbers({ 7: [futureMatch] }, rosterCopy);
+    // backfillMatchBowlerNumbers mutates the array, so re-read:
+    const futureList: Record<number, Match[]> = { 7: [futureMatch] };
+    backfillMatchBowlerNumbers(futureList, rosterCopy);
+    check(futureList[7][0].bowlerNumberA === "EDITED-NEW",
+      "new future schedule must freeze the edited roster ID");
+  }
 
   // #13 v2 → v3 migration backfills frozen names / averages and drops
   //     malformed note-only results.
