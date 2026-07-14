@@ -204,6 +204,11 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
         </span>
         <span className="flex-1 truncate">
           vs {h.opponent}
+          {h.absent && (
+            <span className="ml-2 rounded bg-destructive/20 px-1.5 text-[9px] uppercase tracking-widest text-destructive">
+              absent
+            </span>
+          )}
           {h.isSub && (
             <span className="ml-2 rounded bg-primary/25 px-1.5 text-[9px] uppercase tracking-widest text-primary">
               sub — {h.actualBowler}
@@ -211,13 +216,9 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
           )}
         </span>
         <span className="tabular-nums text-xs text-muted-foreground">
-          {h.scores.join(" · ")} = {h.scratchTotal}
+          {h.absent ? "—" : `${h.scores.join(" · ")} = ${h.scratchTotal}`}
         </span>
-        <span
-          className={
-            "rounded px-2 py-0.5 font-display text-sm text-gold tabular-nums"
-          }
-        >
+        <span className="rounded px-2 py-0.5 font-display text-sm text-gold tabular-nums">
           {formatPoints(h.totalPoints)} – {formatPoints(h.pointsLost)}
         </span>
         {open ? (
@@ -228,33 +229,44 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
       </button>
       {open && (
         <div className="border-t border-border/60 p-3 space-y-4">
-          {h.isSub && (
-            <div className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[11px] leading-snug text-primary">
-              Sub performance shown below; excluded from this bowler’s
-              roster-only season scratch and advanced totals. W-L points and
-              handicap pinfall remain credited.
+          {h.absent ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] leading-snug text-destructive">
+              Absent — no linescore, no scratch or advanced stats credited.
+              {h.pointsOverridden && h.overrideReason && (
+                <> Awarded W-L via manual override: “{h.overrideReason}”.</>
+              )}
             </div>
-          )}
-          <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
-            <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
-            <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
-            <span>Opens <span className="text-gold">{h.weekOpens}</span></span>
-            <span>Marks <span className="text-gold">{h.weekMarks}</span></span>
-            <span>Mark % <span className="text-gold">{h.weekMarkPct.toFixed(1)}%</span></span>
-            <span>Strike % <span className="text-gold">{h.weekStrikePct.toFixed(1)}%</span></span>
-            <span>Spare Conv <span className="text-gold">{h.weekSpareConversionPct.toFixed(1)}%</span></span>
-            <span>Open % <span className="text-gold">{h.weekOpenPct.toFixed(1)}%</span></span>
-            <span>Pins Lost <span className="text-gold">{h.weekPinsLost.toFixed(2)}</span></span>
-            <span>First 5 <span className="text-gold">{h.weekFirst5}</span></span>
-            <span>Last 5 <span className="text-gold">{h.weekLast5}</span></span>
-            <span>Big Opening <span className="text-gold">{h.weekBigOpening}</span></span>
-            <span>Big Finish <span className="text-gold">{h.weekBigFinish}</span></span>
-            <span>Clutch (9–10) <span className="text-gold">{h.weekClutchMarks}/{h.weekClutchOpportunities} · {h.weekClutchPct.toFixed(0)}%</span></span>
-            <span>Hdcp set <span className="text-gold">{h.handicapTotal}</span></span>
-            <span>POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span></span>
-            <span>Result <span className="text-gold">{h.result}</span></span>
-          </div>
-          <ThreeGameLinescore linescore={h.linescore} />
+          ) : h.linescore ? (
+            <>
+              {h.isSub && (
+                <div className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[11px] leading-snug text-primary">
+                  Sub performance shown below; excluded from this bowler’s
+                  roster-only season scratch and advanced totals. W-L points and
+                  handicap pinfall remain credited.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
+                <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
+                <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
+                <span>Opens <span className="text-gold">{h.weekOpens}</span></span>
+                <span>Marks <span className="text-gold">{h.weekMarks}</span></span>
+                <span>Mark % <span className="text-gold">{h.weekMarkPct.toFixed(1)}%</span></span>
+                <span>Strike % <span className="text-gold">{h.weekStrikePct.toFixed(1)}%</span></span>
+                <span>Spare Conv <span className="text-gold">{h.weekSpareConversionPct.toFixed(1)}%</span></span>
+                <span>Open % <span className="text-gold">{h.weekOpenPct.toFixed(1)}%</span></span>
+                <span>Pins Lost <span className="text-gold">{h.weekPinsLost.toFixed(2)}</span></span>
+                <span>First 5 <span className="text-gold">{h.weekFirst5}</span></span>
+                <span>Last 5 <span className="text-gold">{h.weekLast5}</span></span>
+                <span>Big Opening <span className="text-gold">{h.weekBigOpening}</span></span>
+                <span>Big Finish <span className="text-gold">{h.weekBigFinish}</span></span>
+                <span>Clutch (9–10) <span className="text-gold">{h.weekClutchMarks}/{h.weekClutchOpportunities} · {h.weekClutchPct.toFixed(0)}%</span></span>
+                <span>Hdcp set <span className="text-gold">{h.handicapTotal}</span></span>
+                <span>POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span></span>
+                <span>Result <span className="text-gold">{h.result}</span></span>
+              </div>
+              <ThreeGameLinescore linescore={h.linescore} />
+            </>
+          ) : null}
         </div>
       )}
     </div>
