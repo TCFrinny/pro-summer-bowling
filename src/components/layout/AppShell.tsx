@@ -119,6 +119,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                   </Link>
                 );
               })}
+              <Link
+                to={adminLink.to}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  "px-3 py-2 text-sm rounded-md col-span-2",
+                  pathname.startsWith("/admin")
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                )}
+              >
+                {adminLink.label}
+              </Link>
             </div>
           </nav>
         )}
