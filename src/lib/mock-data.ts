@@ -31,6 +31,11 @@ import {
   type GameSegments,
 } from "./duckpin";
 import { computeEliminationBounds } from "./elimination-bounds";
+import {
+  aggregateStandingsTotals,
+  findLatestResultWeek,
+  rankByStandings,
+} from "./standings-rank";
 
 export {
   classifyFrame,
