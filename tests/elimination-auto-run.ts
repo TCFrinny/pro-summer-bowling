@@ -14,7 +14,9 @@ import { readFileSync } from "node:fs";
 import {
   boundsNoticeCopy,
   displayLabelForStatus,
+  holdingCardCopy,
   shouldAutoRunFull,
+  shouldShowFullResults,
   type AutoRunEligibilityInput,
 } from "../src/lib/elimination-auto-run";
 
