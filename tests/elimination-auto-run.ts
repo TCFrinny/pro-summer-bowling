@@ -181,5 +181,31 @@ expect(
   );
 }
 
+// --- 14. Full-results visibility helper ------------------------------
+expect(shouldShowFullResults("full") === true, "full mode → show results");
+expect(shouldShowFullResults("bounds_only") === false, "bounds_only → hide results");
+
+// --- 15. Holding-card copy is public-safe ----------------------------
+{
+  const copy = holdingCardCopy();
+  expect(/being updated/i.test(copy.heading), "holding heading mentions updating");
+  expect(
+    !/your browser/i.test(copy.detail) && !/starting automatically/i.test(copy.detail),
+    "holding card must not imply the visitor's browser is running the calc",
+  );
+}
+
+// --- 16. Route hides table in bounds_only and gates admin button -----
+{
+  const src = readFileSync("src/routes/elimination.tsx", "utf8");
+  expect(src.includes("shouldShowFullResults"), "route must gate results with helper");
+  expect(src.includes("HoldingCard"), "route must render holding card");
+  // Admin controls (Run Full Calculation button) live behind an isAdmin gate
+  expect(
+    /isAdmin && snapshot &&/.test(src) || /isAdmin &&/.test(src),
+    "Run Full Calculation button must be gated by isAdmin",
+  );
+}
+
 // eslint-disable-next-line no-console
 console.log("elimination-auto-run tests passed");
