@@ -13,6 +13,7 @@ import "./checkpoint-3b-hardening";
 import "./week-patch-preservation";
 import "./absent-scoring";
 import "./elimination";
+import "./substitute-profiles";
 import "./elimination-bounds";
 import "./elimination-auto-run";
 import "./frame-input-messages";

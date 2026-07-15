@@ -26,6 +26,7 @@ import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
 import { Route as AdminScheduleRouteImport } from './routes/admin.schedule'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
 import { Route as AdminBowlersRouteImport } from './routes/admin.bowlers'
+import { Route as BowlersSubSubstituteIdRouteImport } from './routes/bowlers.sub.$substituteId'
 
 const WeeklyResultsRoute = WeeklyResultsRouteImport.update({
   id: '/weekly-results',
@@ -112,6 +113,11 @@ const AdminBowlersRoute = AdminBowlersRouteImport.update({
   path: '/bowlers',
   getParentRoute: () => AdminRoute,
 } as any)
+const BowlersSubSubstituteIdRoute = BowlersSubSubstituteIdRouteImport.update({
+  id: '/sub/$substituteId',
+  path: '/sub/$substituteId',
+  getParentRoute: () => BowlersRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -131,6 +137,7 @@ export interface FileRoutesByFullPath {
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -149,6 +156,7 @@ export interface FileRoutesByTo {
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/leaderboards': typeof LeaderboardsIndexRoute
+  '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -169,6 +177,7 @@ export interface FileRoutesById {
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/leaderboards/': typeof LeaderboardsIndexRoute
+  '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/leaderboards/'
+    | '/bowlers/sub/$substituteId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/leaderboards'
+    | '/bowlers/sub/$substituteId'
   id:
     | '__root__'
     | '/'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/leaderboards/'
+    | '/bowlers/sub/$substituteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -364,6 +376,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminBowlersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/bowlers/sub/$substituteId': {
+      id: '/bowlers/sub/$substituteId'
+      path: '/sub/$substituteId'
+      fullPath: '/bowlers/sub/$substituteId'
+      preLoaderRoute: typeof BowlersSubSubstituteIdRouteImport
+      parentRoute: typeof BowlersRoute
+    }
   }
 }
 
@@ -383,10 +402,12 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface BowlersRouteChildren {
   BowlersBowlerIdRoute: typeof BowlersBowlerIdRoute
+  BowlersSubSubstituteIdRoute: typeof BowlersSubSubstituteIdRoute
 }
 
 const BowlersRouteChildren: BowlersRouteChildren = {
   BowlersBowlerIdRoute: BowlersBowlerIdRoute,
+  BowlersSubSubstituteIdRoute: BowlersSubSubstituteIdRoute,
 }
 
 const BowlersRouteWithChildren =

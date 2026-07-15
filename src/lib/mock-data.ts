@@ -36,6 +36,17 @@ import {
   findLatestResultWeek,
   rankByStandings,
 } from "./standings-rank";
+import {
+  buildSubstituteData,
+  type SubstituteIdentity,
+  type SubstituteProfile,
+} from "./substitute-profiles";
+
+export type {
+  SubstituteIdentity,
+  SubstituteProfile,
+  SubstituteWeekRow,
+} from "./substitute-profiles";
 
 export {
   classifyFrame,
@@ -796,6 +807,12 @@ export interface PublicSnapshot {
   seasonLanes: LanePairSummary[];
   weekLanes: Record<number, LanePairSummary[]>;
   elimination: EliminationSnapshot;
+  /** OPTIONAL on old snapshots. Public substitute list (active pool subs
+   *  plus any sub with historical performances). */
+  substitutes?: SubstituteIdentity[];
+  /** OPTIONAL on old snapshots. Aggregated per-substitute profile keyed
+   *  by substitute id. */
+  substituteProfiles?: Record<string, SubstituteProfile>;
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +852,12 @@ export function buildSnapshot(input: {
    *  their opponent's stats and the historical record survive, but they
    *  do not appear on `snapshot.bowlers`, `standings`, or `elimination`. */
   activeBowlerIds?: ReadonlySet<BowlerId>;
+  /** Optional current-season substitute pool. Defaults to empty so
+   *  legacy seed and deterministic tests continue to build snapshots
+   *  without substitute data. Aggregation reads FROZEN linescore fields
+   *  from each completed MatchResult — editing the pool later does not
+   *  rewrite historical calculations. */
+  substitutes?: readonly SubstituteIdentity[];
 }): PublicSnapshot {
   // Deep-clone bowlers so we can mutate aggregate fields without touching the
   // raw db.
@@ -1388,6 +1411,13 @@ export function buildSnapshot(input: {
     totalWeeks: Math.max(TOTAL_WEEKS, weeks.length),
   });
 
+  // 8) Substitute identities + profiles — public read-only aggregation.
+  const subData = buildSubstituteData({
+    substitutes: input.substitutes ?? [],
+    weeks,
+    matchesByWeek,
+  });
+
   return {
     builtAt: Date.now(),
     bowlers: publicBowlers, bowlersById, weeks, matchesByWeek,
@@ -1395,6 +1425,8 @@ export function buildSnapshot(input: {
     seasonBoards, weekBoards,
     seasonLanes, weekLanes,
     elimination,
+    substitutes: subData.substitutes,
+    substituteProfiles: subData.substituteProfiles,
   };
 }
 
@@ -1445,6 +1477,17 @@ export function getWeekLaneSummaries(week: number): LanePairSummary[] {
   return snap().weekLanes[week] ?? [];
 }
 export function getEliminationSnapshot(): EliminationSnapshot { return snap().elimination; }
+
+/** Public substitute list. Empty array when reading a pre-deploy snapshot
+ *  that lacks the field, so old caches never crash the page. */
+export function getPublicSubstitutes(): SubstituteIdentity[] {
+  return snap().substitutes ?? [];
+}
+/** Aggregated per-substitute profile. Undefined when the substitute is
+ *  unknown OR the snapshot predates this feature. */
+export function getSubstituteProfile(id: string): SubstituteProfile | undefined {
+  return snap().substituteProfiles?.[id];
+}
 
 /** Compatibility export — a live view over the roster. Kept as a getter-
  *  backed proxy is unnecessary because consumers call `.map` on this array

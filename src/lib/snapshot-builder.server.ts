@@ -14,6 +14,7 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   assembleSideLinescore,
   buildSnapshot,
+  computeHandicap,
   computeMatchResult,
   LANE_PAIRS,
   type Bowler,
@@ -22,9 +23,10 @@ import {
   type MatchResult,
   type PublicSnapshot,
   type SideParticipation,
+  type SubstituteIdentity,
   type WeekSummary,
 } from "@/lib/mock-data";
-import { rosteredRowToBowler, type RosteredRow } from "@/lib/roster-adapter";
+import { rosteredRowToBowler, type RosteredRow, type SubRow } from "@/lib/roster-adapter";
 
 type Sb = SupabaseClient<Database>;
 
@@ -37,6 +39,32 @@ async function loadRoster(sb: Sb, seasonId: string): Promise<RosteredRow[]> {
     .eq("season_id", seasonId);
   if (res.error) throw new Error(res.error.message);
   return (res.data ?? []).map((r) => ({ ...r, entry_average: Number(r.entry_average) })) as RosteredRow[];
+}
+
+async function loadSubstitutes(sb: Sb, seasonId: string): Promise<SubRow[]> {
+  const res = await sb
+    .from("substitutes")
+    .select("id, name, starting_average, handicap, active, archived, bowler_number, season_id")
+    .eq("season_id", seasonId);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data ?? []).map((r) => ({
+    ...r,
+    starting_average: r.starting_average != null ? Number(r.starting_average) : null,
+  })) as SubRow[];
+}
+
+/** Convert a substitute row into the identity shape buildSnapshot expects. */
+function subRowToIdentity(row: SubRow): SubstituteIdentity {
+  const starting = row.starting_average;
+  return {
+    id: row.id,
+    name: row.name,
+    startingAverage: starting,
+    handicap: starting != null ? computeHandicap(starting) : null,
+    bowlerNumber: row.bowler_number,
+    active: row.active,
+    archived: row.archived,
+  };
 }
 
 interface WeekRow {
@@ -155,8 +183,9 @@ export function assembleWeeksAndMatches(input: {
 }
 
 export async function loadAllForSeason(sb: Sb, seasonId: string) {
-  const [rostered, weekRows] = await Promise.all([
+  const [rostered, subsRows, weekRows] = await Promise.all([
     loadRoster(sb, seasonId),
+    loadSubstitutes(sb, seasonId),
     loadWeeks(sb, seasonId),
   ]);
   const weekIds = weekRows.map((w) => w.id);
@@ -164,22 +193,18 @@ export async function loadAllForSeason(sb: Sb, seasonId: string) {
     loadSlots(sb, weekIds),
     loadResults(sb, weekIds),
   ]);
-  return { rostered, weekRows, slots, results };
+  return { rostered, subs: subsRows, weekRows, slots, results };
 }
 
-/** Build the full snapshot: roster + weeks + slots + results.
- *
- *  Passes EVERY current-season rostered row into the pure builder as
- *  historical bowlers (so archived / inactive bowlers keep resolving in
- *  histories, leaderboards, lane data, and opponent name lookups). The
- *  `activeBowlerIds` set is what filters the public roster and standings. */
+/** Build the full snapshot: roster + subs + weeks + slots + results. */
 export async function buildFullSnapshot(sb: Sb, seasonId: string): Promise<PublicSnapshot> {
-  const { rostered, weekRows, slots, results } = await loadAllForSeason(sb, seasonId);
+  const { rostered, subs, weekRows, slots, results } = await loadAllForSeason(sb, seasonId);
 
   const historicalBowlers: Bowler[] = rostered.map(rosteredRowToBowler);
   const activeBowlerIds = new Set(
     rostered.filter((r) => r.active && !r.archived).map((r) => r.id),
   );
+  const substitutes: SubstituteIdentity[] = subs.map(subRowToIdentity);
 
   const { weeks, matchesByWeek } = assembleWeeksAndMatches({
     weeks: weekRows, slots, results,
@@ -190,6 +215,7 @@ export async function buildFullSnapshot(sb: Sb, seasonId: string): Promise<Publi
     weeks,
     matchesByWeek,
     activeBowlerIds,
+    substitutes,
   });
 }
 
