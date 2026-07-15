@@ -1,10 +1,13 @@
 import { createFileRoute, Outlet, Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { useSession } from "@/hooks/use-session";
 import { getIsAdmin, ensureCurrentSeason } from "@/lib/auth.functions";
+import { rebuildCurrentSeasonSnapshot } from "@/lib/league-repo.functions";
+import { SNAPSHOT_QUERY_KEY } from "@/lib/public-snapshot";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, ShieldAlert, LogOut } from "lucide-react";
+import { Loader2, ShieldAlert, LogOut, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/admin")({
   // Supabase session lives in localStorage; only the browser can read it.
