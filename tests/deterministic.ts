@@ -17,6 +17,7 @@ import "./elimination-bounds";
 import "./elimination-auto-run";
 import "./frame-input-messages";
 import "./standings-movement";
+import "./admin-rebuild-snapshot";
 // @ts-expect-error - JS module without types
 import "./patch-cloudflare-config.test.mjs";
 
