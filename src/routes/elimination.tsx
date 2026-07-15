@@ -181,8 +181,20 @@ function EliminationPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Notice + admin auto-run controls
+// Holding card + admin auto-run controls
 // ---------------------------------------------------------------------------
+
+function HoldingCard() {
+  const copy = holdingCardCopy();
+  return (
+    <Card className="mb-6 bg-card">
+      <CardHeader>
+        <CardTitle className="font-display text-xl">{copy.heading}</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm text-muted-foreground">{copy.detail}</CardContent>
+    </Card>
+  );
+}
 
 interface AdminAutoRunProps {
   mode: CalculationMode;
