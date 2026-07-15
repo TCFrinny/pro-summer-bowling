@@ -917,7 +917,9 @@ export function buildSnapshot(input: {
   const publicBowlers = allBowlers.filter((b) => activeIds.has(b.id));
   const sorted = [...publicBowlers].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
-    return b.handicapPinfall - a.handicapPinfall;
+    if (b.handicapPinfall !== a.handicapPinfall)
+      return b.handicapPinfall - a.handicapPinfall;
+    return a.id.localeCompare(b.id);
   });
 
   // 2a) Movement — compare current official rank to the standings as
