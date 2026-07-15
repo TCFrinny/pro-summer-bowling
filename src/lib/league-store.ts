@@ -195,9 +195,27 @@ function buildStoreState(db: LeagueDatabase): StoreState {
   __stateVersion += 1;
   return {
     db,
-    snapshot: buildSnapshot({ bowlers: rosterToBowlers(db.rostered), weeks: db.weeks, matchesByWeek: db.matchesByWeek }),
+    snapshot: buildSnapshot({
+      bowlers: rosterToBowlers(db.rostered),
+      weeks: db.weeks,
+      matchesByWeek: db.matchesByWeek,
+      substitutes: subsToIdentities(db.subs),
+    }),
     version: __stateVersion,
   };
+}
+
+/** Local SubstituteRecord → snapshot SubstituteIdentity. */
+function subsToIdentities(subs: SubstituteRecord[]) {
+  return subs.map((s) => ({
+    id: s.id,
+    name: s.name,
+    startingAverage: s.startingAverage ?? null,
+    handicap: s.startingAverage != null ? computeHandicap(s.startingAverage) : null,
+    bowlerNumber: s.bowlerNumber ?? null,
+    active: s.active,
+    archived: s.archived,
+  }));
 }
 
 /** Every rostered record — active AND archived — becomes a Bowler so historic
