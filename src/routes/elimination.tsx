@@ -21,7 +21,9 @@ import {
   boundsNoticeCopy,
   countByStatus,
   displayLabelForStatus,
+  holdingCardCopy,
   shouldAutoRunFull,
+  shouldShowFullResults,
   type CalculationMode,
   type RunPhase,
 } from "@/lib/elimination-auto-run";
