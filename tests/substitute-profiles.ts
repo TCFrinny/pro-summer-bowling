@@ -196,6 +196,12 @@ const subRoute = readFileSync(join(ROOT, "src/routes/bowlers.sub.$substituteId.t
 
 assert(/Substitutes/.test(bowlersPage), "bowlers.tsx must render a 'Substitutes' section heading");
 assert(/getPublicSubstitutes/.test(bowlersPage), "bowlers.tsx must call getPublicSubstitutes()");
+assert(/getSubstituteProfile\(s\.id\)/.test(bowlersPage),
+  "bowlers.tsx must call getSubstituteProfile(s.id) inside each card");
+assert(/\.toFixed\(3\)/.test(bowlersPage),
+  "bowlers.tsx must format scratch average to 3 decimals");
+assert(/matchesSubbed/.test(bowlersPage),
+  "bowlers.tsx must display matches-subbed count");
 assert(/to="\/bowlers\/sub\/\$substituteId"/.test(bowlersPage),
   "bowlers.tsx must link to the substitute profile route");
 assert(/createFileRoute\("\/bowlers\/sub\/\$substituteId"\)/.test(subRoute),
