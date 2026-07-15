@@ -97,6 +97,23 @@ export function boundsNoticeCopy(input: {
   };
 }
 
+/** Whether the full results UI (summary cards + bowler table) should render.
+ *  Only `full` mode shows real proofs; anything else must show the holding
+ *  card so public visitors never see placeholder/pending per-bowler rows. */
+export function shouldShowFullResults(mode: CalculationMode): boolean {
+  return mode === "full";
+}
+
+/** Public-safe holding-card copy shown while a fresh full calculation is
+ *  pending. Must not imply the visitor's own browser is doing work. */
+export function holdingCardCopy(): { heading: string; detail: string } {
+  return {
+    heading: "Elimination results are being updated",
+    detail:
+      "The latest standings and schedule changes are still being calculated. Please check back shortly.",
+  };
+}
+
 /** Convenience: count rows by status (used by the summary tiles). */
 export function countByStatus(
   rows: readonly EliminationRow[],
