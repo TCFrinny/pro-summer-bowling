@@ -198,9 +198,14 @@ function assert(cond: unknown, msg: string) {
     assert(rankMap.get("b02") === 2, `tie current b02 rank=${rankMap.get("b02")}`);
     assert(rankMap.get("b03") === 3, `tie current b03 rank=${rankMap.get("b03")}`);
     assert(rankMap.get("b04") === 4, `tie current b04 rank=${rankMap.get("b04")}`);
-    // Prior (W1 only): b1 hcp=800, b2 hcp=600 -> b1=1, b2=2. b3/b4 tied -> b3=3, b4=4.
-    // Movement should be zero for everyone (same rank in both).
-    for (const r of snap.standings) assert(r.movement === 0, `tie mv nonzero for ${r.bowler.id}=${r.movement}`);
+    // Prior (W1 only): b1 hcp=800 rank1, b3 hcp=700 rank2, b4 hcp=700 rank3, b2 hcp=600 rank4.
+    // Current after W2: b1 rank1, b2 rank2 (added +600 hcp), b3 rank3, b4 rank4.
+    // Movement: b01 0, b02 +2, b03 -1, b04 -1. Tie fallback is stable/deterministic.
+    const mvT = new Map(snap.standings.map((r) => [r.bowler.id, r.movement]));
+    assert(mvT.get("b01") === 0, `tie b01 mv=${mvT.get("b01")}`);
+    assert(mvT.get("b02") === 2, `tie b02 mv=${mvT.get("b02")}`);
+    assert(mvT.get("b03") === -1, `tie b03 mv=${mvT.get("b03")}`);
+    assert(mvT.get("b04") === -1, `tie b04 mv=${mvT.get("b04")}`);
   }
 })();
 
