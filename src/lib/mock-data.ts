@@ -948,8 +948,17 @@ export function buildSnapshot(input: {
       }
     }
     if (priorMatches.length > 0) {
-      const priorTotals = aggregateStandingsTotals(activeIdSet, priorMatches);
-      priorRankMap = rankByStandings(activeIdList, priorTotals);
+      // Only bowlers who actually appeared in a prior match get a prior
+      // baseline rank. A newly activated bowler with no prior history
+      // must show movement 0 rather than a fabricated jump from the
+      // bottom of a zero-points baseline.
+      const priorParticipants = new Set<BowlerId>();
+      for (const m of priorMatches) {
+        if (activeIdSet.has(m.bowlerA)) priorParticipants.add(m.bowlerA);
+        if (activeIdSet.has(m.bowlerB)) priorParticipants.add(m.bowlerB);
+      }
+      const priorTotals = aggregateStandingsTotals(priorParticipants, priorMatches);
+      priorRankMap = rankByStandings([...priorParticipants], priorTotals);
     }
   }
   for (const b of publicBowlers) {
