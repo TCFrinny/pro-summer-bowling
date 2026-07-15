@@ -31,6 +31,11 @@ import {
   type GameSegments,
 } from "./duckpin";
 import { computeEliminationBounds } from "./elimination-bounds";
+import {
+  aggregateStandingsTotals,
+  findLatestResultWeek,
+  rankByStandings,
+} from "./standings-rank";
 
 export {
   classifyFrame,
@@ -912,8 +917,55 @@ export function buildSnapshot(input: {
   const publicBowlers = allBowlers.filter((b) => activeIds.has(b.id));
   const sorted = [...publicBowlers].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
-    return b.handicapPinfall - a.handicapPinfall;
+    if (b.handicapPinfall !== a.handicapPinfall)
+      return b.handicapPinfall - a.handicapPinfall;
+    return a.id.localeCompare(b.id);
   });
+
+  // 2a) Movement — compare current official rank to the standings as
+  // they stood BEFORE the latest result-bearing week began. Movement is
+  // display metadata only; it never affects points, pinfall, averages,
+  // rankings, elimination, or history.
+  const cutoffWeek = findLatestResultWeek(matchesByWeek);
+  const activeIdList = publicBowlers.map((b) => b.id);
+  const activeIdSet: ReadonlySet<BowlerId> = new Set(activeIdList);
+  const currentRankMap = rankByStandings(
+    activeIdList,
+    new Map(
+      publicBowlers.map((b) => [
+        b.id,
+        { points: b.points, handicapPinfall: b.handicapPinfall },
+      ]),
+    ),
+  );
+  let priorRankMap: Map<BowlerId, number> | null = null;
+  if (cutoffWeek !== null) {
+    const priorMatches: Match[] = [];
+    for (const w of weeks) {
+      if (w.week >= cutoffWeek) continue;
+      for (const m of matchesByWeek[w.week] ?? []) {
+        if (m.result) priorMatches.push(m);
+      }
+    }
+    if (priorMatches.length > 0) {
+      // Only bowlers who actually appeared in a prior match get a prior
+      // baseline rank. A newly activated bowler with no prior history
+      // must show movement 0 rather than a fabricated jump from the
+      // bottom of a zero-points baseline.
+      const priorParticipants = new Set<BowlerId>();
+      for (const m of priorMatches) {
+        if (activeIdSet.has(m.bowlerA)) priorParticipants.add(m.bowlerA);
+        if (activeIdSet.has(m.bowlerB)) priorParticipants.add(m.bowlerB);
+      }
+      const priorTotals = aggregateStandingsTotals(priorParticipants, priorMatches);
+      priorRankMap = rankByStandings([...priorParticipants], priorTotals);
+    }
+  }
+  for (const b of publicBowlers) {
+    const cur = currentRankMap.get(b.id);
+    const prev = priorRankMap?.get(b.id);
+    b.movement = cur != null && prev != null ? prev - cur : 0;
+  }
   const standings: StandingsRow[] = sorted.map((b, i) => ({
     rank: i + 1, bowler: b, movement: b.movement,
   }));

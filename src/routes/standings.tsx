@@ -9,7 +9,7 @@ import {
   type Bowler,
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
-import { ArrowDown, ArrowUp, Minus, Search, Trophy } from "lucide-react";
+import { ArrowDown, ArrowUp, Search, Trophy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,8 +32,8 @@ export const Route = createFileRoute("/standings")({
 function Movement({ n }: { n: number }) {
   if (n === 0)
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <Minus className="h-3 w-3" /> 0
+      <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label="No rank change">
+        —
       </span>
     );
   if (n > 0)
