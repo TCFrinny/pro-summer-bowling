@@ -32,8 +32,8 @@ export const Route = createFileRoute("/standings")({
 function Movement({ n }: { n: number }) {
   if (n === 0)
     return (
-      <span className="inline-flex items-center gap-1 text-muted-foreground">
-        <Minus className="h-3 w-3" /> 0
+      <span className="inline-flex items-center gap-1 text-muted-foreground" aria-label="No rank change">
+        —
       </span>
     );
   if (n > 0)
