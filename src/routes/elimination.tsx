@@ -110,66 +110,72 @@ function EliminationPage() {
 
       <AdminAutoRun mode={mode} lastCalculatedAt={snap.lastCalculatedAt} />
 
-      <Card className="mb-6 bg-card">
-        <CardHeader>
-          <CardTitle className="flex flex-wrap items-baseline justify-between gap-2 font-display text-xl">
-            <span>Snapshot</span>
-            <span className="text-xs font-normal text-muted-foreground">
-              Last calculated {new Date(snap.lastCalculatedAt).toLocaleString()} ·{" "}
-              {snap.weeksRemaining} weeks remaining
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-          {(Object.keys(STATUS) as EliminationStatus[]).map((s) => (
-            <div key={s} className={`rounded-md p-3 text-sm ${STATUS[s].className}`}>
-              <div className="flex items-center gap-2 text-xs uppercase tracking-widest opacity-90">
-                {STATUS[s].icon} {displayLabelForStatus(s, mode, STATUS[s].label)}
-              </div>
-              <div className="font-display text-2xl">{counts[s] ?? 0}</div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {shouldShowFullResults(mode) ? (
+        <>
+          <Card className="mb-6 bg-card">
+            <CardHeader>
+              <CardTitle className="flex flex-wrap items-baseline justify-between gap-2 font-display text-xl">
+                <span>Snapshot</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  Last calculated {new Date(snap.lastCalculatedAt).toLocaleString()} ·{" "}
+                  {snap.weeksRemaining} weeks remaining
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+              {(Object.keys(STATUS) as EliminationStatus[]).map((s) => (
+                <div key={s} className={`rounded-md p-3 text-sm ${STATUS[s].className}`}>
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-widest opacity-90">
+                    {STATUS[s].icon} {displayLabelForStatus(s, mode, STATUS[s].label)}
+                  </div>
+                  <div className="font-display text-2xl">{counts[s] ?? 0}</div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead className="bg-accent/60 text-xs uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-3 text-left">Bowler</th>
-              <th className="px-3 py-3 text-right">Points</th>
-              <th className="px-3 py-3 text-left">Status</th>
-              <th className="px-3 py-3 text-left">Reason</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {orderedRows.map((r) => (
-              <tr key={r.bowler.id} className="align-top hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
-                <td className="px-3 py-2 text-right font-display text-base text-gold">
-                  {formatPoints(r.bowler.points)}
-                </td>
-                <td className="px-3 py-2">
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${STATUS[r.status].className}`}>
-                    {STATUS[r.status].icon}{" "}
-                    {displayLabelForStatus(r.status, mode, STATUS[r.status].label)}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {r.note ?? "—"}
-                  {(r.maxFinalPoints != null || r.nextOpponent || r.bestMargin != null) && (
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] uppercase tracking-widest opacity-75">
-                      {r.maxFinalPoints != null && <span>Max {formatPoints(r.maxFinalPoints)}</span>}
-                      {r.nextOpponent && <span>Next {r.nextOpponent}</span>}
-                      {r.bestMargin != null && <span>Margin {formatPoints(r.bestMargin)}</span>}
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <table className="w-full text-sm">
+              <thead className="bg-accent/60 text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-3 text-left">Bowler</th>
+                  <th className="px-3 py-3 text-right">Points</th>
+                  <th className="px-3 py-3 text-left">Status</th>
+                  <th className="px-3 py-3 text-left">Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {orderedRows.map((r) => (
+                  <tr key={r.bowler.id} className="align-top hover:bg-accent/30">
+                    <td className="px-3 py-2 font-medium">{r.bowler.name}</td>
+                    <td className="px-3 py-2 text-right font-display text-base text-gold">
+                      {formatPoints(r.bowler.points)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs ${STATUS[r.status].className}`}>
+                        {STATUS[r.status].icon}{" "}
+                        {displayLabelForStatus(r.status, mode, STATUS[r.status].label)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {r.note ?? "—"}
+                      {(r.maxFinalPoints != null || r.nextOpponent || r.bestMargin != null) && (
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] uppercase tracking-widest opacity-75">
+                          {r.maxFinalPoints != null && <span>Max {formatPoints(r.maxFinalPoints)}</span>}
+                          {r.nextOpponent && <span>Next {r.nextOpponent}</span>}
+                          {r.bestMargin != null && <span>Margin {formatPoints(r.bestMargin)}</span>}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <HoldingCard />
+      )}
     </AppShell>
   );
 }
