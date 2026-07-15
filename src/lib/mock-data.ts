@@ -919,6 +919,42 @@ export function buildSnapshot(input: {
     if (b.points !== a.points) return b.points - a.points;
     return b.handicapPinfall - a.handicapPinfall;
   });
+
+  // 2a) Movement — compare current official rank to the standings as
+  // they stood BEFORE the latest result-bearing week began. Movement is
+  // display metadata only; it never affects points, pinfall, averages,
+  // rankings, elimination, or history.
+  const cutoffWeek = findLatestResultWeek(matchesByWeek);
+  const activeIdList = publicBowlers.map((b) => b.id);
+  const activeIdSet: ReadonlySet<BowlerId> = new Set(activeIdList);
+  const currentRankMap = rankByStandings(
+    activeIdList,
+    new Map(
+      publicBowlers.map((b) => [
+        b.id,
+        { points: b.points, handicapPinfall: b.handicapPinfall },
+      ]),
+    ),
+  );
+  let priorRankMap: Map<BowlerId, number> | null = null;
+  if (cutoffWeek !== null) {
+    const priorMatches: Match[] = [];
+    for (const w of weeks) {
+      if (w.week >= cutoffWeek) continue;
+      for (const m of matchesByWeek[w.week] ?? []) {
+        if (m.result) priorMatches.push(m);
+      }
+    }
+    if (priorMatches.length > 0) {
+      const priorTotals = aggregateStandingsTotals(activeIdSet, priorMatches);
+      priorRankMap = rankByStandings(activeIdList, priorTotals);
+    }
+  }
+  for (const b of publicBowlers) {
+    const cur = currentRankMap.get(b.id);
+    const prev = priorRankMap?.get(b.id);
+    b.movement = cur != null && prev != null ? prev - cur : 0;
+  }
   const standings: StandingsRow[] = sorted.map((b, i) => ({
     rank: i + 1, bowler: b, movement: b.movement,
   }));
