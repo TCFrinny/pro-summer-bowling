@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { BOWLERS, getPublicSubstitutes } from "@/lib/mock-data";
+import { BOWLERS, getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
@@ -114,8 +114,15 @@ function BowlersIndex() {
             data-testid="substitutes-grid"
           >
             {subs.map((s) => {
-              const avg = s.startingAverage;
-              const hdcp = s.handicap;
+              const profile = getSubstituteProfile(s.id);
+              const avg = profile && profile.gamesRolled > 0
+                ? profile.scratchAverage.toFixed(3)
+                : "—";
+              const ref = s.handicap != null
+                ? `hdcp ${s.handicap}`
+                : s.startingAverage != null
+                  ? `start avg ${s.startingAverage.toFixed(1)}`
+                  : null;
               return (
                 <Link
                   key={s.id}
@@ -133,9 +140,10 @@ function BowlersIndex() {
                   </div>
                   <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                     <span>
-                      start avg {avg != null ? avg.toFixed(1) : "—"}
+                      avg {avg} · {profile?.matchesSubbed ?? 0} match
+                      {(profile?.matchesSubbed ?? 0) === 1 ? "" : "es"}
                     </span>
-                    <span>hdcp {hdcp ?? "—"}</span>
+                    <span>{ref ?? "—"}</span>
                   </div>
                 </Link>
               );
