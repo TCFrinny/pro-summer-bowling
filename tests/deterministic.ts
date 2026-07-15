@@ -18,6 +18,7 @@ import "./elimination-auto-run";
 import "./frame-input-messages";
 import "./standings-movement";
 import "./admin-rebuild-snapshot";
+import "./schedule-default-week";
 // @ts-expect-error - JS module without types
 import "./patch-cloudflare-config.test.mjs";
 

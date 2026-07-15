@@ -7,9 +7,11 @@ import {
   formatScheduleName,
   getBowler,
   getMatchesForWeek,
+  type Match,
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { useState } from "react";
+import { pickDefaultScheduleWeek } from "@/lib/schedule-default-week";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -35,7 +37,13 @@ export const Route = createFileRoute("/schedule")({
 
 function SchedulePage() {
   useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
-  const [week, setWeek] = useState<number>(WEEKS[0].week);
+  // Compute default only on initial mount so realtime snapshot refreshes
+  // or the visitor's own dropdown choice are never overwritten.
+  const [week, setWeek] = useState<number>(() => {
+    const matchesByWeek: Record<number, Match[]> = {};
+    for (const w of WEEKS) matchesByWeek[w.week] = getMatchesForWeek(w.week);
+    return pickDefaultScheduleWeek(WEEKS, matchesByWeek);
+  });
   const matches = getMatchesForWeek(week);
 
   return (
