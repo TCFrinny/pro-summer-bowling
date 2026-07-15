@@ -122,26 +122,95 @@ function AdminLayout() {
 
   return (
     <AppShell>
-      <div className="mb-4 flex items-center justify-between gap-2 rounded-md border border-border bg-accent/40 px-3 py-2 text-xs">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="font-semibold uppercase tracking-widest text-gold">
-            Admin
+      <AdminHeaderBar
+        onSignOut={async () => {
+          await supabase.auth.signOut();
+          navigate({ to: "/", replace: true });
+        }}
+      />
+      <Outlet />
+    </AppShell>
+  );
+}
+
+/** Admin-only header bar. Rendered only after positive admin verification
+ *  (gate.kind === "admin"). Hosts nav, snapshot rebuild, and sign-out. */
+export function AdminHeaderBar({ onSignOut }: { onSignOut: () => void | Promise<void> }) {
+  const queryClient = useQueryClient();
+  const [rebuildState, setRebuildState] = useState<
+    { kind: "idle" }
+    | { kind: "running" }
+    | { kind: "success" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+
+  async function handleRebuild() {
+    setRebuildState({ kind: "running" });
+    try {
+      // Cheap bounds-only rebuild on the server. The full elimination
+      // solver stays on the elimination page (browser worker) and is NOT
+      // triggered here.
+      await rebuildCurrentSeasonSnapshot();
+      await queryClient.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
+      setRebuildState({ kind: "success" });
+      window.setTimeout(() => {
+        setRebuildState((s) => (s.kind === "success" ? { kind: "idle" } : s));
+      }, 3000);
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Rebuild failed. Please try again.";
+      setRebuildState({ kind: "error", message });
+    }
+  }
+
+  const running = rebuildState.kind === "running";
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-accent/40 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-semibold uppercase tracking-widest text-gold">
+          Admin
+        </span>
+        <Link to="/admin/bowlers" className="hover:underline">Bowlers</Link>
+        <Link to="/admin/schedule" className="hover:underline">Schedule</Link>
+        <Link to="/admin/results" className="hover:underline">Results</Link>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {rebuildState.kind === "success" && (
+          <span className="text-emerald-600 dark:text-emerald-400" role="status">
+            Snapshot rebuilt.
           </span>
-          <Link to="/admin/bowlers" className="hover:underline">Bowlers</Link>
-          <Link to="/admin/schedule" className="hover:underline">Schedule</Link>
-          <Link to="/admin/results" className="hover:underline">Results</Link>
-        </div>
+        )}
+        {rebuildState.kind === "error" && (
+          <span className="text-destructive" role="alert">
+            {rebuildState.message}
+          </span>
+        )}
         <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            navigate({ to: "/", replace: true });
-          }}
+          type="button"
+          onClick={handleRebuild}
+          disabled={running}
+          aria-busy={running}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 hover:bg-accent disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {running ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Rebuilding…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3.5 w-3.5" /> Rebuild Snapshot
+            </>
+          )}
+        </button>
+        <button
+          onClick={onSignOut}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 hover:bg-accent"
         >
           <LogOut className="h-3.5 w-3.5" /> Sign out
         </button>
       </div>
-      <Outlet />
-    </AppShell>
+    </div>
   );
 }
