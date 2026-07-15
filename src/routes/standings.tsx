@@ -9,7 +9,7 @@ import {
   type Bowler,
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
-import { ArrowDown, ArrowUp, Minus, Search, Trophy } from "lucide-react";
+import { ArrowDown, ArrowUp, Search, Trophy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
