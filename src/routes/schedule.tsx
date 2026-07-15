@@ -7,9 +7,11 @@ import {
   formatScheduleName,
   getBowler,
   getMatchesForWeek,
+  getSnapshot,
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { useState } from "react";
+import { pickDefaultScheduleWeek } from "@/lib/schedule-default-week";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
