@@ -7,7 +7,6 @@ import {
   formatScheduleName,
   getBowler,
   getMatchesForWeek,
-  getSnapshot,
 } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { useState } from "react";
