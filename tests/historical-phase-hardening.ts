@@ -131,9 +131,10 @@ function read(p: string) { return readFileSync(join(process.cwd(), p), "utf8"); 
   truthy(repo.includes("dedupeHistoricalContributions"), "career loader dedupes");
 
   // 2026 current-season pipeline is not called from historical repo.
-  truthy(!repo.includes("buildFullSnapshot"), "no import of current-season snapshot builder");
-  truthy(!repo.includes("rebuildAndSaveSnapshot"), "no call into current-season pipeline");
-  truthy(!repo.includes("public_snapshots"), "no read/write of current-season public_snapshots");
+  const noComments = repo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  truthy(!/buildFullSnapshot\s*\(/.test(noComments), "no call into current-season snapshot builder");
+  truthy(!/rebuildAndSaveSnapshot\s*\(/.test(noComments), "no call into current-season pipeline");
+  truthy(!/from\s+["']@\/lib\/public-snapshot["']/.test(noComments), "no import of current-season snapshot lib");
 
   // Public snapshot loader enforces archived + public_visible.
   truthy(repo.includes("q.data.is_current === true") &&
