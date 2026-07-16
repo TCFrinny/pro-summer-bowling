@@ -823,14 +823,22 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       if (!r) continue;
       const derived = r.derived as (null | {
         detailMode: HistoricalDetailMode;
+        hasGameDataA?: boolean; hasGameDataB?: boolean;
         a: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
         b: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
         finalPointsA: number; finalPointsB: number; winner: "A" | "B" | "T";
         override: { pointsA: number; pointsB: number } | null;
       });
       if (!derived) continue;
-      const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number };
-      const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number };
+      const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
+      const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
+      // Explicit availability. Prefer the flag saved in `derived` (new
+      // rows); for legacy rows fall back to the participation shape:
+      // a side has data iff it bowled OR is absent-with-absent-scores.
+      const hasA = typeof derived.hasGameDataA === "boolean" ? derived.hasGameDataA
+        : (sideA.status !== "absent" || Array.isArray(sideA.absentScores));
+      const hasB = typeof derived.hasGameDataB === "boolean" ? derived.hasGameDataB
+        : (sideB.status !== "absent" || Array.isArray(sideB.absentScores));
       matches.push({
         slotId: sid,
         weekNumber: Number(w.week_number),
@@ -844,8 +852,12 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         absentA: sideA.status === "absent",   absentB: sideB.status === "absent",
         entryAverageA: sideA.entryAverage,   entryAverageB: sideB.entryAverage,
         handicapA: sideA.handicap,           handicapB: sideB.handicap,
-        scratchGamesA: derived.a.scratchTotal > 0 ? derived.a.gameScoresScratch : null,
-        scratchGamesB: derived.b.scratchTotal > 0 ? derived.b.gameScoresScratch : null,
+        hasGameDataA: hasA, hasGameDataB: hasB,
+        // Personal / raw stats are only exposed when the side has data
+        // AND actually bowled (absent-with-scores contributes to
+        // standings but NOT to personal stats — matches 2026 semantics).
+        scratchGamesA: hasA && sideA.status !== "absent" ? derived.a.gameScoresScratch : null,
+        scratchGamesB: hasB && sideB.status !== "absent" ? derived.b.gameScoresScratch : null,
         handicapGamesA: derived.a.gameScoresHandicap,
         handicapGamesB: derived.b.gameScoresHandicap,
         scratchTotalA: derived.a.scratchTotal, scratchTotalB: derived.b.scratchTotal,
