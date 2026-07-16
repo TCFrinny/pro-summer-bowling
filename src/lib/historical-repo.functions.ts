@@ -471,6 +471,7 @@ const resultSchema = z.object({
     pointsB: z.number().min(0),
     reason: z.string().max(500).optional(),
   }).nullable().optional(),
+  allowPublished: z.boolean().optional(),
 });
 
 function participationInput(p: z.infer<typeof participationSchema>, scores: [number, number, number] | null): HistoricalSideInput {
@@ -491,20 +492,46 @@ function participationInput(p: z.infer<typeof participationSchema>, scores: [num
   };
 }
 
+/** Compute an explicit availability flag per side, matching the 2026
+ *  hasScores rule: a side has game data iff it bowled OR is absent-with-
+ *  scores. Absent-without-scores has NO data — the snapshot must render
+ *  `—`, not zero. */
+function sideHasScores(p: z.infer<typeof participationSchema>): boolean {
+  if (p.status === "absent") return Array.isArray(p.absentScores);
+  return true;
+}
+
 export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => resultSchema.parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const season = await ensureNonCurrentSeason(context.supabase, data.seasonId);
-
-    // full_linescore MUST come with three game scores derived from the
-    // linescore (client freezes them into gameScoresA/B before save).
-    if (data.detailMode === "full_linescore" && (!data.gameScoresA || !data.gameScoresB)) {
-      throw new Error("Full linescore save requires game totals for both sides.");
+    const week = await assertWeekInSeason(context.supabase, data.weekId, data.seasonId);
+    await assertSlotInWeekAndSeason(context.supabase, data.slotId, data.weekId, data.seasonId);
+    if (week.published && data.allowPublished !== true) {
+      throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
     }
-    if (data.detailMode === "game_scores" && (!data.gameScoresA || !data.gameScoresB)) {
-      throw new Error("Game-score entry requires three scores per side.");
+
+    const bowledA = data.sideA.status !== "absent";
+    const bowledB = data.sideB.status !== "absent";
+    if (bowledA && (!data.gameScoresA)) {
+      throw new Error(`${data.sideA.actualName || "Side A"}: three game scores required.`);
+    }
+    if (bowledB && (!data.gameScoresB)) {
+      throw new Error(`${data.sideB.actualName || "Side B"}: three game scores required.`);
+    }
+    if (data.detailMode === "full_linescore" && (!data.linescoreA || !data.linescoreB)) {
+      throw new Error("Full-linescore save requires a complete linescore for each side that bowled.");
+    }
+
+    // Absent semantics — match 2026 rules exactly. Absent-without-scores is
+    // only valid when an explicit points override is supplied; otherwise
+    // the standings would silently credit fabricated 0-0 points.
+    const aHas = sideHasScores(data.sideA);
+    const bHas = sideHasScores(data.sideB);
+    if ((!aHas || !bHas) && !data.pointOverride) {
+      throw new Error("Absent side without three absent scores requires an explicit points override (points A / points B).");
     }
 
     const sideA = participationInput(data.sideA, data.gameScoresA ?? null);
@@ -517,6 +544,8 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     const derived = {
       pointSystem: season.pointSystem,
       detailMode: data.detailMode,
+      hasGameDataA: aHas,
+      hasGameDataB: bHas,
       a: outcome.a, b: outcome.b,
       finalPointsA: outcome.finalPointsA, finalPointsB: outcome.finalPointsB,
       winner: outcome.winner,
@@ -545,14 +574,59 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     return { ok: true, points: { a: outcome.finalPointsA, b: outcome.finalPointsB } };
   });
 
+/** Load a saved result so the admin form can pre-populate for edit. */
+export const adminGetHistoricalMatchResult = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v) => z.object({ slotId: z.string().uuid(), seasonId: z.string().uuid() }).parse(v))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    const q = await (context.supabase.from as unknown as LooseFrom)("historical_match_results")
+      .select("*").eq("slot_id", data.slotId).eq("season_id", data.seasonId).maybeSingle();
+    if (q.error) {
+      if (isMissingTable(q.error.code)) return { available: false as const, result: null };
+      throw new Error(q.error.message);
+    }
+    if (!q.data) return { available: true as const, result: null };
+    const r = q.data as Record<string, unknown>;
+    return {
+      available: true as const,
+      result: {
+        slotId: String(r.slot_id),
+        weekId: String(r.week_id),
+        seasonId: String(r.season_id),
+        detailMode: r.detail_mode as "full_linescore" | "game_scores",
+        sideA: r.side_a as z.infer<typeof participationSchema>,
+        sideB: r.side_b as z.infer<typeof participationSchema>,
+        linescoreA: r.linescore_a ?? null,
+        linescoreB: r.linescore_b ?? null,
+        gameScoresA: (r.game_scores_a as number[] | null) ?? null,
+        gameScoresB: (r.game_scores_b as number[] | null) ?? null,
+        pointsA: r.points_a != null ? Number(r.points_a) : 0,
+        pointsB: r.points_b != null ? Number(r.points_b) : 0,
+        pointOverride: (r.point_override as { pointsA: number; pointsB: number; reason?: string } | null) ?? null,
+      },
+    };
+  });
+
 export const adminDeleteHistoricalMatchResult = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => z.object({
-    slotId: z.string().uuid(), seasonId: z.string().uuid(), confirm: z.literal(true),
+    slotId: z.string().uuid(), seasonId: z.string().uuid(),
+    allowPublished: z.boolean().optional(),
+    confirm: z.literal(true),
   }).parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    // Fetch containing week to gate the published-week override.
+    const row = await (context.supabase.from as unknown as LooseFrom)("historical_match_results")
+      .select("week_id").eq("slot_id", data.slotId).eq("season_id", data.seasonId).maybeSingle();
+    if (!row.error && row.data) {
+      const week = await assertWeekInSeason(context.supabase, String(row.data.week_id), data.seasonId);
+      if (week.published && data.allowPublished !== true) {
+        throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to clear.`);
+      }
+    }
     const del = await (context.supabase.from as unknown as LooseFrom)("historical_match_results")
       .delete().eq("slot_id", data.slotId).eq("season_id", data.seasonId);
     if (del.error) throw new Error(del.error.message);
