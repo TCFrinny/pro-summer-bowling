@@ -59,7 +59,7 @@ function PersonPage() {
             <Link to="/bowlers" className="text-sm underline">Roster</Link>
           </PageHeader>
           <CareerBody
-            rows={mergeHistoricalIntoCareer(q.data.rows, hist.data ?? [])}
+            rows={mergeHistoricalIntoCareer(q.data.rows, hist.data?.rows ?? [])}
           />
           {q.data.person.notes && (
             <p className="mt-4 text-sm text-muted-foreground">{q.data.person.notes}</p>
