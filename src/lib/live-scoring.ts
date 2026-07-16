@@ -96,6 +96,28 @@ export function completedGameCount(mask: [boolean, boolean, boolean]): 0 | 1 | 2
   return (mask.filter(Boolean).length) as 0 | 1 | 2 | 3;
 }
 
+/** Identity-change detector shared by the server handler and tests.
+ *  Compares a frozen prior live-side JSON against a freshly-resolved
+ *  submitted side. Any of these mutations counts as a change and MUST
+ *  require an explicit `confirmIdentityChange` from the admin:
+ *    - status flip (rostered ↔ substitute)
+ *    - different substitute id
+ *    - different effective starting average (drives handicap)
+ *  A missing prior side (never saved before) is NEVER a change. */
+export function isLiveIdentityChanged(
+  priorSide: LiveSideJson | undefined | null,
+  submitted: LiveSideJson,
+): boolean {
+  if (!priorSide) return false;
+  if (priorSide.status !== submitted.status) return true;
+  if (submitted.status === "substitute") {
+    if ((priorSide.actualId ?? "") !== (submitted.actualId ?? "")) return true;
+  }
+  if (Math.abs(priorSide.entryAverage - submitted.entryAverage) > 1e-9) return true;
+  return false;
+}
+
+
 /** Remaining unawarded points for one live matchup.
  *  Contract: 0 games → 7, 1 → 5, 2 → 3, 3 → 0 (set point awarded at 3). */
 export function remainingPointsForLive(mask: [boolean, boolean, boolean]): 0 | 3 | 5 | 7 {
