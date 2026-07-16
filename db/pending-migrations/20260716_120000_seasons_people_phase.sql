@@ -276,7 +276,7 @@ grant execute on function public.switch_current_season(uuid, boolean) to authent
 -- merge_people: repoint every reference from _remove to _keep, then delete
 -- ONLY the duplicate person identity + its aliases. Seasonal roster,
 -- substitute, and season champion rows themselves are preserved.
-create or replace function public.merge_people(_keep uuid, _remove uuid)
+create or replace function public.merge_people(_keep uuid, _remove uuid, _confirm boolean)
 returns jsonb
 language plpgsql
 security definer
@@ -290,6 +290,9 @@ declare
 begin
   if not public.current_user_is_admin() then
     raise exception 'not authorized' using errcode = '42501';
+  end if;
+  if _confirm is distinct from true then
+    raise exception 'merge_people requires explicit confirmation (_confirm=true)';
   end if;
   if _keep is null or _remove is null or _keep = _remove then
     raise exception 'invalid merge arguments';
@@ -356,7 +359,7 @@ begin
 end;
 $$;
 
-revoke all on function public.merge_people(uuid, uuid) from public;
-grant execute on function public.merge_people(uuid, uuid) to authenticated;
+revoke all on function public.merge_people(uuid, uuid, boolean) from public;
+grant execute on function public.merge_people(uuid, uuid, boolean) to authenticated;
 
 commit;
