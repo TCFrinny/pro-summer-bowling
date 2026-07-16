@@ -210,66 +210,119 @@ function assert(cond: unknown, msg: string) {
     assert(mvT.get("b04") === -1, `tie b04 mv=${mvT.get("b04")}`);
   }
 
-  // ---- Partial FINAL-WEEK live-scoring movement: baseline must be
-  // pre-final-week (W1) standings, not baselined against nothing. Uses a
-  // score-only MatchResult synthesized from a live row with 1 game paired. ----
+  // ---- Progressive partial FINAL-WEEK live-scoring movement ----
+  // The Movement column MUST always compare against the pre-final-week
+  // (W1-only) standings baseline. A common bug is to rebase after the
+  // first live save so later saves compare against the post-first-save
+  // ranks, which silently hides all subsequent movement. This test drives
+  // TWO progressive snapshots (matchup A saved, then matchups A+B saved)
+  // and asserts:
+  //   (a) at least one bowler shows nonzero movement in each snapshot
+  //   (b) both snapshots baseline against W1 (not against each other)
   {
-    // W1: b1 dominates (7-0 vs b2), b3 beats b4 (5-2). Baseline ranks:
-    // b01=1 (7 pts), b03=2 (5 pts), b04=3 (2 pts), b02=4 (0 pts).
-    // W2 live: b2 wins G1 vs b1 (2 pts to b2), b4 wins G1 vs b3 (2 pts to b4).
-    const liveA: LiveMatchRow = {
+    // W1 baseline: b1 sweeps b2 7-0 (b1 hcp=800), b3 beats b4 5-2 (b3 hcp=700).
+    // W1 ranks by points DESC then hcp pinfall DESC:
+    //   b01=1 (7 pts, hcp 800), b03=2 (5 pts, hcp 700),
+    //   b04=3 (2 pts, hcp 500), b02=4 (0 pts, hcp 400).
+    const w1: Match[] = [
+      mkMatch(1, 1, b1, b2, 7, 0, { a: 800, b: 400 }),
+      mkMatch(1, 2, b3, b4, 5, 2, { a: 700, b: 500 }),
+    ];
+
+    // W2 (final) live matchup A: b2 wins G1 with a big handicap set —
+    // makes b02 leapfrog b04 in tie-break for a nonzero movement.
+    const liveA1: LiveMatchRow = {
       id: "L1", schedule_slot_id: "s1", week_id: "w2", season_id: "sea",
       side_a: { scheduledId: b1.id, status: "rostered", actualId: b1.id, actualName: b1.name, scheduledName: b1.name, entryAverage: b1.entryAverage, handicap: b1.handicap },
       side_b: { scheduledId: b2.id, status: "rostered", actualId: b2.id, actualName: b2.name, scheduledName: b2.name, entryAverage: b2.entryAverage, handicap: b2.handicap },
-      a_game1: 140, a_game2: null, a_game3: null,
-      b_game1: 160, b_game2: null, b_game3: null,
+      a_game1: 100, a_game2: null, a_game3: null,
+      b_game1: 200, b_game2: null, b_game3: null,
     };
-    const liveB: LiveMatchRow = {
+    const mrA1 = computeLiveMatchResult({ row: liveA1, scheduledNameA: b1.name, scheduledNameB: b2.name });
+    const partialA: Match = {
+      id: "w2-s1", week: 2, lanePair: "1-2", slot: 0, status: "in-progress",
+      bowlerA: b1.id, bowlerB: b2.id, result: mrA1,
+    };
+
+    const snap1 = buildSnapshot({
+      bowlers, weeks,
+      matchesByWeek: { 1: w1, 2: [partialA], 3: [] },
+    });
+    const mv1 = new Map(snap1.standings.map((r) => [r.bowler.id, r.movement]));
+    const rk1 = new Map(snap1.standings.map((r) => [r.bowler.id, r.rank]));
+    const pts1 = new Map(snap1.standings.map((r) => [r.bowler.id, r.bowler.points]));
+    // Sanity — live G1 credited: b02 +2, others unchanged from W1.
+    assert(pts1.get("b02") === 2, `snap1 b02 pts should be 2 (got ${pts1.get("b02")})`);
+    assert(pts1.get("b01") === 7 && pts1.get("b03") === 5 && pts1.get("b04") === 2,
+      "snap1 other points must equal W1 totals");
+    // Snap1 ranks: b01=1(7), b03=2(5), b02=3(2 pts, hcp=400+232=632),
+    //              b04=4(2 pts, hcp=500). b02 > b04 on hcp pinfall.
+    assert(rk1.get("b02") === 3, `snap1 b02 rank should be 3 (got ${rk1.get("b02")})`);
+    assert(rk1.get("b04") === 4, `snap1 b04 rank should be 4 (got ${rk1.get("b04")})`);
+    // Movement vs W1 baseline (b01=1,b03=2,b04=3,b02=4):
+    //   b02 4→3 = +1  (nonzero — proves baseline isn't the current standings)
+    //   b04 3→4 = −1  (nonzero)
+    //   b01, b03 unchanged
+    assert(mv1.get("b02") === 1, `snap1 b02 mv must be +1 (got ${mv1.get("b02")})`);
+    assert(mv1.get("b04") === -1, `snap1 b04 mv must be -1 (got ${mv1.get("b04")})`);
+    assert(mv1.get("b01") === 0 && mv1.get("b03") === 0,
+      "snap1 unchanged bowlers must have zero movement");
+
+    // Snapshot 2: additionally save matchup B where b3 wins G1 by a huge
+    // handicap margin. b03 gains 2 pts (total 7) → leapfrogs b01 on
+    // hcp pinfall (b03 = 700+232=932 vs b01 = 800+132=932 tie — force
+    // separation by giving b3 a bigger G1). Use 210 vs 90 to make it clear.
+    const liveB1: LiveMatchRow = {
       id: "L2", schedule_slot_id: "s2", week_id: "w2", season_id: "sea",
       side_a: { scheduledId: b3.id, status: "rostered", actualId: b3.id, actualName: b3.name, scheduledName: b3.name, entryAverage: b3.entryAverage, handicap: b3.handicap },
       side_b: { scheduledId: b4.id, status: "rostered", actualId: b4.id, actualName: b4.name, scheduledName: b4.name, entryAverage: b4.entryAverage, handicap: b4.handicap },
-      a_game1: 130, a_game2: null, a_game3: null,
-      b_game1: 170, b_game2: null, b_game3: null,
+      a_game1: 210, a_game2: null, a_game3: null,
+      b_game1: 90, b_game2: null, b_game3: null,
     };
-    const mrA = computeLiveMatchResult({ row: liveA, scheduledNameA: b1.name, scheduledNameB: b2.name });
-    const mrB = computeLiveMatchResult({ row: liveB, scheduledNameA: b3.name, scheduledNameB: b4.name });
-    const partialMatchA: Match = {
-      id: "w2-s1", week: 2, lanePair: "1-2", slot: 0, status: "in-progress",
-      bowlerA: b1.id, bowlerB: b2.id, result: mrA,
-    };
-    const partialMatchB: Match = {
+    const mrB1 = computeLiveMatchResult({ row: liveB1, scheduledNameA: b3.name, scheduledNameB: b4.name });
+    const partialB: Match = {
       id: "w2-s2", week: 2, lanePair: "3-4", slot: 1, status: "in-progress",
-      bowlerA: b3.id, bowlerB: b4.id, result: mrB,
+      bowlerA: b3.id, bowlerB: b4.id, result: mrB1,
     };
-    const m: Record<number, Match[]> = {
-      1: [
-        mkMatch(1, 1, b1, b2, 7, 0, { a: 700, b: 500 }),
-        mkMatch(1, 2, b3, b4, 5, 2, { a: 650, b: 550 }),
-      ],
-      2: [partialMatchA, partialMatchB],
-      3: [],
-    };
-    const snap = buildSnapshot({ bowlers, weeks, matchesByWeek: m });
-    // Baseline check: prior-week ranks come from W1 ONLY. Movement must be
-    // computed against that pre-final-week baseline, not against the empty
-    // pre-first-live-save state.
-    const mv = new Map(snap.standings.map((r) => [r.bowler.id, r.movement]));
-    // W1 baseline: b01=1, b03=2, b04=3, b02=4.
-    // Current totals after partial live G1s: pts add b02+2, b04+2 → b01=7, b02=2, b03=5, b04=4.
-    // Ranks by points DESC then hcp pinfall DESC:
-    //   b01=1 (7), b03=2 (5), b04=3 (4), b02=4 (2).
-    // Movement = prior − current: b01 0, b02 0, b03 0, b04 0.
-    assert(mv.get("b01") === 0, `final-live b01 mv=${mv.get("b01")}`);
-    assert(mv.get("b02") === 0, `final-live b02 mv=${mv.get("b02")}`);
-    assert(mv.get("b03") === 0, `final-live b03 mv=${mv.get("b03")}`);
-    assert(mv.get("b04") === 0, `final-live b04 mv=${mv.get("b04")}`);
-    // Also confirm live results contributed points at all — b02 and b04 must
-    // have earned 2 pts each in W2 relative to W1 totals.
-    const pts = new Map(snap.standings.map((r) => [r.bowler.id, r.bowler.points]));
-    assert(pts.get("b02") === 2, `live b02 pts=${pts.get("b02")}`);
-    assert(pts.get("b04") === 4, `live b04 pts=${pts.get("b04")}`); // 2 (W1) + 2 (live G1)
+    const snap2 = buildSnapshot({
+      bowlers, weeks,
+      matchesByWeek: { 1: w1, 2: [partialA, partialB], 3: [] },
+    });
+    const mv2 = new Map(snap2.standings.map((r) => [r.bowler.id, r.movement]));
+    const rk2 = new Map(snap2.standings.map((r) => [r.bowler.id, r.rank]));
+    const pts2 = new Map(snap2.standings.map((r) => [r.bowler.id, r.bowler.points]));
+    assert(pts2.get("b03") === 7, `snap2 b03 pts should be 7 (got ${pts2.get("b03")})`);
+    assert(pts2.get("b01") === 7, "snap2 b01 still 7");
+    // Snap2 ranks: b01=7 (hcp 800+132=932), b03=7 (hcp 700+242=942). b03 wins tie.
+    // Then b02=2 (632), b04=2 (500).
+    assert(rk2.get("b03") === 1, `snap2 b03 rank should be 1 (got ${rk2.get("b03")})`);
+    assert(rk2.get("b01") === 2, `snap2 b01 rank should be 2 (got ${rk2.get("b01")})`);
+    // Movement vs the SAME W1 baseline (b01=1,b03=2,b04=3,b02=4):
+    //   b03 2→1 = +1, b01 1→2 = −1, b02 4→3 = +1, b04 3→4 = −1
+    // If the implementation incorrectly rebaselined against snap1 (where
+    // b03 was still rank 2, b02 was rank 3), the delta between snap1 and
+    // snap2 movement for b02 would be 0 rather than remaining +1, and b03
+    // would show as +1 in snap1 (it didn't) or 0 in snap2. These asserts
+    // catch that class of bug directly.
+    assert(mv2.get("b03") === 1, `snap2 b03 mv must be +1 (got ${mv2.get("b03")})`);
+    assert(mv2.get("b01") === -1, `snap2 b01 mv must be -1 (got ${mv2.get("b01")})`);
+    assert(mv2.get("b02") === 1, `snap2 b02 mv must be +1 (got ${mv2.get("b02")})`);
+    assert(mv2.get("b04") === -1, `snap2 b04 mv must be -1 (got ${mv2.get("b04")})`);
+    // Cross-snapshot invariant: b02 movement must be +1 in BOTH snapshots.
+    // A rebase-after-first-save bug would make snap2's b02 movement 0
+    // (because relative to snap1 b02 didn't move). Guard that directly.
+    assert(mv1.get("b02") === mv2.get("b02"),
+      `baseline drift: b02 movement changed between snapshots ` +
+      `(snap1=${mv1.get("b02")}, snap2=${mv2.get("b02")})`);
+    // b03 was ranked 2 in W1 AND in snap1 (0 movement in snap1). In snap2
+    // it climbs to rank 1 → must be +1 against W1. A snap1-baselined
+    // implementation would give the same +1 by coincidence, but the b02
+    // invariant above disambiguates the two implementations.
+    assert(mv1.get("b03") === 0 && mv2.get("b03") === 1,
+      "b03 movement must be 0 in snap1 and +1 in snap2 against the W1 baseline");
   }
 })();
+
 
 
 // eslint-disable-next-line no-console
