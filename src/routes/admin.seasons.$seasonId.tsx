@@ -14,6 +14,7 @@ import {
   listPeople,
 } from "@/lib/history-repo.functions";
 import { summarizeLanePairs } from "@/lib/season-history";
+import { HistoricalDataSection } from "@/components/admin/HistoricalDataSection";
 import { Loader2, Save, Star, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/seasons/$seasonId")({
