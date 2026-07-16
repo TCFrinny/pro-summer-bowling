@@ -154,6 +154,62 @@ export function aggregateCareerTotals(rows: readonly CareerSeasonRow[]): CareerT
   };
 }
 
+/** Fold historical career contributions (from `historical_season_snapshots`
+ *  or summary-only records) into the primary CareerSeasonRow list.
+ *  Deduplication key = `${seasonId}::${role}`. Preference order:
+ *   1. Existing row with hasGameData
+ *   2. Historical row with hasGameData
+ *   3. Existing row without game data
+ *   4. Historical row without game data
+ *  This ensures the current-season snapshot path (2026) always wins and
+ *  archived historical rows only fill gaps. */
+export function mergeHistoricalIntoCareer(
+  primary: readonly CareerSeasonRow[],
+  historical: ReadonlyArray<{
+    seasonId: string; seasonLabel: string; role: SeasonRole;
+    displayName: string; bowlerNumber: string | null;
+    startingAverage: number | null; handicap: number | null;
+    games: number | null; scratchPinfall: number | null; average: number | null;
+    highGame: number | null; highSet: number | null;
+    points: number | null; finalFinish: number | null;
+    isChampion: boolean; hasGameData: boolean;
+    source: "historical_snapshot" | "historical_summary";
+  }>,
+): CareerSeasonRow[] {
+  const key = (r: { seasonId: string; role: SeasonRole }) => `${r.seasonId}::${r.role}`;
+  const score = (hasData: boolean, kind: "primary" | "historical") =>
+    (hasData ? 2 : 0) + (kind === "primary" ? 1 : 0);
+  const map = new Map<string, { row: CareerSeasonRow; score: number }>();
+  for (const r of primary) {
+    map.set(key(r), { row: r, score: score(!!r.hasGameData, "primary") });
+  }
+  for (const h of historical) {
+    const k = key(h);
+    const row: CareerSeasonRow = {
+      seasonId: h.seasonId,
+      seasonLabel: h.seasonLabel,
+      role: h.role,
+      seasonalName: h.displayName,
+      bowlerNumber: h.bowlerNumber,
+      startingAverage: h.startingAverage,
+      handicap: h.handicap,
+      hasGameData: h.hasGameData,
+      finalFinish: h.finalFinish,
+      games: h.games,
+      scratchPinfall: h.scratchPinfall,
+      average: h.average,
+      highGame: h.highGame,
+      highSet: h.highSet,
+      points: h.points,
+      isChampion: h.isChampion,
+    };
+    const s = score(h.hasGameData, "historical");
+    const prev = map.get(k);
+    if (!prev || s > prev.score) map.set(k, { row, score: s });
+  }
+  return Array.from(map.values()).map((v) => v.row);
+}
+
 // ---------------- Snapshot backward-compat parse ----------------
 
 export function parseSnapshotBackwardCompat(value: unknown): Record<string, unknown> | null {

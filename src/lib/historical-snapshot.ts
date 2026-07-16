@@ -35,7 +35,14 @@ export interface HistoricalMatch {
   absentA: boolean; absentB: boolean;
   entryAverageA: number; entryAverageB: number;
   handicapA: number; handicapB: number;
-  scratchGamesA: [number, number, number] | null; // null → summary-only (never occurs at match level, kept for future)
+  /** Explicit availability flags. Distinct from `absent`: a side may be
+   *  absent WITH scores (scores entered by admin so standings credit
+   *  works) or bowled with a legitimate zero. Snapshot readers MUST use
+   *  these flags to decide whether to display game/pinfall data — do not
+   *  fall back on truthiness checks like `scratchTotal > 0`. */
+  hasGameDataA: boolean;
+  hasGameDataB: boolean;
+  scratchGamesA: [number, number, number] | null; // null iff !hasGameDataA
   scratchGamesB: [number, number, number] | null;
   handicapGamesA: [number, number, number];
   handicapGamesB: [number, number, number];
