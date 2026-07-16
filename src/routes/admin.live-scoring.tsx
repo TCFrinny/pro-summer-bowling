@@ -53,6 +53,10 @@ interface RowDraft {
     b: [string, string, string];
   };
   mask: [boolean, boolean, boolean];
+  priorScores: {
+    a: [number | null, number | null, number | null];
+    b: [number | null, number | null, number | null];
+  };
 }
 
 function toNum(s: string): number | null {
@@ -86,11 +90,22 @@ function AdminLiveScoringPage() {
       const mask = live
         ? pairCompletedMask(live)
         : ([false, false, false] as [boolean, boolean, boolean]);
+      // Prefill sub Starting Average from the FROZEN live row entry average
+      // when the same substitute is still selected. Blank otherwise so a
+      // fresh sub selection uses the pool default.
       const sideA: SideDraft = live
-        ? { status: live.side_a.status, subId: live.side_a.status === "substitute" ? (live.side_a.actualId ?? "") : "", subStartAvg: "" }
+        ? {
+            status: live.side_a.status,
+            subId: live.side_a.status === "substitute" ? (live.side_a.actualId ?? "") : "",
+            subStartAvg: live.side_a.status === "substitute" ? String(live.side_a.entryAverage) : "",
+          }
         : { status: "rostered", subId: "", subStartAvg: "" };
       const sideB: SideDraft = live
-        ? { status: live.side_b.status, subId: live.side_b.status === "substitute" ? (live.side_b.actualId ?? "") : "", subStartAvg: "" }
+        ? {
+            status: live.side_b.status,
+            subId: live.side_b.status === "substitute" ? (live.side_b.actualId ?? "") : "",
+            subStartAvg: live.side_b.status === "substitute" ? String(live.side_b.entryAverage) : "",
+          }
         : { status: "rostered", subId: "", subStartAvg: "" };
       return {
         slotId: s.id,
@@ -113,14 +128,87 @@ function AdminLiveScoringPage() {
           ],
         },
         mask,
+        // Track prior saved scores so we can flag overwrites at save time.
+        priorScores: {
+          a: [
+            live?.a_game1 ?? null,
+            live?.a_game2 ?? null,
+            live?.a_game3 ?? null,
+          ],
+          b: [
+            live?.b_game1 ?? null,
+            live?.b_game2 ?? null,
+            live?.b_game3 ?? null,
+          ],
+        },
       };
     });
     setRows(drafts);
   }, [q.data]);
 
+  // Row-level validation: for a given game index, both scores must be
+  // valid integers 0..300 OR both blank. Also flag identity changes
+  // vs the frozen prior side (any game already saved → confirmation).
+  const rowValidation = useMemo(() => {
+    const map = new Map<string, { g1: string | null; g2: string | null; g3: string | null; anyInvalid: boolean }>();
+    if (!rows) return map;
+    for (const r of rows) {
+      const games: (string | null)[] = [null, null, null];
+      for (const gi of [0, 1, 2] as const) {
+        const aRaw = r.scores.a[gi].trim();
+        const bRaw = r.scores.b[gi].trim();
+        const aVal = aRaw === "" ? null : toNum(r.scores.a[gi]);
+        const bVal = bRaw === "" ? null : toNum(r.scores.b[gi]);
+        const aFilled = aRaw !== "";
+        const bFilled = bRaw !== "";
+        if (aFilled !== bFilled) {
+          games[gi] = "Both sides must be scored or both blank";
+        } else if (aFilled && (aVal === null || bVal === null)) {
+          games[gi] = "Scores must be integers 0–300";
+        }
+      }
+      map.set(r.slotId, {
+        g1: games[0], g2: games[1], g3: games[2],
+        anyInvalid: games.some((v) => v != null),
+      });
+    }
+    return map;
+  }, [rows]);
+
+  const gameHasInvalid = (game: 1 | 2 | 3): boolean => {
+    if (!rows) return true;
+    for (const r of rows) {
+      if (r.hasFullResult) continue;
+      const v = rowValidation.get(r.slotId);
+      if (!v) continue;
+      if ((game === 1 && v.g1) || (game === 2 && v.g2) || (game === 3 && v.g3)) return true;
+    }
+    return false;
+  };
+
   const saveMut = useMutation({
     mutationFn: async (game: 1 | 2 | 3) => {
       if (!rows) throw new Error("Not loaded");
+      // Collect overwrites for explicit confirmation.
+      const overwrites: string[] = [];
+      for (const r of rows) {
+        if (r.hasFullResult) continue;
+        const gi = game - 1;
+        const priorA = r.priorScores.a[gi];
+        const priorB = r.priorScores.b[gi];
+        const nowA = toNum(r.scores.a[gi]);
+        const nowB = toNum(r.scores.b[gi]);
+        const hadPair = priorA != null && priorB != null;
+        const hasNewPair = nowA != null && nowB != null;
+        const changed = hasNewPair && hadPair && (priorA !== nowA || priorB !== nowB);
+        if (changed) overwrites.push(r.scheduledNameA + " vs " + r.scheduledNameB);
+      }
+      if (overwrites.length > 0) {
+        const ok = typeof window !== "undefined" && window.confirm(
+          `Overwrite existing Game ${game} score(s) for:\n  • ${overwrites.join("\n  • ")}\n\nContinue?`,
+        );
+        if (!ok) throw new Error("Overwrite cancelled");
+      }
       const matches = rows
         .filter((r) => !r.hasFullResult)
         .map((r) => {
@@ -150,9 +238,15 @@ function AdminLiveScoringPage() {
             scoreB: b,
           };
         })
-        // Only send matches where at least one side has a score for this game
-        // (avoids clobbering with nulls for untouched rows).
-        .filter((m) => m.scoreA != null || m.scoreB != null);
+        // A row is only submittable when BOTH sides have valid scores.
+        // Skip untouched rows AND reject one-sided rows outright.
+        .filter((m) => {
+          if (m.scoreA == null && m.scoreB == null) return false;
+          if (m.scoreA == null || m.scoreB == null) {
+            throw new Error("A matchup has only one side scored — enter both or clear both");
+          }
+          return true;
+        });
       if (matches.length === 0) throw new Error("No scores entered for this game");
       return save({ data: { gameNumber: game, matches } });
     },
@@ -241,23 +335,46 @@ function AdminLiveScoringPage() {
         </div>
       )}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <div>
-          {summary.awarded}/{summary.total} points awarded ({summary.pending} pending)
+        <div className="space-y-0.5">
+          <div>{summary.awarded}/{summary.total} points awarded ({summary.pending} pending)</div>
+          <div className="text-[11px]">
+            {[1, 2, 3].map((g) => {
+              let done = 0, total = 0;
+              for (const r of (rows ?? [])) {
+                if (r.hasFullResult) continue;
+                total += 1;
+                if (r.mask[g - 1]) done += 1;
+              }
+              return (
+                <span key={g} className="mr-3">
+                  {done}/{total} Game {g} matchups saved
+                </span>
+              );
+            })}
+          </div>
+          <div className="text-[11px] text-amber-600">
+            Absent matchups must be entered via normal Results / manual override.
+          </div>
         </div>
         <div className="flex gap-2">
-          {[1, 2, 3].map((g) => (
-            <button
-              key={g}
-              type="button"
-              onClick={() => saveMut.mutate(g as 1 | 2 | 3)}
-              disabled={saveMut.isPending || !rows}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 hover:bg-accent disabled:opacity-60"
-            >
-              <Save className="h-3.5 w-3.5" /> Save Game {g}
-            </button>
-          ))}
+          {[1, 2, 3].map((g) => {
+            const invalid = gameHasInvalid(g as 1 | 2 | 3);
+            return (
+              <button
+                key={g}
+                type="button"
+                onClick={() => saveMut.mutate(g as 1 | 2 | 3)}
+                disabled={saveMut.isPending || !rows || invalid}
+                title={invalid ? "Fix validation errors below before saving" : ""}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 hover:bg-accent disabled:opacity-60"
+              >
+                <Save className="h-3.5 w-3.5" /> Save Game {g}
+              </button>
+            );
+          })}
         </div>
       </div>
+
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
@@ -329,7 +446,19 @@ function AdminLiveScoringPage() {
                       <AlertTriangle className="h-3.5 w-3.5" /> Full result exists
                     </span>
                   ) : (
-                    liveStatusLabel(r.mask)
+                    <div>
+                      <div>{liveStatusLabel(r.mask)}</div>
+                      {(() => {
+                        const v = rowValidation.get(r.slotId);
+                        const msgs = [v?.g1, v?.g2, v?.g3].filter(Boolean) as string[];
+                        if (msgs.length === 0) return null;
+                        return (
+                          <div className="mt-1 text-[11px] text-destructive">
+                            {[...new Set(msgs)].join(" · ")}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   )}
                 </td>
                 <td className="p-2 align-top">

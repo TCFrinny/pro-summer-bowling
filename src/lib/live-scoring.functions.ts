@@ -19,7 +19,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
 import { rebuildAndSaveSnapshot } from "@/lib/snapshot-builder.server";
 import { resolveEffectiveScoring } from "@/lib/substitute-handicap";
-import { buildLiveSideJson, type LiveMatchRow, type LiveSideJson } from "@/lib/live-scoring";
+import { buildLiveSideJson, pairCompletedMask, type LiveMatchRow, type LiveSideJson } from "@/lib/live-scoring";
 
 type Sb = SupabaseClient<Database>;
 type Ctx = { supabase: Sb; userId: string };
@@ -244,11 +244,30 @@ export const saveLiveGameBatch = createServerFn({ method: "POST" })
         });
       };
 
-      // Preserve existing sides + scores when identity unchanged; otherwise
-      // rebuild side JSON (frozen at save time).
+      // Freeze participation identity at first save. If a prior live row
+      // exists and the requested side matches (same status + same actual id
+      // for substitutes), reuse the frozen JSON exactly so later Game N
+      // saves cannot silently recalc entry averages against a shifted pool.
       const prior = liveById.get(m.slotId);
-      const sideA = resolveSide(rA, m.sideA, "A");
-      const sideB = resolveSide(rB, m.sideB, "B");
+      const anyGameSaved =
+        prior != null &&
+        (prior.a_game1 != null || prior.a_game2 != null || prior.a_game3 != null ||
+         prior.b_game1 != null || prior.b_game2 != null || prior.b_game3 != null);
+      const sameIdentity = (
+        priorSide: LiveSideJson | undefined,
+        sd: z.infer<typeof sideDraftSchema>,
+      ): boolean => {
+        if (!priorSide) return false;
+        if (priorSide.status !== sd.status) return false;
+        if (sd.status === "substitute") return (priorSide.actualId ?? "") === (sd.substituteId ?? "");
+        return true;
+      };
+      const sideA = anyGameSaved && sameIdentity(prior?.side_a, m.sideA)
+        ? (prior!.side_a as LiveSideJson)
+        : resolveSide(rA, m.sideA, "A");
+      const sideB = anyGameSaved && sameIdentity(prior?.side_b, m.sideB)
+        ? (prior!.side_b as LiveSideJson)
+        : resolveSide(rB, m.sideB, "B");
 
       const gameCol = (side: "A" | "B", n: 1 | 2 | 3) =>
         (side === "A" ? "a_game" : "b_game") + String(n);
@@ -274,10 +293,48 @@ export const saveLiveGameBatch = createServerFn({ method: "POST" })
       .upsert(upserts as unknown as never[], { onConflict: "schedule_slot_id" });
     if (up.error) throw new Error(`live save failed: ${up.error.message}`);
 
+    // Recompute week `completed` flag: every scheduled slot must be either
+    // a full result or a score-only live row with ALL 3 pairs completed.
+    await recomputeWeekCompleted(context.supabase, week.id);
+
     // One snapshot rebuild for the whole batch.
     await rebuildAndSaveSnapshot(context.supabase, seasonId);
     return { ok: true, saved: upserts.length };
   });
+
+/** Recompute the `weeks.completed` flag for the given week id, considering
+ *  both full match_results AND fully-completed live_match_results. */
+async function recomputeWeekCompleted(sb: Sb, weekId: string): Promise<void> {
+  const wkSlots = await sb.from("schedule_slots").select("id").eq("week_id", weekId);
+  if (wkSlots.error) throw new Error(wkSlots.error.message);
+  const slotIds = (wkSlots.data ?? []).map((s) => s.id);
+  if (slotIds.length === 0) {
+    await sb.from("weeks").update({ completed: false }).eq("id", weekId);
+    return;
+  }
+  const full = await sb.from("match_results")
+    .select("schedule_slot_id").in("schedule_slot_id", slotIds);
+  if (full.error) throw new Error(full.error.message);
+  const fullSet = new Set((full.data ?? []).map((r) => r.schedule_slot_id));
+  const remaining = slotIds.filter((id) => !fullSet.has(id));
+
+  let completedLive = 0;
+  if (remaining.length > 0) {
+    const live = await (sb as unknown as AnySb)
+      .from("live_match_results")
+      .select("schedule_slot_id, a_game1, a_game2, a_game3, b_game1, b_game2, b_game3")
+      .in("schedule_slot_id", remaining);
+    if (!live.error) {
+      for (const row of (live.data ?? []) as LiveMatchRow[]) {
+        const mask = pairCompletedMask(row);
+        if (mask[0] && mask[1] && mask[2]) completedLive += 1;
+      }
+    }
+    // 42P01 → treat live table as empty; nothing else must fail hard.
+  }
+  const completed = (fullSet.size + completedLive) === slotIds.length;
+  await sb.from("weeks").update({ completed }).eq("id", weekId);
+}
 
 /** Delete a live row (admin recovery). Idempotent. */
 export const deleteLiveMatch = createServerFn({ method: "POST" })

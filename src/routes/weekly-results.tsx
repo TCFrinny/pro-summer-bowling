@@ -106,7 +106,7 @@ function MatchCard({ m }: { m: Match }) {
           <span>Lanes {m.lanePair}</span>
           <span>Week {m.week}</span>
           <span>
-            Final{" "}
+            {r.scoreOnly ? (r.completedGameCount === 3 ? "Final · scores only" : `Live · ${r.completedGameCount ?? 0}/3 games`) : "Final"}{" "}
             <span className="font-display text-sm text-gold">
               {formatPoints(getAwardedPoints(r).pointsA)}–{formatPoints(getAwardedPoints(r).pointsB)}
             </span>
@@ -143,6 +143,8 @@ function MatchCard({ m }: { m: Match }) {
             >
               <ThreeGameLinescore linescore={r.linescoreA} />
             </ExpandRow>
+          ) : r.scoreOnly && r.participationA.status !== "absent" ? (
+            <ScoreOnlyPlaceholder name={a.name} />
           ) : (
             <AbsentPlaceholder name={a.name} />
           )}
@@ -154,6 +156,8 @@ function MatchCard({ m }: { m: Match }) {
             >
               <ThreeGameLinescore linescore={r.linescoreB} />
             </ExpandRow>
+          ) : r.scoreOnly && r.participationB.status !== "absent" ? (
+            <ScoreOnlyPlaceholder name={b.name} />
           ) : (
             <AbsentPlaceholder name={b.name} />
           )}
@@ -214,6 +218,14 @@ function AbsentPlaceholder({ name }: { name: string }) {
   );
 }
 
+function ScoreOnlyPlaceholder({ name }: { name: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-primary/50 px-3 py-2 text-[11px] uppercase tracking-widest text-primary">
+      {name} — Full linescore unavailable (score-only entry)
+    </div>
+  );
+}
+
 function SummaryRow({
   side,
   m,
@@ -241,6 +253,7 @@ function SummaryRow({
   const winner = r.winner === side;
   const setWinner = sp === 1;
   const setTied = sp === 0.5;
+  const mask = r.pairCompleted ?? [true, true, true];
 
   return (
     <tr className={cn(winner && "bg-primary/10")} data-testid={`wr-row-${m.id}-${side}`}>
@@ -277,7 +290,7 @@ function SummaryRow({
           <td className="py-1.5 text-right">{hdcp}</td>
           {games.map((g, i) => (
             <td key={i} className="py-1.5 text-right" data-testid={`wr-row-${m.id}-${side}-g${i + 1}`}>
-              <div className="font-semibold">{g}</div>
+              <div className="font-semibold">{mask[i] ? g : "—"}</div>
               <div
                 className={cn(
                   "mt-0.5 text-[9px] font-semibold uppercase",
@@ -288,7 +301,7 @@ function SummaryRow({
                       : "text-muted-foreground",
                 )}
               >
-                +{awards[i]}
+                {mask[i] ? `+${awards[i]}` : "pending"}
               </div>
             </td>
           ))}

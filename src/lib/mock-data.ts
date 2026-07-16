@@ -647,6 +647,13 @@ export interface BowlerHistoryRow {
   /** True when the scheduled bowler was Absent for the week. Score fields
    *  and linescore are null / zero; W-L and override note still populate. */
   absent: boolean;
+  /** True when this row was fed by final-week live scoring (score-only,
+   *  no frame linescore). `scores` reflect entered games (0 for pending
+   *  pairs). Frame-derived stats stay zero. `completedGameCount` tracks
+   *  how many pairs both sides scored. */
+  scoreOnly?: boolean;
+  completedGameCount?: 0 | 1 | 2 | 3;
+  pairCompleted?: [boolean, boolean, boolean];
   scores: [number, number, number];
   handicap: number;
   handicapGames: [number, number, number];
@@ -1069,27 +1076,34 @@ export function buildSnapshot(input: {
           res.winner === "T" ? "T" : (isA ? res.winner === "A" : res.winner === "B") ? "W" : "L";
 
         if (participation.status === "absent" || !ls) {
-          // Absent history row — visible in profile. Personal linescore
-          // stays null and stats/high-game do not accumulate, but if the
-          // admin entered absent scratch scores we surface them so the
-          // profile and match display can show the values that fed
-          // handicap pinfall / standings.
+          // Two variants share this branch:
+          //   1) Absent — scheduled bowler did not play. `absent: true`.
+          //   2) Score-only (live final week) — participation was rostered/sub
+          //      but no frame linescore exists yet. `scoreOnly: true`.
+          const isScoreOnly = res.scoreOnly === true && participation.status !== "absent";
           const absentScores = participation.absentScores;
           const rowScores: [number, number, number] =
-            absentScores ?? [0, 0, 0];
+            isScoreOnly ? scores : (absentScores ?? [0, 0, 0]);
           const rowScratchTotal = isA ? res.scratchTotalA : res.scratchTotalB;
           const rowHandicapTotal = isA ? res.handicapTotalA : res.handicapTotalB;
           const rowHandicapGames = isA ? res.handicapGamesA : res.handicapGamesB;
           history[selfId].push({
             week: w.week, matchId: m.id, lanePair: m.lanePair,
             opponent: oppFrozenName, opponentId: oppId,
-            actualBowler: "Absent", isSub: false, absent: true,
+            actualBowler: isScoreOnly
+              ? (isSub ? (participation.actualName || "Substitute") : (isA ? res.scheduledNameA : res.scheduledNameB))
+              : "Absent",
+            isSub: isScoreOnly ? isSub : false,
+            absent: !isScoreOnly,
+            scoreOnly: isScoreOnly || undefined,
+            completedGameCount: isScoreOnly ? res.completedGameCount : undefined,
+            pairCompleted: isScoreOnly ? res.pairCompleted : undefined,
             scores: rowScores, handicap: hdcp,
             handicapGames: rowHandicapGames,
             scratchTotal: rowScratchTotal, handicapTotal: rowHandicapTotal,
             opponentScratchTotal: isA ? res.scratchTotalB : res.scratchTotalA,
             opponentHandicapTotal: isA ? res.handicapTotalB : res.handicapTotalA,
-            gameAwards: [0, 0, 0], gamePoints: 0, setPoint: 0,
+            gameAwards: awards, gamePoints: gp, setPoint: sp,
             totalPoints: tp, pointsLost: lostPts,
             pointsOverridden: awarded.overridden, overrideReason: awarded.reason,
             poaSet: 0, poaBestGame: 0,
