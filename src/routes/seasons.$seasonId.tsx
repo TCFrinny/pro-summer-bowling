@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
-import { getSeasonDetail } from "@/lib/history-repo.functions";
-import { summarizeLanePairs } from "@/lib/season-history";
+import { getPublicSeasonDetail, type SeasonLanePairRow } from "@/lib/history-repo.functions";
+import { summarizeLanePairs, type SeasonRecord } from "@/lib/season-history";
 import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/seasons/$seasonId")({
@@ -18,15 +18,27 @@ export const Route = createFileRoute("/seasons/$seasonId")({
 function SeasonDetailPage() {
   const { seasonId } = Route.useParams();
   const q = useQuery({
-    queryKey: ["seasons", "detail", seasonId],
-    queryFn: () => getSeasonDetail({ data: { seasonId } }),
+    queryKey: ["seasons", "public", "detail", seasonId],
+    queryFn: () => getPublicSeasonDetail({ data: { seasonId } }),
   });
   return (
     <AppShell>
       {q.isLoading && (
         <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       )}
-      {q.data && !q.data.available && (
+      {q.data && q.data.forbidden && (
+        <>
+          <PageHeader title="Season not available" />
+          <EmptyState
+            title="This season isn't publicly visible"
+            description="Draft and privately archived seasons are not available on the public site."
+          />
+          <div className="mt-4">
+            <Link to="/seasons" className="text-sm underline">Back to seasons</Link>
+          </div>
+        </>
+      )}
+      {q.data && !q.data.forbidden && (!q.data.available || !q.data.season) && (
         <>
           <PageHeader title="Season not available" />
           <EmptyState
@@ -58,31 +70,18 @@ function SeasonDetailBody({
   substituteCount,
   champion,
 }: {
-  season: NonNullable<Awaited<ReturnType<typeof getSeasonDetail>>["season"]>;
-  lanePairs: Awaited<ReturnType<typeof getSeasonDetail>>["lanePairs"];
+  season: SeasonRecord;
+  lanePairs: SeasonLanePairRow[];
   rosteredCount: number;
   substituteCount: number;
-  champion: Awaited<ReturnType<typeof getSeasonDetail>>["champion"];
+  champion: { id: string; displayName: string } | null;
 }) {
-  const totals = summarizeLanePairs(
-    lanePairs.map((p) => ({
-      label: p.label,
-      displayOrder: p.displayOrder,
-      matchupCapacity: p.matchupCapacity,
-      active: p.active,
-    })),
-  );
+  const totals = summarizeLanePairs(lanePairs);
   return (
     <>
       <PageHeader
         title={season.label}
-        subtitle={
-          season.status === "current"
-            ? "Current season"
-            : season.status === "archived"
-              ? "Archived season"
-              : "Draft season"
-        }
+        subtitle={season.status === "current" ? "Current season" : "Archived season"}
       >
         <Link to="/seasons" className="text-sm underline">All seasons</Link>
       </PageHeader>
@@ -139,7 +138,7 @@ function SeasonDetailBody({
         </div>
       </section>
       <section className="mt-6 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-        Historical results, weekly linescores, and full standings for this season will land in the next phase.
+        Historical results, weekly linescores, and full standings for this season land in the next phase.
       </section>
     </>
   );

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
-import { listSeasons } from "@/lib/history-repo.functions";
+import { listPublicSeasons } from "@/lib/history-repo.functions";
 import { filterPublicSeasons } from "@/lib/season-history";
 import { Loader2 } from "lucide-react";
 
@@ -16,7 +16,9 @@ export const Route = createFileRoute("/seasons")({
 });
 
 function SeasonsPage() {
-  const q = useQuery({ queryKey: ["seasons", "list"], queryFn: () => listSeasons() });
+  // listPublicSeasons already filters draft / archived-private on the SERVER.
+  // filterPublicSeasons here is a defense-in-depth ordering helper only.
+  const q = useQuery({ queryKey: ["seasons", "public", "list"], queryFn: () => listPublicSeasons() });
   return (
     <AppShell>
       <PageHeader title="Seasons" subtitle="Current season, then archived seasons in reverse order." />
@@ -26,16 +28,17 @@ function SeasonsPage() {
       {q.error && (
         <EmptyState title="Couldn't load seasons" description="Please try again in a moment." />
       )}
-      {q.data && !q.data.available && (
+      {q.data && !q.data.available && q.data.seasons.length === 0 && (
         <EmptyState
           title="Historical season setup is not available yet"
           description="The multi-season history schema hasn't been applied to the database. Current-season pages continue to work normally."
         />
       )}
-      {q.data && q.data.available && (
+      {q.data && q.data.seasons.length > 0 && (
         <SeasonsList
           seasons={filterPublicSeasons(q.data.seasons)}
           bowlerCounts={q.data.bowlerCounts}
+          legacyOnly={!q.data.available}
         />
       )}
     </AppShell>
@@ -45,9 +48,11 @@ function SeasonsPage() {
 function SeasonsList({
   seasons,
   bowlerCounts,
+  legacyOnly,
 }: {
   seasons: ReturnType<typeof filterPublicSeasons>;
   bowlerCounts: Record<string, number>;
+  legacyOnly: boolean;
 }) {
   if (seasons.length === 0) {
     return <EmptyState title="No public seasons yet" description="Archived seasons will appear here once published." />;
@@ -56,6 +61,11 @@ function SeasonsList({
   const archived = current ? seasons.slice(1) : seasons;
   return (
     <div className="space-y-6">
+      {legacyOnly && (
+        <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+          Historical season history isn't fully configured yet — only the current season is shown. Archived season detail becomes available once the multi-season migration is applied.
+        </div>
+      )}
       {current && (
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Current</h2>
@@ -77,7 +87,6 @@ function SeasonsList({
     </div>
   );
 }
-
 
 function SeasonCard({
   season,
