@@ -556,11 +556,13 @@ const ADMIN_PEOPLE_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.pe
 
   // Removal must delete only the alias row.
   const rmIdx = HISTORY_SRC.indexOf("export const removePersonAlias");
-  const rmChunk = HISTORY_SRC.slice(rmIdx, rmIdx + 1500);
+  const rmEnd = HISTORY_SRC.indexOf("// ----", rmIdx + 10);
+  const rmChunk = HISTORY_SRC.slice(rmIdx, rmEnd > 0 ? rmEnd : rmIdx + 800);
   assert(/\.delete\(\)\.eq\("id", data\.aliasId\)/.test(rmChunk),
     "removePersonAlias must delete only the specified alias row");
   assert(!/rostered_bowlers|substitutes|match_results/.test(rmChunk),
     "removePersonAlias must not touch any seasonal record");
+
 })();
 
 (function phaseCAdminPeopleUI() {
