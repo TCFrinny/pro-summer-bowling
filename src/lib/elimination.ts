@@ -477,16 +477,26 @@ function tryFlow(
   strict: boolean,
 ): FlowResult {
   const tCurr = prep.currUnits.get(target) ?? 0;
-  const tRem = witness.perWeek.reduce(
-    (acc, w) => acc + (w.pairs.some((p) => p[0] === target || p[1] === target) ? 1 : 0),
-    0,
-  );
-  const tFinal = tCurr + 14 * tRem;
 
-  const nonTargetPairs: PairT[] = [];
+  // Per-pair unit capacity: fixed live/published pair uses stored units;
+  // solver-chosen pair (unpublished week) uses full 14.
+  const unitsFor = (week: number, a: BowlerId, b: BowlerId): number => {
+    const k = pairUnitKey(week, a, b);
+    const v = prep.pairUnits.get(k);
+    return v ?? 14;
+  };
+
+  let tRemUnits = 0;
   for (const w of witness.perWeek)
     for (const p of w.pairs)
-      if (p[0] !== target && p[1] !== target) nonTargetPairs.push(p);
+      if (p[0] === target || p[1] === target) tRemUnits += unitsFor(w.week, p[0], p[1]);
+  const tFinal = tCurr + tRemUnits;
+
+  const nonTargetPairs: Array<{ pair: PairT; units: number }> = [];
+  for (const w of witness.perWeek)
+    for (const p of w.pairs)
+      if (p[0] !== target && p[1] !== target)
+        nonTargetPairs.push({ pair: p, units: unitsFor(w.week, p[0], p[1]) });
 
   const M = nonTargetPairs.length;
   const opponentIds = prep.active.map((b) => b.id).filter((id) => id !== target);
@@ -501,18 +511,15 @@ function tryFlow(
   const nNodes = T + 1;
 
   const flow = new MaxFlow(nNodes);
-  // Track match->opponent edge indices for witness extraction.
-  const matchEdges: Array<[number, number, BowlerId, BowlerId]> = [];
 
+  let demand = 0;
   for (let i = 0; i < M; i++) {
-    flow.addEdge(S, matchNode(i), 14);
-    const [a, b] = nonTargetPairs[i];
-    const ea = flow.g[matchNode(i)].length;
-    flow.addEdge(matchNode(i), oppNode(oppIdx.get(a)!), 14);
-    const eb = flow.g[matchNode(i)].length;
-    flow.addEdge(matchNode(i), oppNode(oppIdx.get(b)!), 14);
-    matchEdges.push([ea, eb, a, b]);
-    void matchEdges;
+    const { pair: [a, b], units } = nonTargetPairs[i];
+    if (units <= 0) continue;
+    demand += units;
+    flow.addEdge(S, matchNode(i), units);
+    flow.addEdge(matchNode(i), oppNode(oppIdx.get(a)!), units);
+    flow.addEdge(matchNode(i), oppNode(oppIdx.get(b)!), units);
   }
   for (let j = 0; j < K; j++) {
     const oCurr = prep.currUnits.get(opponentIds[j]) ?? 0;
@@ -520,11 +527,9 @@ function tryFlow(
     flow.addEdge(oppNode(j), T, Math.max(0, allowance));
   }
 
-  const demand = 14 * M;
   const maxflow = flow.run(S, T);
   if (maxflow !== demand) return { feasible: false };
 
-  // Extract witness: per-opponent flow = 14 - residual on opp->T edge.
   const finals = new Map<BowlerId, number>();
   for (const b of prep.active) finals.set(b.id, prep.currUnits.get(b.id) ?? 0);
   finals.set(target, tFinal);
