@@ -978,8 +978,20 @@ async function loadParticipants(sb: Sb, seasonId: string): Promise<HistoricalPar
     (sb.from as unknown as LooseFrom)("substitutes")
       .select("id,name,bowler_number,starting_average,handicap,person_id").eq("season_id", seasonId),
   ]);
+  // FAIL CLOSED: never silently return an empty roster on a DB error and
+  // let the caller overwrite a good snapshot with empty data. Missing
+  // multi-season migration remains the one clear-cut cause of a missing
+  // table — propagate that as a targeted error.
+  if (rb.error) {
+    if (isMissingTable(rb.error.code)) throw new Error("Historical data requires the multi-season migration.");
+    throw new Error(`rostered_bowlers load failed: ${rb.error.message}`);
+  }
+  if (sub.error) {
+    if (isMissingTable(sub.error.code)) throw new Error("Historical data requires the multi-season migration.");
+    throw new Error(`substitutes load failed: ${sub.error.message}`);
+  }
   const out: HistoricalParticipantMeta[] = [];
-  for (const r of ((rb.error ? [] : rb.data) as Array<Record<string, unknown>>) ?? []) {
+  for (const r of (rb.data as Array<Record<string, unknown>>) ?? []) {
     out.push({
       ref: String(r.id), personId: (r.person_id as string | null) ?? null,
       displayName: String(r.name ?? ""),
@@ -989,7 +1001,7 @@ async function loadParticipants(sb: Sb, seasonId: string): Promise<HistoricalPar
       role: "rostered",
     });
   }
-  for (const r of ((sub.error ? [] : sub.data) as Array<Record<string, unknown>>) ?? []) {
+  for (const r of (sub.data as Array<Record<string, unknown>>) ?? []) {
     out.push({
       ref: String(r.id), personId: (r.person_id as string | null) ?? null,
       displayName: String(r.name ?? ""),
