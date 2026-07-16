@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { compareLanePairSlotCamel } from "@/lib/lane-pair-order";
 
 export const Route = createFileRoute("/admin/results")({
   head: () => ({
