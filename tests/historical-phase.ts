@@ -44,12 +44,12 @@ truthy(!supportsPerGameScores("summary_only"), "no per-game scores in summary-on
 {
   const r = computeHistoricalMatch({
     pointSystem: 7,
-    sideA: { gameScores: [180, 170, 190], handicap: 20, participation: { status: "rostered" } },
+    sideA: { gameScores: [180, 175, 190], handicap: 20, participation: { status: "rostered" } },
     sideB: { gameScores: [150, 160, 170], handicap: 30, participation: { status: "rostered" } },
   });
-  // A: 200,190,210 -> 600. B: 180,190,200 -> 570. A wins all 3 + set.
-  eq(r.a.finalPoints ?? r.finalPointsA, 7, "7-point A wins all + set = 7");
-  eq(r.b.finalPoints ?? r.finalPointsB, 0, "7-point B loses all = 0");
+  // A hcp: 200,195,210 vs B hcp: 180,190,200 → A sweeps + set = 7.
+  eq(r.finalPointsA, 7, "7-point A wins all + set = 7");
+  eq(r.finalPointsB, 0, "7-point B loses all = 0");
   eq(r.winner, "A", "winner A");
 }
 
