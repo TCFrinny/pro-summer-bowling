@@ -324,23 +324,29 @@ export const adminListHistoricalSchedule = createServerFn({ method: "GET" })
       if (isMissingTable(q.error.code)) return { available: false, slots: [] as HistoricalSlotRow[] };
       throw new Error(q.error.message);
     }
-    const slots = (q.data ?? []).map(mapSlot);
-    slots.sort(compareLanePairSlotSnake as unknown as (a: HistoricalSlotRow, b: HistoricalSlotRow) => number);
+    const slots = ((q.data as Array<Record<string, unknown>>) ?? []).map(mapSlot);
+    slots.sort(compareLanePairSlotCamel);
     return { available: true, slots };
   });
+
+/** Loader that returns every slot in a season, grouped by week — public
+ *  archived pages reuse this via a filtered snapshot. */
 
 const slotSchema = z.object({
   id: z.string().uuid().optional(),
   seasonId: z.string().uuid(),
   weekId: z.string().uuid(),
   lanePair: z.string().min(1).max(20),
-  slot: z.number().int().min(1).max(32),
+  slot: z.number().int().min(1).max(64),
   bowlerARef: z.string().min(1),
   bowlerBRef: z.string().min(1),
   nameA: z.string().max(120).nullable(),
   nameB: z.string().max(120).nullable(),
   bowlerNumberA: z.string().max(10).nullable(),
   bowlerNumberB: z.string().max(10).nullable(),
+  /** Explicit acknowledgment for editing / adding within a published
+   *  week. Blocks accidental changes to already-published data. */
+  allowPublished: z.boolean().optional(),
 });
 
 export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST" })
