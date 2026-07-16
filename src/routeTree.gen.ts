@@ -26,12 +26,12 @@ import { Route as SeasonsSeasonIdRouteImport } from './routes/seasons.$seasonId'
 import { Route as PeoplePersonIdRouteImport } from './routes/people.$personId'
 import { Route as LeaderboardsAdvancedRouteImport } from './routes/leaderboards.advanced'
 import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
-import { Route as AdminSeasonsRouteImport } from './routes/admin.seasons'
 import { Route as AdminScheduleRouteImport } from './routes/admin.schedule'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
 import { Route as AdminPeopleRouteImport } from './routes/admin.people'
 import { Route as AdminLiveScoringRouteImport } from './routes/admin.live-scoring'
 import { Route as AdminBowlersRouteImport } from './routes/admin.bowlers'
+import { Route as AdminSeasonsIndexRouteImport } from './routes/admin.seasons.index'
 import { Route as BowlersSubSubstituteIdRouteImport } from './routes/bowlers.sub.$substituteId'
 import { Route as AdminSeasonsSeasonIdRouteImport } from './routes/admin.seasons.$seasonId'
 
@@ -120,11 +120,6 @@ const BowlersBowlerIdRoute = BowlersBowlerIdRouteImport.update({
   path: '/$bowlerId',
   getParentRoute: () => BowlersRoute,
 } as any)
-const AdminSeasonsRoute = AdminSeasonsRouteImport.update({
-  id: '/seasons',
-  path: '/seasons',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminScheduleRoute = AdminScheduleRouteImport.update({
   id: '/schedule',
   path: '/schedule',
@@ -150,15 +145,20 @@ const AdminBowlersRoute = AdminBowlersRouteImport.update({
   path: '/bowlers',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminSeasonsIndexRoute = AdminSeasonsIndexRouteImport.update({
+  id: '/seasons/',
+  path: '/seasons/',
+  getParentRoute: () => AdminRoute,
+} as any)
 const BowlersSubSubstituteIdRoute = BowlersSubSubstituteIdRouteImport.update({
   id: '/sub/$substituteId',
   path: '/sub/$substituteId',
   getParentRoute: () => BowlersRoute,
 } as any)
 const AdminSeasonsSeasonIdRoute = AdminSeasonsSeasonIdRouteImport.update({
-  id: '/$seasonId',
-  path: '/$seasonId',
-  getParentRoute: () => AdminSeasonsRoute,
+  id: '/seasons/$seasonId',
+  path: '/seasons/$seasonId',
+  getParentRoute: () => AdminRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -179,7 +179,6 @@ export interface FileRoutesByFullPath {
   '/admin/people': typeof AdminPeopleRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
-  '/admin/seasons': typeof AdminSeasonsRouteWithChildren
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/people/$personId': typeof PeoplePersonIdRoute
@@ -187,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/leaderboards/': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons/': typeof AdminSeasonsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -205,7 +205,6 @@ export interface FileRoutesByTo {
   '/admin/people': typeof AdminPeopleRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
-  '/admin/seasons': typeof AdminSeasonsRouteWithChildren
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/people/$personId': typeof PeoplePersonIdRoute
@@ -213,6 +212,7 @@ export interface FileRoutesByTo {
   '/leaderboards': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons': typeof AdminSeasonsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -233,7 +233,6 @@ export interface FileRoutesById {
   '/admin/people': typeof AdminPeopleRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
-  '/admin/seasons': typeof AdminSeasonsRouteWithChildren
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/people/$personId': typeof PeoplePersonIdRoute
@@ -241,6 +240,7 @@ export interface FileRoutesById {
   '/leaderboards/': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons/': typeof AdminSeasonsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -262,7 +262,6 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/results'
     | '/admin/schedule'
-    | '/admin/seasons'
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/people/$personId'
@@ -270,6 +269,7 @@ export interface FileRouteTypes {
     | '/leaderboards/'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -288,7 +288,6 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/results'
     | '/admin/schedule'
-    | '/admin/seasons'
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/people/$personId'
@@ -296,6 +295,7 @@ export interface FileRouteTypes {
     | '/leaderboards'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons'
   id:
     | '__root__'
     | '/'
@@ -315,7 +315,6 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/results'
     | '/admin/schedule'
-    | '/admin/seasons'
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/people/$personId'
@@ -323,6 +322,7 @@ export interface FileRouteTypes {
     | '/leaderboards/'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -462,13 +462,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BowlersBowlerIdRouteImport
       parentRoute: typeof BowlersRoute
     }
-    '/admin/seasons': {
-      id: '/admin/seasons'
-      path: '/seasons'
-      fullPath: '/admin/seasons'
-      preLoaderRoute: typeof AdminSeasonsRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/schedule': {
       id: '/admin/schedule'
       path: '/schedule'
@@ -504,6 +497,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminBowlersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/seasons/': {
+      id: '/admin/seasons/'
+      path: '/seasons'
+      fullPath: '/admin/seasons/'
+      preLoaderRoute: typeof AdminSeasonsIndexRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/bowlers/sub/$substituteId': {
       id: '/bowlers/sub/$substituteId'
       path: '/sub/$substituteId'
@@ -513,25 +513,13 @@ declare module '@tanstack/react-router' {
     }
     '/admin/seasons/$seasonId': {
       id: '/admin/seasons/$seasonId'
-      path: '/$seasonId'
+      path: '/seasons/$seasonId'
       fullPath: '/admin/seasons/$seasonId'
       preLoaderRoute: typeof AdminSeasonsSeasonIdRouteImport
-      parentRoute: typeof AdminSeasonsRoute
+      parentRoute: typeof AdminRoute
     }
   }
 }
-
-interface AdminSeasonsRouteChildren {
-  AdminSeasonsSeasonIdRoute: typeof AdminSeasonsSeasonIdRoute
-}
-
-const AdminSeasonsRouteChildren: AdminSeasonsRouteChildren = {
-  AdminSeasonsSeasonIdRoute: AdminSeasonsSeasonIdRoute,
-}
-
-const AdminSeasonsRouteWithChildren = AdminSeasonsRoute._addFileChildren(
-  AdminSeasonsRouteChildren,
-)
 
 interface AdminRouteChildren {
   AdminBowlersRoute: typeof AdminBowlersRoute
@@ -539,7 +527,8 @@ interface AdminRouteChildren {
   AdminPeopleRoute: typeof AdminPeopleRoute
   AdminResultsRoute: typeof AdminResultsRoute
   AdminScheduleRoute: typeof AdminScheduleRoute
-  AdminSeasonsRoute: typeof AdminSeasonsRouteWithChildren
+  AdminSeasonsSeasonIdRoute: typeof AdminSeasonsSeasonIdRoute
+  AdminSeasonsIndexRoute: typeof AdminSeasonsIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
@@ -548,7 +537,8 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminPeopleRoute: AdminPeopleRoute,
   AdminResultsRoute: AdminResultsRoute,
   AdminScheduleRoute: AdminScheduleRoute,
-  AdminSeasonsRoute: AdminSeasonsRouteWithChildren,
+  AdminSeasonsSeasonIdRoute: AdminSeasonsSeasonIdRoute,
+  AdminSeasonsIndexRoute: AdminSeasonsIndexRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
@@ -609,13 +599,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

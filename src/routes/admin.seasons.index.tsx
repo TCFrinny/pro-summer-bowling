@@ -5,7 +5,7 @@ import { PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { adminListSeasons, adminUpsertSeason } from "@/lib/history-repo.functions";
 import { Loader2, Plus } from "lucide-react";
 
-export const Route = createFileRoute("/admin/seasons")({
+export const Route = createFileRoute("/admin/seasons/")({
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
   component: AdminSeasonsPage,
 });
