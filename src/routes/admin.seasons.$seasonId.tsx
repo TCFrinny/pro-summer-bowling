@@ -83,6 +83,14 @@ function SeasonEditor() {
           await people.refetch();
         }}
       />
+
+      <HistoricalDataSection
+        seasonId={seasonId}
+        seasonLabel={season.label}
+        isCurrent={season.status === "current"}
+        totalWeeksHint={season.totalWeeks ?? null}
+        lanePairLabels={detail.data.lanePairs.map((p) => p.label)}
+      />
     </>
   );
 }
