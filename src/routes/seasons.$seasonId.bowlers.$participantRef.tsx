@@ -114,9 +114,14 @@ function SeasonBowlerPage() {
             <Stat label="Spare Conv %" value={`${adv.spareConversionPct.toFixed(1)}%`} />
             <Stat label="Pins Lost / G" value={adv.pinsLostPerGame.toFixed(2)} />
             <Stat label="Consistency (σ)" value={adv.consistency.toFixed(2)} />
+            <Stat label="Open Pins Left" value={adv.openPinsLeft} />
+            <Stat label="First 5 (total)" value={adv.first5Total} />
             <Stat label="First 5 / G" value={adv.first5PerGame.toFixed(1)} />
+            <Stat label="Last 5 (total)" value={adv.last5Total} />
             <Stat label="Last 5 / G" value={adv.last5PerGame.toFixed(1)} />
+            <Stat label="Big Opening (total)" value={adv.bigOpeningTotal} />
             <Stat label="Big Opening / G" value={adv.bigOpeningPerGame.toFixed(1)} />
+            <Stat label="Big Finish (total)" value={adv.bigFinishTotal} />
             <Stat label="Big Finish / G" value={adv.bigFinishPerGame.toFixed(1)} />
             <Stat label="Clutch %" value={`${adv.clutchPct.toFixed(1)}% (${adv.clutchMarks}/${adv.clutchOpportunities})`} />
           </div>
