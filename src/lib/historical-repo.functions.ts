@@ -411,40 +411,45 @@ export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST"
     const pairs = await loadLanePairConfig(context.supabase, data.seasonId);
     assertLanePairAndSlot(pairs, data.lanePair, data.slot);
 
-    // Scheduled A/B must be rostered bowlers only. Substitutes may appear
-    // only as ACTUAL participants inside a result.
+    // FAIL CLOSED: roster query throws on error. When inserting, an empty
+    // roster means there is nobody legitimately schedulable — refuse.
     const rosterIds = await loadRosterIds(context.supabase, data.seasonId);
-    if (rosterIds.size > 0) {
-      if (!rosterIds.has(data.bowlerARef)) {
-        throw new Error(`${data.nameA ?? data.bowlerARef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
-      }
-      if (!rosterIds.has(data.bowlerBRef)) {
-        throw new Error(`${data.nameB ?? data.bowlerBRef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
-      }
+    if (!data.id && rosterIds.size === 0) {
+      throw new Error("This season has no rostered bowlers yet — add rostered participants before scheduling.");
+    }
+    if (!rosterIds.has(data.bowlerARef)) {
+      throw new Error(`Bowler A is not a rostered bowler for this season. Substitutes may only appear as an actual participant in results, never as a scheduled bowler.`);
+    }
+    if (!rosterIds.has(data.bowlerBRef)) {
+      throw new Error(`Bowler B is not a rostered bowler for this season.`);
     }
     if (data.bowlerARef === data.bowlerBRef) {
       throw new Error("A bowler cannot face themselves.");
     }
+    // Freeze display names/numbers from the DB — never trust the client.
+    const idA = await loadFrozenIdentity(context.supabase, data.seasonId, data.bowlerARef, "rostered");
+    const idB = await loadFrozenIdentity(context.supabase, data.seasonId, data.bowlerBRef, "rostered");
+    if (!idA || !idB) throw new Error("Rostered bowler lookup failed.");
+
     // Duplicate-participant-in-week guard.
     const dup = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
       .select("id,bowler_a_ref,bowler_b_ref").eq("week_id", data.weekId);
-    if (!dup.error) {
-      for (const r of (dup.data as Array<{ id: string; bowler_a_ref: string; bowler_b_ref: string }>) ?? []) {
-        if (data.id && r.id === data.id) continue;
-        if (r.bowler_a_ref === data.bowlerARef || r.bowler_b_ref === data.bowlerARef) {
-          throw new Error(`${data.nameA ?? data.bowlerARef} is already scheduled in another slot this week.`);
-        }
-        if (r.bowler_a_ref === data.bowlerBRef || r.bowler_b_ref === data.bowlerBRef) {
-          throw new Error(`${data.nameB ?? data.bowlerBRef} is already scheduled in another slot this week.`);
-        }
+    if (dup.error) throw new Error(`schedule read failed: ${dup.error.message}`);
+    for (const r of (dup.data as Array<{ id: string; bowler_a_ref: string; bowler_b_ref: string }>) ?? []) {
+      if (data.id && r.id === data.id) continue;
+      if (r.bowler_a_ref === data.bowlerARef || r.bowler_b_ref === data.bowlerARef) {
+        throw new Error(`${idA.name} is already scheduled in another slot this week.`);
+      }
+      if (r.bowler_a_ref === data.bowlerBRef || r.bowler_b_ref === data.bowlerBRef) {
+        throw new Error(`${idB.name} is already scheduled in another slot this week.`);
       }
     }
     const payload = {
       season_id: data.seasonId, week_id: data.weekId,
       lane_pair: data.lanePair, slot: data.slot,
       bowler_a_ref: data.bowlerARef, bowler_b_ref: data.bowlerBRef,
-      name_a: data.nameA, name_b: data.nameB,
-      bowler_number_a: data.bowlerNumberA, bowler_number_b: data.bowlerNumberB,
+      name_a: idA.name, name_b: idB.name,
+      bowler_number_a: idA.bowlerNumber, bowler_number_b: idB.bowlerNumber,
     };
     if (data.id) {
       const upd = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
