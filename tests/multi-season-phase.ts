@@ -438,3 +438,164 @@ const ADMIN_LAYOUT_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.ts
          SEASON_EDITOR_SRC.includes("apply the pending"),
     "Season editor must surface a not-available message pre-migration");
 })();
+
+// -------------------------------------------------------------------------
+// 11) Phase C — People linking, aliases, guarded merge
+// -------------------------------------------------------------------------
+const ADMIN_PEOPLE_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.people.tsx"), "utf8");
+
+(function phaseCServerFunctions() {
+  // New server-fn exports required by Phase C.
+  for (const name of [
+    "addPersonAlias",
+    "removePersonAlias",
+    "createAndLinkParticipant",
+  ]) {
+    const idx = HISTORY_SRC.indexOf(`export const ${name} `);
+    assert(idx >= 0, `Phase C export missing: ${name}`);
+    const chunk = HISTORY_SRC.slice(idx, idx + 2500);
+    assert(chunk.includes("requireSupabaseAuth"), `${name} must use requireSupabaseAuth`);
+    assert(chunk.includes("ensureAdmin(context)"), `${name} must ensureAdmin() before any write`);
+  }
+
+  // linkParticipantToPerson must ONLY update person_id — never overwrite
+  // other seasonal fields.
+  const linkIdx = HISTORY_SRC.indexOf("export const linkParticipantToPerson");
+  const linkChunk = HISTORY_SRC.slice(linkIdx, linkIdx + 3000);
+  assert(/\.update\(\{\s*person_id:\s*data\.personId\s*\}\)/.test(linkChunk),
+    "linkParticipantToPerson must update ONLY person_id");
+  assert(linkChunk.includes("already linked to a person") || linkChunk.includes("already linked"),
+    "linkParticipantToPerson must refuse to overwrite an existing link");
+  assert(linkChunk.includes("Target person does not exist"),
+    "linkParticipantToPerson must verify the target person exists");
+  assert(linkChunk.includes("already linked to another row in this season for the same role"),
+    "linkParticipantToPerson must reject same-role/season duplicates");
+
+  // Create-and-link: transaction safety — verify existence first, then insert
+  // person, then link, then roll back the person on failure.
+  const calIdx = HISTORY_SRC.indexOf("export const createAndLinkParticipant");
+  const calChunk = HISTORY_SRC.slice(calIdx, calIdx + 3500);
+  const orderCheckRow = calChunk.indexOf(".select(\"season_id, person_id\")");
+  const orderInsertPerson = calChunk.indexOf('"people")\n      .insert');
+  const orderUpdate = calChunk.indexOf(".update({ person_id:");
+  const orderRollback = calChunk.indexOf('.delete().eq("id", personId)');
+  assert(orderCheckRow > 0 && orderInsertPerson > orderCheckRow,
+    "createAndLinkParticipant must check the participant row before inserting person");
+  assert(orderUpdate > orderInsertPerson,
+    "createAndLinkParticipant must insert person before linking");
+  assert(orderRollback > orderUpdate,
+    "createAndLinkParticipant must roll back the new person if linking fails");
+})();
+
+(function phaseCListPeopleShape() {
+  // listPeople must aggregate aliases + seasonal records + haystack.
+  const idx = HISTORY_SRC.indexOf("export const listPeople ");
+  const chunk = HISTORY_SRC.slice(idx, idx + 6000);
+  assert(chunk.includes('"person_aliases"'), "listPeople must load aliases in bulk");
+  assert(chunk.includes("seasonalRecords"), "listPeople must group seasonal roster + sub records under each person");
+  assert(chunk.includes("searchHaystack"),
+    "listPeople must precompute a search haystack covering name + aliases + seasonal names + bowler numbers");
+  // Haystack composition: display_name + alias + seasonal name + bowler number.
+  assert(/parts\.push\(String\(p\.display_name\)\)|parts:\s*string\[\]\s*=\s*\[String\(p\.display_name\)\]/.test(chunk),
+    "haystack must include the person's display name");
+  assert(/parts\.push\(a\.alias\)/.test(chunk), "haystack must include aliases");
+  assert(/parts\.push\(r\.name\)/.test(chunk), "haystack must include seasonal names");
+  assert(/parts\.push\(r\.bowlerNumber\)/.test(chunk), "haystack must include bowler numbers");
+})();
+
+(function phaseCMergePreviewRichness() {
+  const idx = HISTORY_SRC.indexOf("export const previewPersonMerge");
+  const chunk = HISTORY_SRC.slice(idx, idx + 6000);
+  // Preview must include rostered, substitutes, championSeasons, aliases,
+  // and conflict flags for (season, role) and alias collisions.
+  for (const key of ["rostered", "substitutes", "championSeasons", "aliases", "conflict"]) {
+    assert(chunk.includes(key), `merge preview must include: ${key}`);
+  }
+  assert(chunk.includes("keepDisplayName") && chunk.includes("removeDisplayName"),
+    "merge preview must show both people's display names");
+})();
+
+(function phaseCMergeExecuteContract() {
+  // Existing checks re-asserted for clarity + Phase C specifics.
+  assert(HISTORY_SRC.includes("confirmMerge: z.literal(true)"),
+    "executePersonMerge must require confirmMerge:true");
+  assert(/_keep: data\.keepPersonId, _remove: data\.removePersonId, _confirm: true/.test(HISTORY_SRC),
+    "executePersonMerge must call merge_people RPC with _confirm:true");
+  // The RPC never deletes seasonal rows.
+  const migPath = resolve(__dirname, "../db/pending-migrations/20260716_120000_seasons_people_phase.sql");
+  const sql = readFileSync(migPath, "utf8");
+  const mergeFn = sql.slice(sql.indexOf("create or replace function public.merge_people"));
+  assert(!/delete\s+from\s+public\.rostered_bowlers/i.test(mergeFn),
+    "merge RPC must never delete rostered_bowlers rows");
+  assert(!/delete\s+from\s+public\.substitutes/i.test(mergeFn),
+    "merge RPC must never delete substitutes rows");
+  assert(!/delete\s+from\s+public\.match_results/i.test(mergeFn),
+    "merge RPC must never delete match_results rows");
+  assert(!/delete\s+from\s+public\.seasons/i.test(mergeFn),
+    "merge RPC must never delete seasons rows");
+  // It DOES delete the duplicate person + its aliases; both are required.
+  assert(/delete\s+from\s+public\.people\s+where\s+id\s*=\s*_remove/i.test(mergeFn),
+    "merge RPC must delete the duplicate person identity");
+  assert(/delete\s+from\s+public\.person_aliases\s+where\s+person_id\s*=\s*_remove/i.test(mergeFn),
+    "merge RPC must delete duplicate person's aliases");
+})();
+
+(function phaseCAliasNormalization() {
+  // Alias insert normalizes and the unique constraint on normalized_alias
+  // (in the pending migration) prevents duplicates.
+  const addIdx = HISTORY_SRC.indexOf("export const addPersonAlias");
+  const chunk = HISTORY_SRC.slice(addIdx, addIdx + 2000);
+  assert(chunk.includes("normalizeName("), "addPersonAlias must normalize the alias before insert");
+  assert(chunk.includes("normalized_alias"), "addPersonAlias must set normalized_alias column");
+  assert(/UNIQUE_VIOLATION|23505/.test(chunk),
+    "addPersonAlias must surface a friendly duplicate-alias error on unique violation");
+  const migPath = resolve(__dirname, "../db/pending-migrations/20260716_120000_seasons_people_phase.sql");
+  const sql = readFileSync(migPath, "utf8");
+  assert(/unique\s*\(normalized_alias\)/i.test(sql),
+    "pending migration must enforce unique normalized_alias");
+
+  // Removal must delete only the alias row.
+  const rmIdx = HISTORY_SRC.indexOf("export const removePersonAlias");
+  const rmEnd = HISTORY_SRC.indexOf("// ----", rmIdx + 10);
+  const rmChunk = HISTORY_SRC.slice(rmIdx, rmEnd > 0 ? rmEnd : rmIdx + 800);
+  assert(/\.delete\(\)\.eq\("id", data\.aliasId\)/.test(rmChunk),
+    "removePersonAlias must delete only the specified alias row");
+  assert(!/rostered_bowlers|substitutes|match_results/.test(rmChunk),
+    "removePersonAlias must not touch any seasonal record");
+
+})();
+
+(function phaseCAdminPeopleUI() {
+  // Search input covers everything via the server-provided haystack.
+  assert(ADMIN_PEOPLE_SRC.includes("searchHaystack"),
+    "/admin/people must filter against server-provided haystack (aliases, seasonal names, bowler #)");
+  assert(/placeholder=\"Search name, alias, seasonal name, or bowler #/.test(ADMIN_PEOPLE_SRC),
+    "search input must advertise coverage of aliases + seasonal names + bowler numbers");
+
+  // Unlinked block: link OR create-and-link.
+  assert(ADMIN_PEOPLE_SRC.includes("createAndLinkParticipant"),
+    "unlinked-row UI must support create-and-link");
+  assert(ADMIN_PEOPLE_SRC.includes("linkParticipantToPerson"),
+    "unlinked-row UI must support linking to an existing person");
+  assert(/Unlinked/.test(ADMIN_PEOPLE_SRC),
+    "unlinked badges must be shown");
+
+  // Alias UI: add + remove with confirmation.
+  assert(ADMIN_PEOPLE_SRC.includes("addPersonAlias"), "UI must add aliases");
+  assert(ADMIN_PEOPLE_SRC.includes("removePersonAlias"), "UI must remove aliases");
+  assert(/window\.confirm\([^)]*alias/i.test(ADMIN_PEOPLE_SRC),
+    "alias removal must gate on a browser confirmation");
+
+  // Guarded merge workflow: typed MERGE + browser confirm + confirmMerge:true.
+  assert(/typed !== "MERGE"|typed === "MERGE"/.test(ADMIN_PEOPLE_SRC),
+    "merge control must require a typed MERGE token");
+  assert(/window\.confirm\(/.test(ADMIN_PEOPLE_SRC),
+    "merge must also gate on window.confirm as a second confirmation");
+  assert(/confirmMerge:\s*true/.test(ADMIN_PEOPLE_SRC),
+    "merge call site must send confirmMerge:true");
+
+  // Career link surfaced per person on the admin listing.
+  assert(/to="\/people\/\$personId"/.test(ADMIN_PEOPLE_SRC),
+    "admin people list must expose a Career link per person");
+})();
+

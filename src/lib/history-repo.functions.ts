@@ -606,6 +606,27 @@ export const adminAddParticipant = createServerFn({ method: "POST" })
 
 // ---------------- PEOPLE (admin) -------------------------------------------
 
+export interface PersonAliasRow {
+  id: string;
+  alias: string;
+  normalizedAlias: string;
+}
+
+export interface PersonSeasonalRecord {
+  id: string;
+  role: "rostered" | "substitute";
+  seasonId: string;
+  seasonLabel: string;
+  seasonStatus: string;
+  seasonPublicVisible: boolean;
+  name: string;
+  bowlerNumber: string | null;
+  average: number | null;
+  handicap: number | null;
+  active: boolean;
+  archived: boolean;
+}
+
 export interface PersonRow {
   id: string;
   displayName: string;
@@ -613,13 +634,19 @@ export interface PersonRow {
   notes: string | null;
   rosterCount: number;
   substituteCount: number;
+  aliases: PersonAliasRow[];
+  seasonalRecords: PersonSeasonalRecord[];
+  /** Precomputed lowercased haystack (name + aliases + seasonal names +
+   *  bowler numbers) so the client-side search box is a single includes(). */
+  searchHaystack: string;
 }
 
 export const listPeople = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context);
-    const q = await (context.supabase.from as unknown as LooseFrom)("people")
+    const sb = context.supabase;
+    const q = await (sb.from as unknown as LooseFrom)("people")
       .select("id,display_name,normalized_name,notes")
       .order("display_name", { ascending: true });
     if (q.error) {
@@ -628,28 +655,99 @@ export const listPeople = createServerFn({ method: "GET" })
     }
     const ids = (q.data ?? []).map((p: Record<string, unknown>) => String(p.id));
     if (ids.length === 0) return { available: true, people: [] as PersonRow[] };
-    const [rb, sub] = await Promise.all([
-      (context.supabase.from as unknown as LooseFrom)("rostered_bowlers")
-        .select("person_id").in("person_id", ids),
-      (context.supabase.from as unknown as LooseFrom)("substitutes")
-        .select("person_id").in("person_id", ids),
+
+    const [rb, sub, aliases, seasonsQ] = await Promise.all([
+      (sb.from as unknown as LooseFrom)("rostered_bowlers")
+        .select("id,person_id,season_id,name,bowler_number,entry_average,handicap,active,archived")
+        .in("person_id", ids),
+      (sb.from as unknown as LooseFrom)("substitutes")
+        .select("id,person_id,season_id,name,bowler_number,starting_average,handicap,active,archived")
+        .in("person_id", ids),
+      (sb.from as unknown as LooseFrom)("person_aliases")
+        .select("id,person_id,alias,normalized_alias")
+        .in("person_id", ids)
+        .order("alias", { ascending: true }),
+      fetchSeasonsWide(sb),
     ]);
+    const seasonMeta = new Map<string, { label: string; status: string; publicVisible: boolean }>();
+    for (const s of seasonsQ.rows) {
+      seasonMeta.set(s.id, { label: s.label, status: s.status, publicVisible: s.publicVisible === true });
+    }
+
     const rc: Record<string, number> = {};
-    for (const r of (rb.error ? [] : rb.data ?? []) as { person_id: string | null }[]) {
-      if (r.person_id) rc[r.person_id] = (rc[r.person_id] ?? 0) + 1;
-    }
     const sc: Record<string, number> = {};
-    for (const r of (sub.error ? [] : sub.data ?? []) as { person_id: string | null }[]) {
-      if (r.person_id) sc[r.person_id] = (sc[r.person_id] ?? 0) + 1;
+    const seasonalByPerson = new Map<string, PersonSeasonalRecord[]>();
+    for (const r of ((rb.error ? [] : (rb.data as Array<Record<string, unknown>>)) ?? [])) {
+      const pid = r.person_id ? String(r.person_id) : null;
+      if (!pid) continue;
+      rc[pid] = (rc[pid] ?? 0) + 1;
+      const sid = String(r.season_id);
+      const meta = seasonMeta.get(sid);
+      const arr = seasonalByPerson.get(pid) ?? [];
+      arr.push({
+        id: String(r.id), role: "rostered", seasonId: sid,
+        seasonLabel: meta?.label ?? "—", seasonStatus: meta?.status ?? "unknown",
+        seasonPublicVisible: meta?.publicVisible === true,
+        name: String(r.name ?? ""),
+        bowlerNumber: (r.bowler_number as string | null) ?? null,
+        average: r.entry_average != null ? Number(r.entry_average) : null,
+        handicap: r.handicap != null ? Number(r.handicap) : null,
+        active: r.active !== false, archived: r.archived === true,
+      });
+      seasonalByPerson.set(pid, arr);
     }
-    const people: PersonRow[] = (q.data ?? []).map((p: Record<string, unknown>) => ({
-      id: String(p.id),
-      displayName: String(p.display_name),
-      normalizedName: (p.normalized_name as string | null) ?? null,
-      notes: (p.notes as string | null) ?? null,
-      rosterCount: rc[String(p.id)] ?? 0,
-      substituteCount: sc[String(p.id)] ?? 0,
-    }));
+    for (const r of ((sub.error ? [] : (sub.data as Array<Record<string, unknown>>)) ?? [])) {
+      const pid = r.person_id ? String(r.person_id) : null;
+      if (!pid) continue;
+      sc[pid] = (sc[pid] ?? 0) + 1;
+      const sid = String(r.season_id);
+      const meta = seasonMeta.get(sid);
+      const arr = seasonalByPerson.get(pid) ?? [];
+      arr.push({
+        id: String(r.id), role: "substitute", seasonId: sid,
+        seasonLabel: meta?.label ?? "—", seasonStatus: meta?.status ?? "unknown",
+        seasonPublicVisible: meta?.publicVisible === true,
+        name: String(r.name ?? ""),
+        bowlerNumber: (r.bowler_number as string | null) ?? null,
+        average: r.starting_average != null ? Number(r.starting_average) : null,
+        handicap: r.handicap != null ? Number(r.handicap) : null,
+        active: r.active !== false, archived: r.archived === true,
+      });
+      seasonalByPerson.set(pid, arr);
+    }
+    const aliasesByPerson = new Map<string, PersonAliasRow[]>();
+    for (const a of ((aliases.error ? [] : (aliases.data as Array<Record<string, unknown>>)) ?? [])) {
+      const pid = String(a.person_id);
+      const arr = aliasesByPerson.get(pid) ?? [];
+      arr.push({
+        id: String(a.id), alias: String(a.alias),
+        normalizedAlias: String(a.normalized_alias ?? normalizeName(String(a.alias))),
+      });
+      aliasesByPerson.set(pid, arr);
+    }
+
+    const people: PersonRow[] = (q.data ?? []).map((p: Record<string, unknown>) => {
+      const pid = String(p.id);
+      const seasonal = seasonalByPerson.get(pid) ?? [];
+      const al = aliasesByPerson.get(pid) ?? [];
+      const parts: string[] = [String(p.display_name)];
+      for (const a of al) parts.push(a.alias);
+      for (const r of seasonal) {
+        parts.push(r.name);
+        if (r.bowlerNumber) parts.push(r.bowlerNumber);
+      }
+      return {
+        id: pid,
+        displayName: String(p.display_name),
+        normalizedName: (p.normalized_name as string | null) ?? null,
+        notes: (p.notes as string | null) ?? null,
+        rosterCount: rc[pid] ?? 0,
+        substituteCount: sc[pid] ?? 0,
+        aliases: al,
+        seasonalRecords: seasonal,
+        searchHaystack: parts.join(" | ").toLowerCase(),
+      };
+    });
     return { available: true, people };
   });
 
@@ -670,10 +768,60 @@ export const createPerson = createServerFn({ method: "POST" })
       if (isMissingTable(ins.error.code)) {
         throw new Error("Historical people table not available yet. Apply the pending migration first.");
       }
+      if (ins.error.code === UNIQUE_VIOLATION) {
+        throw new Error(`A person named "${data.displayName.trim()}" already exists.`);
+      }
       throw new Error(ins.error.message);
     }
     return { id: String(ins.data.id) };
   });
+
+// ---------------- Aliases -------------------------------------------------
+
+export const addPersonAlias = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v) => z.object({
+    personId: z.string().uuid(),
+    alias: z.string().min(1).max(120),
+  }).parse(v))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    const trimmed = data.alias.trim();
+    if (!trimmed) throw new Error("Alias cannot be empty.");
+    const norm = normalizeName(trimmed);
+    const ins = await (context.supabase.from as unknown as LooseFrom)("person_aliases")
+      .insert({
+        person_id: data.personId,
+        alias: trimmed,
+        normalized_alias: norm,
+      })
+      .select("id")
+      .single();
+    if (ins.error) {
+      if (isMissingTable(ins.error.code)) {
+        throw new Error("Aliases require the pending multi-season migration.");
+      }
+      if (ins.error.code === UNIQUE_VIOLATION) {
+        throw new Error(`Alias "${trimmed}" is already registered to a person.`);
+      }
+      throw new Error(ins.error.message);
+    }
+    return { id: String(ins.data.id) };
+  });
+
+export const removePersonAlias = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v) => z.object({ aliasId: z.string().uuid() }).parse(v))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    // Aliases are cosmetic pointers to the person row. Deleting one NEVER
+    // touches roster/sub/season/result data — only the alias row itself.
+    const del = await (context.supabase.from as unknown as LooseFrom)("person_aliases")
+      .delete().eq("id", data.aliasId);
+    if (del.error) throw new Error(del.error.message);
+    return { ok: true };
+  });
+
 
 // ---------------- ADMIN: link unlinked participant to person --------------
 
@@ -743,52 +891,202 @@ export const linkParticipantToPerson = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     const table = data.role === "rostered" ? "rostered_bowlers" : "substitutes";
-    // Duplicate guard: same person can't hold two rows in the same
-    // (season, role). Reads the row's season_id then checks.
+    // Existence + already-linked check: refuse to overwrite an existing
+    // person_id — the caller must unlink deliberately (out of scope this
+    // phase). Also captures season_id for the same-role conflict test.
     const cur = await (context.supabase.from as unknown as LooseFrom)(table)
-      .select("season_id").eq("id", data.id).maybeSingle();
+      .select("season_id, person_id").eq("id", data.id).maybeSingle();
     if (cur.error) throw new Error(cur.error.message);
     if (!cur.data) throw new Error("Participant row not found.");
+    if (cur.data.person_id) throw new Error("That participant row is already linked to a person.");
     const seasonId = String(cur.data.season_id);
+    // Target person must actually exist.
+    const pExists = await (context.supabase.from as unknown as LooseFrom)("people")
+      .select("id").eq("id", data.personId).maybeSingle();
+    if (pExists.error) throw new Error(pExists.error.message);
+    if (!pExists.data) throw new Error("Target person does not exist.");
+    // Conflict guard: same person can't hold two rows in the same (season, role).
     const dup = await (context.supabase.from as unknown as LooseFrom)(table)
       .select("id").eq("season_id", seasonId).eq("person_id", data.personId).neq("id", data.id).limit(1);
     if (!dup.error && dup.data && dup.data.length > 0) {
       throw new Error("That person is already linked to another row in this season for the same role.");
     }
+    // ONLY the person_id column is updated — name/average/handicap/bowler
+    // number and all season/results/snapshots are preserved.
     const upd = await (context.supabase.from as unknown as LooseFrom)(table)
       .update({ person_id: data.personId }).eq("id", data.id);
     if (upd.error) throw new Error(upd.error.message);
     return { ok: true };
   });
 
+/** Create a new person and link an unlinked participant row to it in one
+ *  request. If the link step fails after the person is created, the newly
+ *  created person is best-effort deleted so the admin isn't left with an
+ *  orphaned empty identity. */
+export const createAndLinkParticipant = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v) => z.object({
+    role: z.enum(["rostered", "substitute"]),
+    id: z.string().min(1),
+    displayName: z.string().min(1).max(120),
+  }).parse(v))
+  .handler(async ({ context, data }) => {
+    await ensureAdmin(context);
+    const sb = context.supabase;
+    const table = data.role === "rostered" ? "rostered_bowlers" : "substitutes";
+
+    // Verify the participant row exists AND is not already linked BEFORE
+    // creating the person, so we don't leak an empty person on trivial
+    // errors.
+    const cur = await (sb.from as unknown as LooseFrom)(table)
+      .select("season_id, person_id").eq("id", data.id).maybeSingle();
+    if (cur.error) throw new Error(cur.error.message);
+    if (!cur.data) throw new Error("Participant row not found.");
+    if (cur.data.person_id) throw new Error("That participant row is already linked.");
+
+    const trimmed = data.displayName.trim();
+    const ins = await (sb.from as unknown as LooseFrom)("people")
+      .insert({
+        display_name: trimmed,
+        normalized_name: normalizeName(trimmed),
+      })
+      .select("id").single();
+    if (ins.error) {
+      if (isMissingTable(ins.error.code)) {
+        throw new Error("Historical people table not available yet.");
+      }
+      if (ins.error.code === UNIQUE_VIOLATION) {
+        throw new Error(`A person named "${trimmed}" already exists — use "Link to existing" instead.`);
+      }
+      throw new Error(ins.error.message);
+    }
+    const personId = String(ins.data.id);
+
+    // Now link. If this fails, roll back the newly minted person so the
+    // admin does not accumulate empty identities.
+    const upd = await (sb.from as unknown as LooseFrom)(table)
+      .update({ person_id: personId }).eq("id", data.id);
+    if (upd.error) {
+      await (sb.from as unknown as LooseFrom)("people").delete().eq("id", personId);
+      throw new Error(`Linking failed after create — rolled back new person: ${upd.error.message}`);
+    }
+    return { ok: true, personId };
+  });
+
 // ---------------- ADMIN: person merge (preview + execute) ------------------
+
+export interface PersonMergePreview {
+  keepPersonId: string;
+  removePersonId: string;
+  keepDisplayName: string | null;
+  removeDisplayName: string | null;
+  rostered: Array<{ id: string; seasonId: string; seasonLabel: string; name: string; conflict: boolean }>;
+  substitutes: Array<{ id: string; seasonId: string; seasonLabel: string; name: string; conflict: boolean }>;
+  championSeasons: Array<{ id: string; seasonLabel: string }>;
+  aliases: Array<{ id: string; alias: string; conflict: boolean }>;
+  /** Serialized `PersonLink[]` (for legacy `planPersonMerge` compatibility). */
+  repoints: PersonLink[];
+  summary: string[];
+}
 
 export const previewPersonMerge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) =>
     z.object({ keepPersonId: z.string().uuid(), removePersonId: z.string().uuid() }).parse(v),
   )
-  .handler(async ({ context, data }) => {
+  .handler(async ({ context, data }): Promise<PersonMergePreview> => {
     await ensureAdmin(context);
     if (data.keepPersonId === data.removePersonId) throw new Error("Cannot merge a person into itself.");
-    const links: PersonLink[] = [];
-    const rb = await (context.supabase.from as unknown as LooseFrom)("rostered_bowlers")
-      .select("id").eq("person_id", data.removePersonId);
-    for (const r of (rb.data ?? []) as { id: string }[]) {
-      links.push({ table: "rostered_bowlers", id: r.id, column: "person_id" });
-    }
-    const subQ = await (context.supabase.from as unknown as LooseFrom)("substitutes")
-      .select("id").eq("person_id", data.removePersonId);
-    for (const r of (subQ.data ?? []) as { id: string }[]) {
-      links.push({ table: "substitutes", id: r.id, column: "person_id" });
-    }
-    const ss = await (context.supabase.from as unknown as LooseFrom)("seasons")
-      .select("id").eq("champion_person_id", data.removePersonId);
-    for (const r of (ss.data ?? []) as { id: string }[]) {
-      links.push({ table: "seasons", id: r.id, column: "champion_person_id" });
-    }
-    return planPersonMerge(data.keepPersonId, data.removePersonId, links);
+    const sb = context.supabase;
+
+    const [keepP, removeP] = await Promise.all([
+      (sb.from as unknown as LooseFrom)("people").select("id,display_name").eq("id", data.keepPersonId).maybeSingle(),
+      (sb.from as unknown as LooseFrom)("people").select("id,display_name").eq("id", data.removePersonId).maybeSingle(),
+    ]);
+    if (!keepP.data || !removeP.data) throw new Error("Both people must exist.");
+
+    // Fetch full detail on both sides so we can label rows and detect
+    // (season, role) collisions the RPC would leave behind.
+    const [rbRemove, subRemove, rbKeep, subKeep, champ, aliasesRemove, aliasesKeep, seasonsQ] = await Promise.all([
+      (sb.from as unknown as LooseFrom)("rostered_bowlers")
+        .select("id,season_id,name").eq("person_id", data.removePersonId),
+      (sb.from as unknown as LooseFrom)("substitutes")
+        .select("id,season_id,name").eq("person_id", data.removePersonId),
+      (sb.from as unknown as LooseFrom)("rostered_bowlers")
+        .select("season_id").eq("person_id", data.keepPersonId),
+      (sb.from as unknown as LooseFrom)("substitutes")
+        .select("season_id").eq("person_id", data.keepPersonId),
+      (sb.from as unknown as LooseFrom)("seasons")
+        .select("id,label").eq("champion_person_id", data.removePersonId),
+      (sb.from as unknown as LooseFrom)("person_aliases")
+        .select("id,alias,normalized_alias").eq("person_id", data.removePersonId),
+      (sb.from as unknown as LooseFrom)("person_aliases")
+        .select("normalized_alias").eq("person_id", data.keepPersonId),
+      fetchSeasonsWide(sb),
+    ]);
+
+    const seasonLabel = new Map<string, string>();
+    for (const s of seasonsQ.rows) seasonLabel.set(s.id, s.label);
+    const keepRosterSeasons = new Set(((rbKeep.data as Array<{ season_id: string }>) ?? []).map((r) => String(r.season_id)));
+    const keepSubSeasons = new Set(((subKeep.data as Array<{ season_id: string }>) ?? []).map((r) => String(r.season_id)));
+    const keepAliasNorms = new Set(((aliasesKeep.data as Array<{ normalized_alias: string }>) ?? []).map((r) => r.normalized_alias));
+
+    const rostered = ((rbRemove.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
+      id: String(r.id),
+      seasonId: String(r.season_id),
+      seasonLabel: seasonLabel.get(String(r.season_id)) ?? "—",
+      name: String(r.name ?? ""),
+      conflict: keepRosterSeasons.has(String(r.season_id)),
+    }));
+    const substitutes = ((subRemove.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
+      id: String(r.id),
+      seasonId: String(r.season_id),
+      seasonLabel: seasonLabel.get(String(r.season_id)) ?? "—",
+      name: String(r.name ?? ""),
+      conflict: keepSubSeasons.has(String(r.season_id)),
+    }));
+    const championSeasons = ((champ.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
+      id: String(r.id),
+      seasonLabel: seasonLabel.get(String(r.id)) ?? String(r.label ?? "—"),
+    }));
+    const aliases = ((aliasesRemove.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
+      id: String(r.id),
+      alias: String(r.alias),
+      conflict: keepAliasNorms.has(String(r.normalized_alias)),
+    }));
+
+    const links: PersonLink[] = [
+      ...rostered.map<PersonLink>((r) => ({ table: "rostered_bowlers", id: r.id, column: "person_id" })),
+      ...substitutes.map<PersonLink>((r) => ({ table: "substitutes", id: r.id, column: "person_id" })),
+      ...championSeasons.map<PersonLink>((r) => ({ table: "seasons", id: r.id, column: "champion_person_id" })),
+    ];
+    const plan = planPersonMerge(data.keepPersonId, data.removePersonId, links);
+    const conflicts =
+      rostered.filter((r) => r.conflict).length +
+      substitutes.filter((r) => r.conflict).length +
+      aliases.filter((a) => a.conflict).length;
+    const summary = [
+      ...plan.summary,
+      `${aliases.length} alias(es), ${championSeasons.length} champion reference(s).`,
+      conflicts > 0
+        ? `${conflicts} conflicting record(s) will be dropped rather than repointed (kept person already has them).`
+        : "No (season, role) or alias collisions detected.",
+    ];
+    return {
+      keepPersonId: data.keepPersonId,
+      removePersonId: data.removePersonId,
+      keepDisplayName: String(keepP.data.display_name),
+      removeDisplayName: String(removeP.data.display_name),
+      rostered,
+      substitutes,
+      championSeasons,
+      aliases,
+      repoints: plan.repoints,
+      summary,
+    };
   });
+
+
 
 export const executePersonMerge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
