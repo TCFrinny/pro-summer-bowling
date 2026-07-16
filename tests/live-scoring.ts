@@ -70,7 +70,7 @@ function liveRow(overrides: Partial<LiveMatchRow>): LiveMatchRow {
   const weeks: WeekSummary[] = [
     { week: 1, date: "", completed: false, published: true },
   ];
-  const snap = buildSnapshot([A, B], weeks, { 1: [match] });
+  const snap = buildSnapshot({ bowlers: [A, B], weeks: weeks, matchesByWeek: { 1: [match] } });
   const a = snap.bowlers.find((x) => x.id === "a")!;
   const b = snap.bowlers.find((x) => x.id === "b")!;
   expect(a.points === 2, `A points after 1 game = 2 (got ${a.points})`);
