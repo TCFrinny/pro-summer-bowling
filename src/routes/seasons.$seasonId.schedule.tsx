@@ -1,4 +1,6 @@
-/** PUBLIC archived-season Schedule (all weeks; sorted by lane pair). */
+/** PUBLIC archived-season Schedule. Shows EVERY scheduled slot (played or
+ *  not) using the frozen scheduled bowler names, sorted by natural lane
+ *  pair order. Weekly Results shows only saved results. */
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
@@ -17,13 +19,13 @@ function SchedulePage() {
   });
   const snap = q.data?.snapshot;
   if (!snap) return <EmptyState title="Schedule unavailable" description="No cached snapshot for this season." />;
+  if (snap.weeks.length === 0) {
+    return <EmptyState title="No weeks yet" description="Schedule has not been entered for this season." />;
+  }
   return (
     <div className="space-y-4">
-      {snap.weeks.length === 0 && (
-        <EmptyState title="No weeks yet" description="Schedule has not been entered for this season." />
-      )}
       {snap.weeks.map((w) => {
-        const sorted = [...w.matches].sort(compareLanePairSlotCamel);
+        const rows = [...(w.schedule ?? [])].sort(compareLanePairSlotCamel);
         return (
           <section key={w.weekNumber} className="rounded-lg border border-border bg-card">
             <header className="flex items-baseline justify-between border-b border-border p-3">
@@ -32,17 +34,20 @@ function SchedulePage() {
                 {w.date ?? "—"}{w.published ? "" : " · unpublished"}
               </span>
             </header>
-            {sorted.length === 0 ? (
+            {rows.length === 0 ? (
               <p className="p-3 text-xs text-muted-foreground">No slots.</p>
             ) : (
               <table className="min-w-full text-sm">
                 <tbody className="divide-y divide-border">
-                  {sorted.map((m) => (
-                    <tr key={m.slotId}>
-                      <td className="px-3 py-1 font-mono text-xs">{m.lanePair}·{m.slot}</td>
-                      <td className="px-3 py-1">{m.actualNameA || m.scheduledA}{m.isSubA && <span className="ml-1 text-[10px] text-muted-foreground">(sub)</span>}</td>
+                  {rows.map((s) => (
+                    <tr key={s.slotId} data-testid={`archived-slot-${s.slotId}`}>
+                      <td className="px-3 py-1 font-mono text-xs">{s.lanePair}·{s.slot}</td>
+                      <td className="px-3 py-1">{s.nameA}</td>
                       <td className="px-1 text-center text-muted-foreground">vs</td>
-                      <td className="px-3 py-1">{m.actualNameB || m.scheduledB}{m.isSubB && <span className="ml-1 text-[10px] text-muted-foreground">(sub)</span>}</td>
+                      <td className="px-3 py-1">{s.nameB}</td>
+                      <td className="px-3 py-1 text-right text-[10px] uppercase text-muted-foreground">
+                        {s.hasResult ? "played" : "scheduled"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

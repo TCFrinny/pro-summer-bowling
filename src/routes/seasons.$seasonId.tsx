@@ -1,12 +1,8 @@
 /**
- * PUBLIC archived-season layout.
- *
- * Renders a shared season banner + tab nav around <Outlet /> so every
- * sub-route (/overview, /standings, /schedule, /results, /statistics,
- * /bowlers/$participantRef) reads from the same server-authorized public
- * archive detail. The current 2026 season is served via the top-level
- * `/`, `/standings`, `/schedule`, `/weekly-results`, `/statistics`, and
- * `/bowlers` routes — those are unchanged.
+ * PUBLIC archived-season layout. Provides the season banner + tab nav and
+ * renders <Outlet /> for each child route. The 2026 current-season routes
+ * remain served by the top-level `/`, `/standings`, `/schedule`,
+ * `/weekly-results`, `/statistics`, `/bowlers` routes — untouched.
  */
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -69,20 +65,21 @@ function SeasonArchiveLayout() {
 }
 
 function ArchivedTabs({ seasonId }: { seasonId: string }) {
-  const tabs: Array<{ to: string; label: string }> = [
-    { to: `/seasons/${seasonId}`, label: "Overview" },
-    { to: `/seasons/${seasonId}/standings`, label: "Standings" },
-    { to: `/seasons/${seasonId}/schedule`, label: "Schedule" },
-    { to: `/seasons/${seasonId}/results`, label: "Results" },
-    { to: `/seasons/${seasonId}/statistics`, label: "Statistics" },
-  ];
+  const linkCls =
+    "rounded-md px-3 py-1 text-muted-foreground hover:bg-accent/40";
+  const active = { className: "rounded-md bg-primary px-3 py-1 text-primary-foreground" };
   return (
     <nav className="mb-4 flex flex-wrap gap-2 border-b border-border pb-2 text-sm">
-      {tabs.map((t) => (
-        <a key={t.to} href={t.to}
-          className="rounded-md px-3 py-1 hover:bg-accent/40 text-muted-foreground [&.active]:bg-primary [&.active]:text-primary-foreground"
-        >{t.label}</a>
-      ))}
+      <Link to="/seasons/$seasonId" params={{ seasonId }} activeOptions={{ exact: true }}
+        className={linkCls} activeProps={active}>Overview</Link>
+      <Link to="/seasons/$seasonId/standings" params={{ seasonId }}
+        className={linkCls} activeProps={active}>Standings</Link>
+      <Link to="/seasons/$seasonId/schedule" params={{ seasonId }}
+        className={linkCls} activeProps={active}>Schedule</Link>
+      <Link to="/seasons/$seasonId/weekly-results" params={{ seasonId }}
+        className={linkCls} activeProps={active}>Weekly Results</Link>
+      <Link to="/seasons/$seasonId/statistics" params={{ seasonId }}
+        className={linkCls} activeProps={active}>Statistics</Link>
     </nav>
   );
 }
