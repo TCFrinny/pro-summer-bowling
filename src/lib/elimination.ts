@@ -33,8 +33,10 @@ import type {
   EliminationRow,
   EliminationSnapshot,
   Match,
+  MatchResult,
   WeekSummary,
 } from "./mock-data";
+import { unawardedUnitsForMatch } from "./elimination-bounds";
 
 const DEFAULT_NODE_BUDGET = 200_000;
 
