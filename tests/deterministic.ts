@@ -28,6 +28,7 @@ import "./season-history";
 import "./multi-season-phase";
 import "./lane-pair-order";
 import "./weekly-results-lane-order";
+import "./historical-phase";
 
 
 
