@@ -40,7 +40,7 @@ import {
   type HistoricalSnapshot,
   type HistoricalWeekSummary,
 } from "@/lib/historical-snapshot";
-import { compareLanePairSlotSnake } from "@/lib/lane-pair-order";
+import { compareLanePairSlotCamel, compareLanePairSlotSnake } from "@/lib/lane-pair-order";
 
 type Sb = SupabaseClient<Database>;
 type AuthedCtx = { supabase: Sb; userId: string };
@@ -90,6 +90,80 @@ async function ensureNonCurrentSeason(sb: Sb, seasonId: string): Promise<{
 
 function isMissingTable(code: string | undefined | null): boolean { return code === MISSING_TABLE; }
 function isMissingColumn(code: string | undefined | null): boolean { return code === MISSING_COLUMN; }
+
+// ---------------- Cross-table scope + config validators --------------------
+// Every write goes through these — RLS/triggers are the DB backstop, but
+// server-side rejection produces clean error messages and stops bad
+// payloads before they hit the DB.
+
+async function assertWeekInSeason(sb: Sb, weekId: string, seasonId: string): Promise<{
+  id: string; seasonId: string; weekNumber: number; published: boolean;
+}> {
+  const q = await (sb.from as unknown as LooseFrom)("historical_weeks")
+    .select("id,season_id,week_number,published").eq("id", weekId).maybeSingle();
+  if (q.error) throw new Error(q.error.message);
+  if (!q.data) throw new Error("Week not found.");
+  if (String(q.data.season_id) !== seasonId) {
+    throw new Error("Week does not belong to this season.");
+  }
+  return {
+    id: String(q.data.id), seasonId: String(q.data.season_id),
+    weekNumber: Number(q.data.week_number), published: q.data.published === true,
+  };
+}
+
+async function assertSlotInWeekAndSeason(
+  sb: Sb, slotId: string, weekId: string, seasonId: string,
+): Promise<{ id: string; lanePair: string; slot: number; bowlerARef: string; bowlerBRef: string }> {
+  const q = await (sb.from as unknown as LooseFrom)("historical_schedule_slots")
+    .select("id,season_id,week_id,lane_pair,slot,bowler_a_ref,bowler_b_ref")
+    .eq("id", slotId).maybeSingle();
+  if (q.error) throw new Error(q.error.message);
+  if (!q.data) throw new Error("Schedule slot not found.");
+  if (String(q.data.season_id) !== seasonId || String(q.data.week_id) !== weekId) {
+    throw new Error("Slot does not belong to the supplied week / season.");
+  }
+  return {
+    id: String(q.data.id), lanePair: String(q.data.lane_pair), slot: Number(q.data.slot),
+    bowlerARef: String(q.data.bowler_a_ref), bowlerBRef: String(q.data.bowler_b_ref),
+  };
+}
+
+interface LanePairCfg { label: string; matchupCapacity: number; active: boolean }
+
+async function loadLanePairConfig(sb: Sb, seasonId: string): Promise<LanePairCfg[]> {
+  const q = await (sb.from as unknown as LooseFrom)("season_lane_pairs")
+    .select("label,matchup_capacity,active").eq("season_id", seasonId);
+  if (q.error) return [];
+  return ((q.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
+    label: String(r.label),
+    matchupCapacity: Number(r.matchup_capacity ?? 0),
+    active: r.active !== false,
+  }));
+}
+
+function assertLanePairAndSlot(pairs: LanePairCfg[], lanePair: string, slot: number): void {
+  if (pairs.length === 0) return; // legacy season without configured lane pairs — do not block
+  const cfg = pairs.find((p) => p.label === lanePair && p.active);
+  if (!cfg) {
+    throw new Error(`Lane pair "${lanePair}" is not configured / active for this season.`);
+  }
+  if (slot < 1 || slot > cfg.matchupCapacity) {
+    throw new Error(`Slot ${slot} exceeds capacity ${cfg.matchupCapacity} for lane pair ${lanePair}.`);
+  }
+}
+
+/** Look up rostered_bowlers ids for this season; used to gate scheduled
+ *  A/B pickers to roster-only participants (substitutes may only appear
+ *  as ACTUAL participants inside a result). Returns an empty set if the
+ *  table is unreachable — callers should treat that as "unknown" and
+ *  fall back on the DB constraint. */
+async function loadRosterIds(sb: Sb, seasonId: string): Promise<Set<string>> {
+  const q = await (sb.from as unknown as LooseFrom)("rostered_bowlers")
+    .select("id").eq("season_id", seasonId);
+  if (q.error) return new Set();
+  return new Set(((q.data as Array<{ id: string }>) ?? []).map((r) => String(r.id)));
+}
 
 // -------------------- Server publishable client (public reads) --------------
 
