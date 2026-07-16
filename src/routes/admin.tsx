@@ -175,6 +175,7 @@ export function AdminHeaderBar({ onSignOut }: { onSignOut: () => void | Promise<
         <Link to="/admin/bowlers" className="hover:underline">Bowlers</Link>
         <Link to="/admin/schedule" className="hover:underline">Schedule</Link>
         <Link to="/admin/results" className="hover:underline">Results</Link>
+        <Link to="/admin/live-scoring" className="hover:underline">Live Scoring</Link>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {rebuildState.kind === "success" && (

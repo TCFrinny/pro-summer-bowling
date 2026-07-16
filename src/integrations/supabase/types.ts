@@ -14,6 +14,82 @@ export type Database = {
   }
   public: {
     Tables: {
+      live_match_results: {
+        Row: {
+          a_game1: number | null
+          a_game2: number | null
+          a_game3: number | null
+          b_game1: number | null
+          b_game2: number | null
+          b_game3: number | null
+          created_at: string
+          entered_by: string | null
+          id: string
+          schedule_slot_id: string
+          season_id: string
+          side_a: Json
+          side_b: Json
+          updated_at: string
+          week_id: string
+        }
+        Insert: {
+          a_game1?: number | null
+          a_game2?: number | null
+          a_game3?: number | null
+          b_game1?: number | null
+          b_game2?: number | null
+          b_game3?: number | null
+          created_at?: string
+          entered_by?: string | null
+          id?: string
+          schedule_slot_id: string
+          season_id: string
+          side_a: Json
+          side_b: Json
+          updated_at?: string
+          week_id: string
+        }
+        Update: {
+          a_game1?: number | null
+          a_game2?: number | null
+          a_game3?: number | null
+          b_game1?: number | null
+          b_game2?: number | null
+          b_game3?: number | null
+          created_at?: string
+          entered_by?: string | null
+          id?: string
+          schedule_slot_id?: string
+          season_id?: string
+          side_a?: Json
+          side_b?: Json
+          updated_at?: string
+          week_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_match_results_schedule_slot_id_fkey"
+            columns: ["schedule_slot_id"]
+            isOneToOne: true
+            referencedRelation: "schedule_slots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_match_results_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_match_results_week_id_fkey"
+            columns: ["week_id"]
+            isOneToOne: false
+            referencedRelation: "weeks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_results: {
         Row: {
           created_at: string

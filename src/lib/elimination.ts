@@ -33,8 +33,10 @@ import type {
   EliminationRow,
   EliminationSnapshot,
   Match,
+  MatchResult,
   WeekSummary,
 } from "./mock-data";
+import { unawardedUnitsForMatch } from "./elimination-bounds";
 
 const DEFAULT_NODE_BUDGET = 200_000;
 
@@ -81,8 +83,16 @@ interface Prep {
   pastPairsPreFinal: Set<string>;
   publishedNextOpp: Map<BowlerId, { week: number; opp: BowlerId } | undefined>;
   weeksRemaining: number;
+  /** Per-fixed-pair remaining unit capacity, keyed `${week}|${pk(a,b)}`.
+   *  Present for both published-unresolved pairs (14 units) AND live-partial
+   *  score-only pairs on the final week (6 or 10 units). Solver-chosen pairs
+   *  in unpublished weeks default to 14 at the site of use. */
+  pairUnits: Map<string, number>;
 }
 interface PrepFail { ok: false; reason: string; }
+function pairUnitKey(week: number, a: BowlerId, b: BowlerId): string {
+  return `${week}|${pk(a, b)}`;
+}
 
 function prepare(input: EliminationInput): Prep | PrepFail {
   const active = [...input.activeBowlers].sort((a, b) => a.id.localeCompare(b.id));
@@ -99,8 +109,8 @@ function prepare(input: EliminationInput): Prep | PrepFail {
   const pastPairsPreFinal = new Set<string>();
   const weekSlots: WeekSlot[] = [];
   const publishedNextOpp = new Map<BowlerId, { week: number; opp: BowlerId } | undefined>();
+  const pairUnits = new Map<string, number>();
 
-  // Index week metadata by number.
   const weekMeta = new Map<number, WeekSummary>();
   for (const w of input.weeks) weekMeta.set(w.week, w);
 
@@ -121,8 +131,13 @@ function prepare(input: EliminationInput): Prep | PrepFail {
         return { ok: false, reason: `Week ${w} has a self-match (${m.bowlerA}).` };
       const aActive = activeSet.has(m.bowlerA);
       const bActive = activeSet.has(m.bowlerB);
-      if (m.result) {
-        // Completed. Count active endpoints as covered.
+      // A "fully resolved" result contributes 0 unawarded units. A live-
+      // partial score-only result contributes 6/10/14 depending on games
+      // saved and is treated as a fixed-but-unresolved pair.
+      const resultUnits = m.result ? unawardedUnitsForMatch(m.result as MatchResult) : 14;
+      const isFullyResolved = m.result != null && resultUnits === 0;
+
+      if (isFullyResolved) {
         if (aActive) {
           if (seenThisWeek.has(m.bowlerA))
             return { ok: false, reason: `Week ${w}: bowler ${m.bowlerA} appears in multiple matches.` };
@@ -148,9 +163,11 @@ function prepare(input: EliminationInput): Prep | PrepFail {
             pastPairsPreFinal.add(key);
           }
         }
-      } else if (published) {
-        // Fixed unresolved.
-        if (!aActive || !bActive) continue; // schedule references an inactive bowler; skip
+      } else if (published || m.result != null) {
+        // Fixed unresolved pair. Includes:
+        //  - normal published-unresolved (14 units)
+        //  - final-week live-partial score-only (6 or 10 units)
+        if (!aActive || !bActive) continue;
         if (seenThisWeek.has(m.bowlerA))
           return { ok: false, reason: `Week ${w}: bowler ${m.bowlerA} appears in multiple matches.` };
         if (seenThisWeek.has(m.bowlerB))
@@ -160,6 +177,7 @@ function prepare(input: EliminationInput): Prep | PrepFail {
         fixedPairs.push([m.bowlerA, m.bowlerB]);
         fixedForBowler.set(m.bowlerA, m.bowlerB);
         fixedForBowler.set(m.bowlerB, m.bowlerA);
+        pairUnits.set(pairUnitKey(w, m.bowlerA, m.bowlerB), resultUnits);
         if (!isFinal) {
           const key = pk(m.bowlerA, m.bowlerB);
           if (pastPairsPreFinal.has(key))
@@ -169,7 +187,6 @@ function prepare(input: EliminationInput): Prep | PrepFail {
             };
           pastPairsPreFinal.add(key);
         }
-        // Earliest-week published opponent per bowler.
         for (const [a, b] of [[m.bowlerA, m.bowlerB], [m.bowlerB, m.bowlerA]] as const) {
           const cur = publishedNextOpp.get(a);
           if (!cur || cur.week > w) publishedNextOpp.set(a, { week: w, opp: b });
@@ -182,7 +199,6 @@ function prepare(input: EliminationInput): Prep | PrepFail {
       if (!completedBowlers.has(b.id)) unresolvedActive.add(b.id);
 
     if (published) {
-      // Every active bowler must be covered exactly once by completed+fixed.
       const covered = new Set<BowlerId>(completedBowlers);
       for (const [a, b] of fixedPairs) { covered.add(a); covered.add(b); }
       for (const b of active) {
@@ -216,7 +232,7 @@ function prepare(input: EliminationInput): Prep | PrepFail {
   }
 
   const weeksRemaining = weekSlots.filter((s) => s.unresolvedActive.size > 0).length;
-  return { ok: true, active, activeSet, currUnits, weekSlots, finalWeek, pastPairsPreFinal, publishedNextOpp, weeksRemaining };
+  return { ok: true, active, activeSet, currUnits, weekSlots, finalWeek, pastPairsPreFinal, publishedNextOpp, weeksRemaining, pairUnits };
 }
 
 // -----------------------------------------------------------------------
@@ -461,16 +477,26 @@ function tryFlow(
   strict: boolean,
 ): FlowResult {
   const tCurr = prep.currUnits.get(target) ?? 0;
-  const tRem = witness.perWeek.reduce(
-    (acc, w) => acc + (w.pairs.some((p) => p[0] === target || p[1] === target) ? 1 : 0),
-    0,
-  );
-  const tFinal = tCurr + 14 * tRem;
 
-  const nonTargetPairs: PairT[] = [];
+  // Per-pair unit capacity: fixed live/published pair uses stored units;
+  // solver-chosen pair (unpublished week) uses full 14.
+  const unitsFor = (week: number, a: BowlerId, b: BowlerId): number => {
+    const k = pairUnitKey(week, a, b);
+    const v = prep.pairUnits.get(k);
+    return v ?? 14;
+  };
+
+  let tRemUnits = 0;
   for (const w of witness.perWeek)
     for (const p of w.pairs)
-      if (p[0] !== target && p[1] !== target) nonTargetPairs.push(p);
+      if (p[0] === target || p[1] === target) tRemUnits += unitsFor(w.week, p[0], p[1]);
+  const tFinal = tCurr + tRemUnits;
+
+  const nonTargetPairs: Array<{ pair: PairT; units: number }> = [];
+  for (const w of witness.perWeek)
+    for (const p of w.pairs)
+      if (p[0] !== target && p[1] !== target)
+        nonTargetPairs.push({ pair: p, units: unitsFor(w.week, p[0], p[1]) });
 
   const M = nonTargetPairs.length;
   const opponentIds = prep.active.map((b) => b.id).filter((id) => id !== target);
@@ -485,18 +511,15 @@ function tryFlow(
   const nNodes = T + 1;
 
   const flow = new MaxFlow(nNodes);
-  // Track match->opponent edge indices for witness extraction.
-  const matchEdges: Array<[number, number, BowlerId, BowlerId]> = [];
 
+  let demand = 0;
   for (let i = 0; i < M; i++) {
-    flow.addEdge(S, matchNode(i), 14);
-    const [a, b] = nonTargetPairs[i];
-    const ea = flow.g[matchNode(i)].length;
-    flow.addEdge(matchNode(i), oppNode(oppIdx.get(a)!), 14);
-    const eb = flow.g[matchNode(i)].length;
-    flow.addEdge(matchNode(i), oppNode(oppIdx.get(b)!), 14);
-    matchEdges.push([ea, eb, a, b]);
-    void matchEdges;
+    const { pair: [a, b], units } = nonTargetPairs[i];
+    if (units <= 0) continue;
+    demand += units;
+    flow.addEdge(S, matchNode(i), units);
+    flow.addEdge(matchNode(i), oppNode(oppIdx.get(a)!), units);
+    flow.addEdge(matchNode(i), oppNode(oppIdx.get(b)!), units);
   }
   for (let j = 0; j < K; j++) {
     const oCurr = prep.currUnits.get(opponentIds[j]) ?? 0;
@@ -504,11 +527,9 @@ function tryFlow(
     flow.addEdge(oppNode(j), T, Math.max(0, allowance));
   }
 
-  const demand = 14 * M;
   const maxflow = flow.run(S, T);
   if (maxflow !== demand) return { feasible: false };
 
-  // Extract witness: per-opponent flow = 14 - residual on opp->T edge.
   const finals = new Map<BowlerId, number>();
   for (const b of prep.active) finals.set(b.id, prep.currUnits.get(b.id) ?? 0);
   finals.set(target, tFinal);
@@ -582,14 +603,41 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   const tCurr = prep.currUnits.get(target.id) ?? 0;
   const opponents = prep.active.filter((b) => b.id !== target.id);
 
-  // Remaining match counts per bowler (over all unresolved weeks).
-  const remaining = new Map<BowlerId, number>();
-  for (const b of prep.active) remaining.set(b.id, 0);
-  for (const s of prep.weekSlots)
-    for (const id of s.unresolvedActive) remaining.set(id, (remaining.get(id) ?? 0) + 1);
+  // Per-bowler remaining UNIT capacity.
+  // - Unresolved active bowlers on published weeks with fixed pairs
+  //   contribute the actual pairUnits value (14 for open, 6/10 for
+  //   score-only partials).
+  // - Unresolved active bowlers on unpublished weeks contribute 14 each
+  //   (full 7-point matchup — pairing to be determined).
+  const remainingUnits = new Map<BowlerId, number>();
+  for (const b of prep.active) remainingUnits.set(b.id, 0);
+  let totalUnits = 0;
+  for (const s of prep.weekSlots) {
+    if (s.unresolvedActive.size === 0) continue;
+    // Fixed unresolved pairs from prepare()
+    const covered = new Set<BowlerId>();
+    for (const [a, b] of s.fixedPairs) {
+      const u = prep.pairUnits.get(pairUnitKey(s.week, a, b)) ?? 14;
+      remainingUnits.set(a, (remainingUnits.get(a) ?? 0) + u);
+      remainingUnits.set(b, (remainingUnits.get(b) ?? 0) + u);
+      totalUnits += u;
+      covered.add(a); covered.add(b);
+    }
+    // Any leftover unresolved bowlers are in unpublished weeks — each still
+    // has one match worth 14 units to distribute (2 bowlers × 14 = 28 total
+    // per two players, but as a per-match unit total it's 14; count once
+    // per pair by halving after the loop).
+    let extraSlots = 0;
+    for (const id of s.unresolvedActive) {
+      if (covered.has(id)) continue;
+      remainingUnits.set(id, (remainingUnits.get(id) ?? 0) + 14);
+      extraSlots += 1;
+    }
+    totalUnits += 14 * (extraSlots / 2);
+  }
 
-  const tRem = remaining.get(target.id) ?? 0;
-  const tFinal = tCurr + 14 * tRem;
+  const tRemUnits = remainingUnits.get(target.id) ?? 0;
+  const tFinal = tCurr + tRemUnits;
 
   const publishedNext = prep.publishedNextOpp.get(target.id);
   const nextOpponent = publishedNext
@@ -599,7 +647,7 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   // --- Bound 1: CLINCHED ---------------------------------------------------
   let bestOppMax = { id: "" as BowlerId, name: "", max: -Infinity };
   for (const o of opponents) {
-    const oMax = (prep.currUnits.get(o.id) ?? 0) + 14 * (remaining.get(o.id) ?? 0);
+    const oMax = (prep.currUnits.get(o.id) ?? 0) + (remainingUnits.get(o.id) ?? 0);
     if (oMax > bestOppMax.max) bestOppMax = { id: o.id, name: o.name, max: oMax };
   }
   if (opponents.length > 0 && tCurr > bestOppMax.max) {
@@ -630,17 +678,9 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   }
 
   // --- Capacity bound (schedule independent) -------------------------------
-  // Every unresolved match not involving target still distributes exactly
-  // 14 units among the two participants (opponents). Sum of opponent
-  // allowances must be at least that total or the target cannot avoid tie/beat.
-  let numTargetMatches = 0;
-  let numTotalMatches = 0;
-  for (const s of prep.weekSlots) {
-    numTotalMatches += s.unresolvedActive.size / 2;
-    if (s.unresolvedActive.has(target.id)) numTargetMatches += 1;
-  }
-  const nonTargetMatches = numTotalMatches - numTargetMatches;
-  const totalNonTargetUnits = 14 * nonTargetMatches;
+  // Non-target unit demand = total unawarded units minus units on target's own matches.
+  const nonTargetUnits = totalUnits - tRemUnits;
+  const nonTargetMatches = Math.round(nonTargetUnits / 14); // reporting only
 
   let sumStrictCap = 0;
   let sumTieCap = 0;
@@ -650,19 +690,19 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
     sumTieCap += Math.max(0, tFinal - oCurr);
   }
 
-  const tieImpossibleByCapacity = sumTieCap < totalNonTargetUnits;
+  const tieImpossibleByCapacity = sumTieCap < nonTargetUnits;
   if (tieImpossibleByCapacity) {
     return {
       bowler: target,
       status: "eliminated",
-      note: `Even with ${target.name} winning every remaining match (final ${fmt(tFinal)}), opponent points available in the ${nonTargetMatches} non-target match(es) exceed the combined room to stay at or below ${fmt(tFinal)} (capacity ${fmt(sumTieCap)} < needed ${fmt(totalNonTargetUnits)}).`,
+      note: `Even with ${target.name} winning every remaining match (final ${fmt(tFinal)}), opponent points available in the ${nonTargetMatches} non-target match(es) exceed the combined room to stay at or below ${fmt(tFinal)} (capacity ${fmt(sumTieCap)} < needed ${fmt(nonTargetUnits)}).`,
       maxFinalPoints: tFinal / 2,
       nextOpponent,
     };
   }
 
   const strictImpossibleIndependent =
-    sumStrictCap < totalNonTargetUnits ||
+    sumStrictCap < nonTargetUnits ||
     opponents.some((o) => (prep.currUnits.get(o.id) ?? 0) >= tFinal);
 
   // --- Try to prove ALIVE ---------------------------------------------------
