@@ -519,9 +519,28 @@ function ResultEntryForm({
       setOvrB(String(r.pointOverride.pointsB));
       setOvrReason(r.pointOverride.reason ?? "");
     }
-    // Linescore hydration is intentionally NOT rehydrated frame-by-frame
-    // (the stored jsonb is already the authoritative source). Admin can
-    // re-enter or switch to game_scores to edit computed totals.
+    // Rehydrate FULL_LINESCORE frame editor by reading the saved
+    // GameLinescore array back into per-frame mark/cumulative strings.
+    if (r.detailMode === "full_linescore") {
+      const rehydrate = (raw: unknown): SideEditorState => {
+        const empty = emptySideEditorState();
+        if (!Array.isArray(raw) || raw.length !== 3) return empty;
+        for (let gi = 0; gi < 3; gi++) {
+          const g = raw[gi] as { frames?: Array<{ mark?: string; cumulativeScore?: number }> } | null;
+          if (!g || !Array.isArray(g.frames) || g.frames.length !== 10) continue;
+          const marks: string[] = [];
+          const cums: string[] = [];
+          for (const f of g.frames) {
+            marks.push(String(f.mark ?? ""));
+            cums.push(f.cumulativeScore != null ? String(f.cumulativeScore) : "");
+          }
+          empty.games[gi] = { marks, cumulatives: cums };
+        }
+        return empty;
+      };
+      if (A.status !== "absent") setLineA(rehydrate(r.linescoreA));
+      if (B.status !== "absent") setLineB(rehydrate(r.linescoreB));
+    }
   }, [existing.data]);
 
   function actualFor(status: Status, scheduled: ParticipantRow | undefined, subId: string) {
