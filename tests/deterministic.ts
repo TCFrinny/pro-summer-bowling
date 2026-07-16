@@ -20,6 +20,9 @@ import "./frame-input-messages";
 import "./standings-movement";
 import "./admin-rebuild-snapshot";
 import "./schedule-default-week";
+import "./live-scoring";
+import "./live-scoring-elim-capacity";
+import "./live-scoring-backward-safety";
 // @ts-expect-error - JS module without types
 import "./patch-cloudflare-config.test.mjs";
 

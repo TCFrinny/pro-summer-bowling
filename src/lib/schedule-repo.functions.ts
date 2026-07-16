@@ -586,11 +586,17 @@ export const saveMatchResult = createServerFn({ method: "POST" })
     if (up.error) throw new Error(up.error.message);
 
     // Retire any live-scoring row for this slot — full result is now the
-    // single source of truth. Failing here (e.g. table absent) is not fatal.
-    try {
-      await (context.supabase as unknown as SupabaseClient)
-        .from("live_match_results").delete().eq("schedule_slot_id", slot.data.id);
-    } catch { /* backward-safe: table may not exist yet */ }
+    // single source of truth. Inspect delete errors rather than swallowing:
+    // only the "table does not exist" case is backward-safe.
+    const liveDel = await (context.supabase as unknown as SupabaseClient)
+      .from("live_match_results").delete().eq("schedule_slot_id", slot.data.id);
+    if (liveDel.error) {
+      const code = (liveDel.error as { code?: string }).code;
+      const msg = liveDel.error.message ?? "";
+      if (code !== "42P01" && !/does not exist/i.test(msg)) {
+        throw new Error(`live retire failed: ${msg}`);
+      }
+    }
 
     // Mark week completed if every slot has a result.
     const wkSlots = await context.supabase.from("schedule_slots")

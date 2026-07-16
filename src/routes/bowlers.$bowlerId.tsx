@@ -225,7 +225,15 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
           )}
         </span>
         <span className="tabular-nums text-xs text-muted-foreground">
-          {h.absent ? "—" : `${h.scores.join(" · ")} = ${h.scratchTotal}`}
+          {h.absent
+            ? "—"
+            : h.scoreOnly
+              ? (() => {
+                  const mask = h.pairCompleted ?? [true, true, true];
+                  const parts = h.scores.map((g, i) => (mask[i] ? String(g) : "—"));
+                  return `${parts.join(" · ")} = ${h.scratchTotal}`;
+                })()
+              : `${h.scores.join(" · ")} = ${h.scratchTotal}`}
         </span>
         <span className="rounded px-2 py-0.5 font-display text-sm text-gold tabular-nums">
           {formatPoints(h.totalPoints)} – {formatPoints(h.pointsLost)}
@@ -244,6 +252,19 @@ function WeekRow({ h }: { h: BowlerHistoryRow }) {
               {h.pointsOverridden && h.overrideReason && (
                 <> Awarded W-L via manual override: “{h.overrideReason}”.</>
               )}
+            </div>
+          ) : h.scoreOnly ? (
+            <div className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[11px] leading-snug text-primary space-y-1">
+              <div>
+                Full linescore unavailable — final-week live entry
+                ({h.completedGameCount ?? 0}/3 games recorded).
+                Frame-derived advanced stats are skipped for this week.
+              </div>
+              <div className="text-foreground">
+                Scores: {h.scores.map((g, i) => ((h.pairCompleted ?? [true,true,true])[i] ? g : "pending")).join(" · ")}
+                {" · "}Handicap set {h.handicapTotal}
+                {" · "}Result {h.result}
+              </div>
             </div>
           ) : h.linescore ? (
             <>

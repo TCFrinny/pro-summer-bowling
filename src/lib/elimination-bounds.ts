@@ -67,12 +67,21 @@ export function computeEliminationBounds(
   const perBowlerUnawarded = new Map<BowlerId, Array<{ opp: BowlerId; units: number }>>();
   for (const b of active) perBowlerUnawarded.set(b.id, []);
 
+  // Per-bowler count of remaining weeks with NO scheduled match involving them.
+  // Each such phantom week contributes an unknown future 7-point matchup (14 units)
+  // to that bowler's absolute maximum.
+  const phantomUnits = new Map<BowlerId, number>();
+  for (const b of active) phantomUnits.set(b.id, 0);
+
   let weeksRemaining = 0;
   let totalUnawardedUnits = 0;
   for (let w = 1; w <= input.totalWeeks; w++) {
     const matches = input.matchesByWeek[w] ?? [];
     let anyUnresolved = matches.length === 0;
+    const bowlersScheduledThisWeek = new Set<BowlerId>();
     for (const m of matches) {
+      bowlersScheduledThisWeek.add(m.bowlerA);
+      bowlersScheduledThisWeek.add(m.bowlerB);
       const u = unawardedUnitsForMatch(m.result);
       const aActive = activeSet.has(m.bowlerA);
       const bActive = activeSet.has(m.bowlerB);
@@ -82,18 +91,27 @@ export function computeEliminationBounds(
       if (bActive) perBowlerUnawarded.get(m.bowlerB)!.push({ opp: m.bowlerA, units: u });
       if (aActive || bActive) totalUnawardedUnits += u;
     }
+    // Add phantom units for bowlers not scheduled this week.
+    for (const b of active) {
+      if (!bowlersScheduledThisWeek.has(b.id)) {
+        phantomUnits.set(b.id, (phantomUnits.get(b.id) ?? 0) + 14);
+        anyUnresolved = true;
+      }
+    }
     if (anyUnresolved) weeksRemaining += 1;
   }
 
   const currUnits = new Map<BowlerId, number>();
   for (const b of active) currUnits.set(b.id, Math.round(b.points * 2));
 
-  // absMax per target = current + sum of unawarded units on target's own matches.
+  // absMax per target = current + sum of unawarded units on target's own scheduled
+  // matches + phantom units for weeks without a scheduled matchup.
   const absMax = new Map<BowlerId, number>();
   const targetOwnUnits = new Map<BowlerId, number>();
   for (const b of active) {
     let own = 0;
     for (const entry of perBowlerUnawarded.get(b.id) ?? []) own += entry.units;
+    own += phantomUnits.get(b.id) ?? 0;
     targetOwnUnits.set(b.id, own);
     absMax.set(b.id, (currUnits.get(b.id) ?? 0) + own);
   }

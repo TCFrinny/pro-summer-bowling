@@ -102,11 +102,18 @@ function SchedulePage() {
                       {r ? (
                         <Link
                           to="/weekly-results"
-                          className="rounded bg-accent px-2 py-0.5 font-display text-xs text-gold tabular-nums hover:bg-primary/20"
-                          title="View full linescore"
+                          className="flex flex-col items-center rounded bg-accent px-2 py-0.5 font-display text-xs text-gold tabular-nums hover:bg-primary/20"
+                          title={r.scoreOnly ? "Live · score-only entry" : "View full linescore"}
                         >
-                          {formatPoints(r.totalPointsA)}–
-                          {formatPoints(r.totalPointsB)}
+                          <span>
+                            {formatPoints(r.totalPointsA)}–
+                            {formatPoints(r.totalPointsB)}
+                          </span>
+                          {r.scoreOnly && (
+                            <span className="text-[9px] uppercase tracking-widest text-primary">
+                              {r.completedGameCount === 3 ? "final · scores" : `live ${r.completedGameCount ?? 0}/3`}
+                            </span>
+                          )}
                         </Link>
                       ) : (
                         <span className="px-2 text-xs uppercase tracking-widest text-muted-foreground">
