@@ -39,6 +39,12 @@ interface SideDraft {
   subId: string;
   subStartAvg: string;
 }
+interface PriorIdentity {
+  /** Present when any live game was previously saved for this row. */
+  anyGameSaved: boolean;
+  a: { status: SideStatus; subId: string; entryAverage: number } | null;
+  b: { status: SideStatus; subId: string; entryAverage: number } | null;
+}
 interface RowDraft {
   slotId: string;
   scheduledA: string;
@@ -57,7 +63,9 @@ interface RowDraft {
     a: [number | null, number | null, number | null];
     b: [number | null, number | null, number | null];
   };
+  priorIdentity: PriorIdentity;
 }
+
 
 function toNum(s: string): number | null {
   if (!s.trim()) return null;
@@ -141,7 +149,28 @@ function AdminLiveScoringPage() {
             live?.b_game3 ?? null,
           ],
         },
+        // Snapshot of the FROZEN identity from any prior live save. Used to
+        // detect submitter identity/handicap changes and require confirm.
+        priorIdentity: {
+          anyGameSaved: mask[0] || mask[1] || mask[2] || (
+            live != null && (
+              live.a_game1 != null || live.a_game2 != null || live.a_game3 != null ||
+              live.b_game1 != null || live.b_game2 != null || live.b_game3 != null
+            )
+          ),
+          a: live ? {
+            status: live.side_a.status,
+            subId: live.side_a.status === "substitute" ? (live.side_a.actualId ?? "") : "",
+            entryAverage: live.side_a.entryAverage,
+          } : null,
+          b: live ? {
+            status: live.side_b.status,
+            subId: live.side_b.status === "substitute" ? (live.side_b.actualId ?? "") : "",
+            entryAverage: live.side_b.entryAverage,
+          } : null,
+        },
       };
+
     });
     setRows(drafts);
   }, [q.data]);
@@ -209,11 +238,66 @@ function AdminLiveScoringPage() {
         );
         if (!ok) throw new Error("Overwrite cancelled");
       }
+      // Detect identity/handicap changes vs the frozen prior side. Any
+      // change while `anyGameSaved` requires an explicit admin confirm — the
+      // server rejects without the flag.
+      const identityChanges: { row: RowDraft; sides: ("A" | "B")[] }[] = [];
+      const perRowConfirm = new Map<string, { a: boolean; b: boolean }>();
+      for (const r of rows) {
+        if (r.hasFullResult) continue;
+        if (!r.priorIdentity.anyGameSaved) continue;
+        const submittedA = {
+          status: r.sideA.status,
+          subId: r.sideA.status === "substitute" ? (r.sideA.subId || "") : "",
+          startAvgStr: r.sideA.subStartAvg.trim(),
+        };
+        const submittedB = {
+          status: r.sideB.status,
+          subId: r.sideB.status === "substitute" ? (r.sideB.subId || "") : "",
+          startAvgStr: r.sideB.subStartAvg.trim(),
+        };
+        const changed = (side: "A" | "B"): boolean => {
+          const prior = side === "A" ? r.priorIdentity.a : r.priorIdentity.b;
+          const sub = side === "A" ? submittedA : submittedB;
+          if (!prior) return false;
+          if (prior.status !== sub.status) return true;
+          if (sub.status === "substitute" && prior.subId !== sub.subId) return true;
+          // Compare effective starting average when the field was overridden;
+          // blank means "use pool default", so only flag when submitted value
+          // actually differs from frozen entry average.
+          if (sub.status === "substitute" && sub.startAvgStr !== "") {
+            const n = Number(sub.startAvgStr);
+            if (Number.isFinite(n) && Math.abs(n - prior.entryAverage) > 1e-9) return true;
+          }
+          return false;
+        };
+        const changes: ("A" | "B")[] = [];
+        if (changed("A")) changes.push("A");
+        if (changed("B")) changes.push("B");
+        if (changes.length > 0) identityChanges.push({ row: r, sides: changes });
+      }
+      if (identityChanges.length > 0) {
+        const summary = identityChanges
+          .map((c) => `  • ${c.row.scheduledNameA} vs ${c.row.scheduledNameB} (side ${c.sides.join(", ")})`)
+          .join("\n");
+        const ok = typeof window !== "undefined" && window.confirm(
+          `Substitute identity or Starting Average changed on a matchup with previously saved games:\n${summary}\n\n` +
+          `Continuing will REPLACE the frozen handicap used by every already-saved game on that side. Continue?`,
+        );
+        if (!ok) throw new Error("Identity change cancelled");
+        for (const c of identityChanges) {
+          perRowConfirm.set(c.row.slotId, {
+            a: c.sides.includes("A"),
+            b: c.sides.includes("B"),
+          });
+        }
+      }
       const matches = rows
         .filter((r) => !r.hasFullResult)
         .map((r) => {
           const a = toNum(r.scores.a[game - 1]);
           const b = toNum(r.scores.b[game - 1]);
+          const confirm = perRowConfirm.get(r.slotId);
           return {
             slotId: r.slotId,
             sideA: {
@@ -236,6 +320,9 @@ function AdminLiveScoringPage() {
             },
             scoreA: a,
             scoreB: b,
+            confirmIdentityChange: confirm
+              ? { a: confirm.a, b: confirm.b }
+              : undefined,
           };
         })
         // A row is only submittable when BOTH sides have valid scores.
@@ -250,6 +337,7 @@ function AdminLiveScoringPage() {
       if (matches.length === 0) throw new Error("No scores entered for this game");
       return save({ data: { gameNumber: game, matches } });
     },
+
     onSuccess: async (_r, game) => {
       setBanner({ kind: "ok", msg: `Game ${game} saved.` });
       await qc.invalidateQueries({ queryKey: ["admin", "live-scoring"] });

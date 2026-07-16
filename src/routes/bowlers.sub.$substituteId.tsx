@@ -194,34 +194,51 @@ function WeekRow({ h }: { h: SubstituteWeekRow }) {
       </button>
       {open && (
         <div className="border-t border-border/60 p-3 space-y-4">
-          <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
-            <span>Start avg <span className="text-gold">{h.startingAverageAtMatch.toFixed(1)}</span></span>
-            <span>Hdcp used <span className="text-gold">+{h.handicapAtMatch}</span></span>
-            <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
-            <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
-            <span>Opens <span className="text-gold">{h.weekOpens}</span></span>
-            <span>Marks <span className="text-gold">{h.weekMarks}</span></span>
-            <span>Mark % <span className="text-gold">{h.weekMarkPct.toFixed(1)}%</span></span>
-            <span>Strike % <span className="text-gold">{h.weekStrikePct.toFixed(1)}%</span></span>
-            <span>Spare Conv <span className="text-gold">{h.weekSpareConversionPct.toFixed(1)}%</span></span>
-            <span>Open % <span className="text-gold">{h.weekOpenPct.toFixed(1)}%</span></span>
-            <span>Pins Lost <span className="text-gold">{h.weekPinsLost.toFixed(2)}</span></span>
-            <span>First 5 <span className="text-gold">{h.weekFirst5}</span></span>
-            <span>Last 5 <span className="text-gold">{h.weekLast5}</span></span>
-            <span>Big Opening <span className="text-gold">{h.weekBigOpening}</span></span>
-            <span>Big Finish <span className="text-gold">{h.weekBigFinish}</span></span>
-            <span>
-              Clutch (9–10){" "}
-              <span className="text-gold">
-                {h.weekClutchMarks}/{h.weekClutchOpportunities} · {h.weekClutchPct.toFixed(0)}%
+          {h.scoreOnly ? (
+            <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
+              <span>Start avg <span className="text-gold">{h.startingAverageAtMatch.toFixed(1)}</span></span>
+              <span>Hdcp used <span className="text-gold">+{h.handicapAtMatch}</span></span>
+              <span>Games <span className="text-gold">{h.completedGameCount ?? 0}/3</span></span>
+              <span>Hdcp set <span className="text-gold">{h.handicapTotal}</span></span>
+              <span>POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span></span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest text-muted-foreground md:grid-cols-4">
+              <span>Start avg <span className="text-gold">{h.startingAverageAtMatch.toFixed(1)}</span></span>
+              <span>Hdcp used <span className="text-gold">+{h.handicapAtMatch}</span></span>
+              <span>Strikes <span className="text-gold">{h.weekStrikes}</span></span>
+              <span>Spares <span className="text-gold">{h.weekSpares}</span></span>
+              <span>Opens <span className="text-gold">{h.weekOpens}</span></span>
+              <span>Marks <span className="text-gold">{h.weekMarks}</span></span>
+              <span>Mark % <span className="text-gold">{h.weekMarkPct.toFixed(1)}%</span></span>
+              <span>Strike % <span className="text-gold">{h.weekStrikePct.toFixed(1)}%</span></span>
+              <span>Spare Conv <span className="text-gold">{h.weekSpareConversionPct.toFixed(1)}%</span></span>
+              <span>Open % <span className="text-gold">{h.weekOpenPct.toFixed(1)}%</span></span>
+              <span>Pins Lost <span className="text-gold">{h.weekPinsLost.toFixed(2)}</span></span>
+              <span>First 5 <span className="text-gold">{h.weekFirst5}</span></span>
+              <span>Last 5 <span className="text-gold">{h.weekLast5}</span></span>
+              <span>Big Opening <span className="text-gold">{h.weekBigOpening}</span></span>
+              <span>Big Finish <span className="text-gold">{h.weekBigFinish}</span></span>
+              <span>
+                Clutch (9–10){" "}
+                <span className="text-gold">
+                  {h.weekClutchMarks}/{h.weekClutchOpportunities} · {h.weekClutchPct.toFixed(0)}%
+                </span>
               </span>
-            </span>
-            <span>Hdcp set <span className="text-gold">{h.handicapTotal}</span></span>
-            <span>POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span></span>
-          </div>
-          <ThreeGameLinescore linescore={h.linescore} />
+              <span>Hdcp set <span className="text-gold">{h.handicapTotal}</span></span>
+              <span>POA (set) <span className="text-gold">{formatSigned(h.poaSet)}</span></span>
+            </div>
+          )}
+          {h.linescore ? (
+            <ThreeGameLinescore linescore={h.linescore} />
+          ) : (
+            <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              Full linescore unavailable — score-only entry from Final Week Live Scoring.
+            </div>
+          )}
         </div>
       )}
+
     </div>
   );
 }
