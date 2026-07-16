@@ -345,17 +345,17 @@ create table if not exists public.historical_season_snapshots (
   snapshot jsonb not null,
   built_at timestamptz not null default now()
 );
-grant select                             on public.historical_season_snapshots to anon;
-grant select, insert, update, delete     on public.historical_season_snapshots to authenticated;
-grant all                                on public.historical_season_snapshots to service_role;
+-- PRIVACY: the stored snapshot is the FULL admin snapshot including
+-- unpublished weeks. Anon and non-admin authenticated callers must NEVER
+-- see the raw row; the server-only public reader filters with
+-- filterPublicHistoricalSnapshot before returning any data.
+revoke select on public.historical_season_snapshots from anon;
+grant  select, insert, update, delete on public.historical_season_snapshots to authenticated;
+grant  all                            on public.historical_season_snapshots to service_role;
 alter table public.historical_season_snapshots enable row level security;
+-- Drop any previously-created public policy so a rerun corrects it.
+drop policy if exists "public reads historical snapshot" on public.historical_season_snapshots;
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_season_snapshots'
-                  and policyname='public reads historical snapshot') then
-    create policy "public reads historical snapshot" on public.historical_season_snapshots
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_season_snapshots'
                   and policyname='admin reads all historical snapshot') then
     create policy "admin reads all historical snapshot" on public.historical_season_snapshots
