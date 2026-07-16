@@ -533,7 +533,7 @@ const participantWriteSchema = z.object({
   active: z.boolean().optional(),
 });
 
-function computeHandicapWithSeason(avg: number | null, percent: number | null, base: number | null): number | null {
+export function computeHandicapWithSeason(avg: number | null, percent: number | null, base: number | null): number | null {
   if (avg == null) return null;
   // Fall back to the current-season formula (80% deficit from 160) when the
   // configured percent/base are absent. Matches the existing invariant used
