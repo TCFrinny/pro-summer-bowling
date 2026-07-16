@@ -11,8 +11,8 @@ export const Route = createFileRoute("/admin/seasons")({
 });
 
 function AdminSeasonsPage() {
-  // ADMIN-ONLY listing. Never call the public listPublicSeasons endpoint
-  // here — admins must see draft/private seasons too.
+  // ADMIN-ONLY listing. The public seasons endpoint is intentionally NOT
+  // used here — admins must see draft/private seasons too.
   const q = useQuery({ queryKey: ["admin", "seasons"], queryFn: () => adminListSeasons() });
   const navigate = useNavigate();
 
