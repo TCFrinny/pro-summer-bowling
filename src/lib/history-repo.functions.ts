@@ -376,7 +376,7 @@ export const adminMakeSeasonCurrent = createServerFn({ method: "POST" })
     await ensureAdmin(context);
     const rpc = await (context.supabase.rpc as unknown as (name: string, args: Record<string, unknown>) => Promise<{ error: { message: string; code?: string } | null }>)(
       "switch_current_season",
-      { _season_id: data.seasonId },
+      { _season_id: data.seasonId, _confirm: true },
     );
     if (rpc.error) {
       if (isMissingTable(rpc.error.code) || /does not exist/i.test(rpc.error.message)) {
