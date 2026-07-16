@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 import { getCareerProfile } from "@/lib/history-repo.functions";
-import { aggregateCareerTotals, type CareerSeasonRow } from "@/lib/season-history";
+import { getHistoricalCareerContributions } from "@/lib/historical-repo.functions";
+import {
+  aggregateCareerTotals,
+  mergeHistoricalIntoCareer,
+  type CareerSeasonRow,
+} from "@/lib/season-history";
 
 export const Route = createFileRoute("/people/$personId")({
   head: () => ({
@@ -20,6 +25,10 @@ function PersonPage() {
   const q = useQuery({
     queryKey: ["people", "career", personId],
     queryFn: () => getCareerProfile({ data: { personId } }),
+  });
+  const hist = useQuery({
+    queryKey: ["people", "career-historical", personId],
+    queryFn: () => getHistoricalCareerContributions({ data: { personId } }),
   });
   return (
     <AppShell>
@@ -49,7 +58,9 @@ function PersonPage() {
           >
             <Link to="/bowlers" className="text-sm underline">Roster</Link>
           </PageHeader>
-          <CareerBody rows={q.data.rows} />
+          <CareerBody
+            rows={mergeHistoricalIntoCareer(q.data.rows, hist.data ?? [])}
+          />
           {q.data.person.notes && (
             <p className="mt-4 text-sm text-muted-foreground">{q.data.person.notes}</p>
           )}
@@ -60,8 +71,9 @@ function PersonPage() {
 }
 
 function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
-  const totals = aggregateCareerTotals(rows);
-  if (rows.length === 0) {
+  const sorted = [...rows].sort((a, b) => a.seasonLabel.localeCompare(b.seasonLabel));
+  const totals = aggregateCareerTotals(sorted);
+  if (sorted.length === 0) {
     return <EmptyState title="No public seasons yet" description="This person has no public rostered or substitute record." />;
   }
   return (
@@ -92,7 +104,7 @@ function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {rows.map((r, i) => (
+              {sorted.map((r, i) => (
                 <tr key={`${r.seasonId}-${r.role}-${i}`}>
                   <td className="px-3 py-2">
                     <Link to="/seasons/$seasonId" params={{ seasonId: r.seasonId }} className="underline">
@@ -110,7 +122,7 @@ function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
                   <td className="px-3 py-2 text-right">{r.games ?? "—"}</td>
                   <td className="px-3 py-2 text-right">{r.average != null ? r.average.toFixed(1) : "—"}</td>
                   <td className="px-3 py-2 text-right">{(r.highGame ?? "—") + " / " + (r.highSet ?? "—")}</td>
-                  <td className="px-3 py-2 text-right">{r.points ?? (r.role === "substitute" ? "—" : "—")}</td>
+                  <td className="px-3 py-2 text-right">{r.points ?? "—"}</td>
                   <td className="px-3 py-2 text-right">{r.finalFinish ?? "—"}</td>
                 </tr>
               ))}
@@ -118,7 +130,7 @@ function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
           </table>
         </div>
         <p className="border-t border-border p-3 text-xs text-muted-foreground">
-          Season-level games/averages/points/finish come from that season's saved public snapshot. Missing values are left as em dashes, never zero.
+          Season data comes from that season's saved public snapshot or historical archive. Missing values are dashes, never zero.
         </p>
       </section>
     </div>
