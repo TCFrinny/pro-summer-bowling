@@ -183,7 +183,7 @@ function AdminResultsPage() {
         result: resultBySlot.get(s.id) ?? null,
       });
     }
-    list.sort((a, b) => a.lanePair === b.lanePair ? a.slot - b.slot : a.lanePair.localeCompare(b.lanePair));
+    list.sort(compareLanePairSlotCamel);
     return list;
   }, [query.data, weekList, week, rosterById]);
 
