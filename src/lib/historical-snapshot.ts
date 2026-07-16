@@ -600,26 +600,45 @@ export function dedupeHistoricalContributions(
 
 // ---------------- Deterministic self-tests -------------------------------
 (function selfTest() {
-  const deduped = dedupeHistoricalContributions([
-    { seasonId: "s1", seasonLabel: "S1", role: "rostered", displayName: "n",
-      bowlerNumber: null, startingAverage: null, handicap: null,
-      games: null, scratchPinfall: null, average: null, highGame: null, highSet: null,
-      points: null, finalFinish: null, isChampion: false, hasGameData: false,
-      source: "historical_summary" },
-    { seasonId: "s1", seasonLabel: "S1", role: "rostered", displayName: "n",
-      bowlerNumber: null, startingAverage: null, handicap: null,
-      games: 30, scratchPinfall: 3300, average: 110, highGame: 180, highSet: 500,
-      points: 42, finalFinish: 3, isChampion: false, hasGameData: true,
-      source: "historical_snapshot" },
-    { seasonId: "s2", seasonLabel: "S2", role: "substitute", displayName: "n",
-      bowlerNumber: null, startingAverage: 105, handicap: 45,
-      games: 6, scratchPinfall: 660, average: 110, highGame: 150, highSet: 350,
-      points: null, finalFinish: null, isChampion: false, hasGameData: true,
-      source: "historical_snapshot" },
+  const mk = (over: Partial<HistoricalCareerContribution>): HistoricalCareerContribution => ({
+    seasonId: "s", seasonLabel: "S", role: "rostered", displayName: "n",
+    bowlerNumber: null, startingAverage: null, handicap: null,
+    games: null, scratchPinfall: null, average: null, highGame: null, highSet: null,
+    points: null, finalFinish: null, isChampion: false,
+    hasGameData: false, source: "historical_summary", ...over,
+  });
+
+  // (b) snapshot with data beats overlapping summary with data.
+  const d1 = dedupeHistoricalContributions([
+    mk({ seasonId: "s1", games: 30, scratchPinfall: 3300, hasGameData: true, source: "historical_summary" }),
+    mk({ seasonId: "s1", games: 30, scratchPinfall: 3300, points: 42, hasGameData: true, source: "historical_snapshot" }),
   ]);
-  if (deduped.length !== 2) throw new Error(`dedupe collapsed: ${deduped.length}`);
-  const s1 = deduped.find((r) => r.seasonId === "s1")!;
-  if (s1.source !== "historical_snapshot" || s1.games !== 30) {
-    throw new Error("dedupe should have kept the snapshot row");
+  if (d1.length !== 1 || d1[0].source !== "historical_snapshot" || d1[0].points !== 42) {
+    throw new Error("dedupe: snapshot+data should beat summary+data");
+  }
+
+  // (a) summary-only substitute: summary WITH data must beat empty snapshot projection.
+  const d2 = dedupeHistoricalContributions([
+    mk({ seasonId: "s2", role: "substitute", hasGameData: false, source: "historical_snapshot" }),
+    mk({ seasonId: "s2", role: "substitute", games: 6, scratchPinfall: 660, average: 110,
+         highGame: 150, highSet: 350, hasGameData: true, source: "historical_summary" }),
+  ]);
+  if (d2.length !== 1 || d2[0].source !== "historical_summary" || d2[0].games !== 6) {
+    throw new Error("dedupe: summary-with-data must beat empty snapshot projection");
+  }
+
+  // (c) no duplicate season+role rows survive, distinct seasons/roles retained.
+  const d3 = dedupeHistoricalContributions([
+    mk({ seasonId: "s3", role: "rostered", hasGameData: false, source: "historical_summary" }),
+    mk({ seasonId: "s3", role: "rostered", hasGameData: false, source: "historical_snapshot" }),
+    mk({ seasonId: "s3", role: "substitute", games: 3, hasGameData: true, source: "historical_summary" }),
+    mk({ seasonId: "s4", role: "rostered", games: 30, hasGameData: true, source: "historical_snapshot" }),
+  ]);
+  if (d3.length !== 3) throw new Error(`dedupe: expected 3 unique season+role rows, got ${d3.length}`);
+  const keys = new Set(d3.map((r) => `${r.seasonId}::${r.role}`));
+  if (keys.size !== 3) throw new Error("dedupe: duplicate season+role survived");
+  const s3ros = d3.find((r) => r.seasonId === "s3" && r.role === "rostered")!;
+  if (s3ros.source !== "historical_snapshot") {
+    throw new Error("dedupe: neither-has-data should prefer historical_snapshot");
   }
 })();
