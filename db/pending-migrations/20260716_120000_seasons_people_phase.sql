@@ -242,7 +242,7 @@ update public.substitutes s
 -- switch_current_season: atomically promote one season to `current` and
 -- retire every other current season. Admin-guarded inside the function
 -- body so a rogue authenticated user cannot call it directly.
-create or replace function public.switch_current_season(_season_id uuid)
+create or replace function public.switch_current_season(_season_id uuid, _confirm boolean)
 returns void
 language plpgsql
 security definer
@@ -252,11 +252,14 @@ begin
   if not public.current_user_is_admin() then
     raise exception 'not authorized' using errcode = '42501';
   end if;
+  if _confirm is distinct from true then
+    raise exception 'switch_current_season requires explicit confirmation (_confirm=true)';
+  end if;
   if not exists (select 1 from public.seasons where id = _season_id) then
     raise exception 'season % does not exist', _season_id;
   end if;
   -- Retire any previously-current seasons. Only touches status/is_current;
-  -- no scoring rows are modified.
+  -- no scoring rows are modified. status and is_current are kept in sync.
   update public.seasons
      set is_current = false,
          status = case when status = 'current' then 'archived' else status end
@@ -267,13 +270,13 @@ begin
 end;
 $$;
 
-revoke all on function public.switch_current_season(uuid) from public;
-grant execute on function public.switch_current_season(uuid) to authenticated;
+revoke all on function public.switch_current_season(uuid, boolean) from public;
+grant execute on function public.switch_current_season(uuid, boolean) to authenticated;
 
 -- merge_people: repoint every reference from _remove to _keep, then delete
 -- ONLY the duplicate person identity + its aliases. Seasonal roster,
 -- substitute, and season champion rows themselves are preserved.
-create or replace function public.merge_people(_keep uuid, _remove uuid)
+create or replace function public.merge_people(_keep uuid, _remove uuid, _confirm boolean)
 returns jsonb
 language plpgsql
 security definer
@@ -287,6 +290,9 @@ declare
 begin
   if not public.current_user_is_admin() then
     raise exception 'not authorized' using errcode = '42501';
+  end if;
+  if _confirm is distinct from true then
+    raise exception 'merge_people requires explicit confirmation (_confirm=true)';
   end if;
   if _keep is null or _remove is null or _keep = _remove then
     raise exception 'invalid merge arguments';
@@ -353,7 +359,7 @@ begin
 end;
 $$;
 
-revoke all on function public.merge_people(uuid, uuid) from public;
-grant execute on function public.merge_people(uuid, uuid) to authenticated;
+revoke all on function public.merge_people(uuid, uuid, boolean) from public;
+grant execute on function public.merge_people(uuid, uuid, boolean) to authenticated;
 
 commit;

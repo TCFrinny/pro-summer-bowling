@@ -20,7 +20,7 @@
  *   no destructive 2026-data statements.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   aggregateCareerTotals,
@@ -261,8 +261,6 @@ function assert(cond: unknown, msg: string): asserts cond {
   assert(existsSync(pendingPath), "pending migration file must exist");
   const supaMigDir = resolve(__dirname, "../supabase/migrations");
   if (existsSync(supaMigDir)) {
-    // no historical-phase copy allowed in supabase/migrations/
-    const { readdirSync } = require("node:fs") as typeof import("node:fs"); // eslint-disable-line @typescript-eslint/no-require-imports
     const files = readdirSync(supaMigDir);
     for (const f of files) {
       assert(!f.includes("seasons_people_phase"),
@@ -284,6 +282,19 @@ function assert(cond: unknown, msg: string): asserts cond {
   assert(sql.includes("check (btrim(label) <> ''"), "lane pair label must be non-empty");
   assert(sql.includes("people_normalized_name_unique"),
     "must guarantee unique non-null normalized names to avoid ambiguous backfill matches");
+
+  // RPCs require explicit confirmation booleans + admin gate.
+  assert(/switch_current_season\(_season_id uuid, _confirm boolean\)/.test(sql),
+    "switch_current_season RPC must take an explicit _confirm boolean");
+  assert(/merge_people\(_keep uuid, _remove uuid, _confirm boolean\)/.test(sql),
+    "merge_people RPC must take an explicit _confirm boolean");
+  assert(/_confirm is distinct from true/.test(sql),
+    "RPCs must reject calls without _confirm=true");
+  // Server-fn callers must actually pass _confirm=true.
+  assert(/_season_id: data\.seasonId, _confirm: true/.test(HISTORY_SRC),
+    "adminMakeSeasonCurrent must send _confirm=true to switch_current_season");
+  assert(/_keep: data\.keepPersonId, _remove: data\.removePersonId, _confirm: true/.test(HISTORY_SRC),
+    "executePersonMerge must send _confirm=true to merge_people");
 
   // Backfill must NOT rewrite ANY existing scoring data — only touch person_id
   // on unlinked rows (`where ... person_id is null`) and only touch the
