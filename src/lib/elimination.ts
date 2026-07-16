@@ -83,8 +83,16 @@ interface Prep {
   pastPairsPreFinal: Set<string>;
   publishedNextOpp: Map<BowlerId, { week: number; opp: BowlerId } | undefined>;
   weeksRemaining: number;
+  /** Per-fixed-pair remaining unit capacity, keyed `${week}|${pk(a,b)}`.
+   *  Present for both published-unresolved pairs (14 units) AND live-partial
+   *  score-only pairs on the final week (6 or 10 units). Solver-chosen pairs
+   *  in unpublished weeks default to 14 at the site of use. */
+  pairUnits: Map<string, number>;
 }
 interface PrepFail { ok: false; reason: string; }
+function pairUnitKey(week: number, a: BowlerId, b: BowlerId): string {
+  return `${week}|${pk(a, b)}`;
+}
 
 function prepare(input: EliminationInput): Prep | PrepFail {
   const active = [...input.activeBowlers].sort((a, b) => a.id.localeCompare(b.id));
