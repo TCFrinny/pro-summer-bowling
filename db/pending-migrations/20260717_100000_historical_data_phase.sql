@@ -173,13 +173,19 @@ grant select                             on public.historical_schedule_slots to 
 grant select, insert, update, delete     on public.historical_schedule_slots to authenticated;
 grant all                                on public.historical_schedule_slots to service_role;
 alter table public.historical_schedule_slots enable row level security;
+drop policy if exists "public reads historical slots" on public.historical_schedule_slots;
+create policy "public reads historical slots" on public.historical_schedule_slots
+  for select to anon, authenticated
+  using (
+    public.season_is_public_archive(season_id)
+    and exists (
+      select 1 from public.historical_weeks w
+      where w.id = historical_schedule_slots.week_id
+        and w.season_id = historical_schedule_slots.season_id
+        and w.published = true
+    )
+  );
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_schedule_slots'
-                  and policyname='public reads historical slots') then
-    create policy "public reads historical slots" on public.historical_schedule_slots
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_schedule_slots'
                   and policyname='admin reads all historical slots') then
     create policy "admin reads all historical slots" on public.historical_schedule_slots
