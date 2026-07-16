@@ -135,10 +135,11 @@ assert(profile.marks === 0 && profile.framesRolled === 0,
   "score-only: marks/framesRolled must be 0");
 assert(profile.pinsLost === 0, "score-only: pinsLost must be 0");
 
-assert(profile.first5 === 0 && profile.last5 === 0,
-  "score-only: first5/last5 must be 0");
-assert(profile.bigOpening === 0 && profile.bigFinish === 0,
-  "score-only: bigOpening/bigFinish must be 0");
+assert(profile.first5PerGame === 0 && profile.last5PerGame === 0,
+  "score-only: first5/last5 per-game must be 0");
+assert(profile.bigOpeningPerGame === 0 && profile.bigFinishPerGame === 0,
+  "score-only: bigOpening/bigFinish per-game must be 0");
+
 assert(profile.clutchMarks === 0 && profile.clutchOpportunities === 0,
   "score-only: clutch stats must be 0");
 
