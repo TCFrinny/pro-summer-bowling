@@ -15,7 +15,9 @@ const NAV = [
   { to: "/statistics", label: "Statistics" },
   { to: "/lane-data", label: "Lane Data" },
   { to: "/elimination", label: "Elimination" },
+  { to: "/seasons", label: "Seasons" },
 ] as const;
+
 
 function DuckpinBallMark({ className }: { className?: string }) {
   // Duckpin balls have NO finger holes — render as a plain sphere with a
