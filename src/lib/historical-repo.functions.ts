@@ -355,6 +355,25 @@ export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST"
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    const week = await assertWeekInSeason(context.supabase, data.weekId, data.seasonId);
+    if (week.published && data.allowPublished !== true) {
+      throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
+    }
+    // Lane pair must exist in season_lane_pairs config; slot within capacity.
+    const pairs = await loadLanePairConfig(context.supabase, data.seasonId);
+    assertLanePairAndSlot(pairs, data.lanePair, data.slot);
+
+    // Scheduled A/B must be rostered bowlers only. Substitutes may appear
+    // only as ACTUAL participants inside a result.
+    const rosterIds = await loadRosterIds(context.supabase, data.seasonId);
+    if (rosterIds.size > 0) {
+      if (!rosterIds.has(data.bowlerARef)) {
+        throw new Error(`${data.nameA ?? data.bowlerARef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
+      }
+      if (!rosterIds.has(data.bowlerBRef)) {
+        throw new Error(`${data.nameB ?? data.bowlerBRef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
+      }
+    }
     if (data.bowlerARef === data.bowlerBRef) {
       throw new Error("A bowler cannot face themselves.");
     }
@@ -395,11 +414,22 @@ export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST"
 export const adminDeleteHistoricalScheduleSlot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => z.object({
-    id: z.string().uuid(), seasonId: z.string().uuid(), confirm: z.literal(true),
+    id: z.string().uuid(), seasonId: z.string().uuid(),
+    allowPublished: z.boolean().optional(),
+    confirm: z.literal(true),
   }).parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    // Fetch week to check published — cheap round-trip.
+    const cur = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
+      .select("week_id").eq("id", data.id).maybeSingle();
+    if (!cur.error && cur.data) {
+      const week = await assertWeekInSeason(context.supabase, String(cur.data.week_id), data.seasonId);
+      if (week.published && data.allowPublished !== true) {
+        throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to remove.`);
+      }
+    }
     const del = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
       .delete().eq("id", data.id).eq("season_id", data.seasonId);
     if (del.error) throw new Error(del.error.message);
