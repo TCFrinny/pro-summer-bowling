@@ -67,7 +67,13 @@ function BowlerProfile() {
       >
         <ChevronLeft className="h-4 w-4" /> All bowlers
       </Link>
-      <PageHeader title={bowler.name} subtitle="Bowler profile" />
+      <PageHeader title={bowler.name} subtitle="Bowler profile">
+        {bowler.personId && (
+          <Link to="/people/$personId" params={{ personId: bowler.personId }} className="text-sm underline">
+            Career profile
+          </Link>
+        )}
+      </PageHeader>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Entry Avg" value={bowler.entryAverage.toString()} />

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { getSubstituteProfile } from "@/lib/mock-data";
+import { getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
@@ -60,7 +60,16 @@ function SubstituteProfilePage() {
       <PageHeader
         title={profile.name}
         subtitle={`Substitute profile${profile.archived ? " · archived" : ""}`}
-      />
+      >
+        {(() => {
+          const identity = getPublicSubstitutes().find((s) => s.id === profile.id);
+          return identity?.personId ? (
+            <Link to="/people/$personId" params={{ personId: identity.personId }} className="text-sm underline">
+              Career profile
+            </Link>
+          ) : null;
+        })()}
+      </PageHeader>
 
       <div className="mb-4 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-[12px] leading-snug text-primary">
         Match W-L points and credited handicap pinfall from these
