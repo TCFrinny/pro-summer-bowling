@@ -143,11 +143,19 @@ const matchDraftSchema = z.object({
   sideB: sideDraftSchema,
   scoreA: z.number().int().min(0).max(300).nullable(),
   scoreB: z.number().int().min(0).max(300).nullable(),
+  /** Explicit per-side confirmation to REPLACE the frozen identity/handicap
+   *  of a live row that has any game already saved. Absent/false means the
+   *  server will reject any identity change to a saved side. */
+  confirmIdentityChange: z.object({
+    a: z.boolean().optional(),
+    b: z.boolean().optional(),
+  }).optional(),
 });
 const batchInput = z.object({
   gameNumber: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   matches: z.array(matchDraftSchema).min(1),
 });
+
 
 /** Batch-save one game round across matchups. Transactional-ish: we apply
  *  all upserts then rebuild the snapshot once. RLS + the unique
@@ -245,29 +253,61 @@ export const saveLiveGameBatch = createServerFn({ method: "POST" })
       };
 
       // Freeze participation identity at first save. If a prior live row
-      // exists and the requested side matches (same status + same actual id
-      // for substitutes), reuse the frozen JSON exactly so later Game N
-      // saves cannot silently recalc entry averages against a shifted pool.
+      // exists with any saved game, and the resolved effective identity
+      // (status + substitute id + effective starting average) has changed,
+      // reject unless the caller explicitly opts in via
+      // `confirmIdentityChange.{a,b}` — protecting the frozen handicap of
+      // already-saved games from silent recalculation.
       const prior = liveById.get(m.slotId);
       const anyGameSaved =
         prior != null &&
         (prior.a_game1 != null || prior.a_game2 != null || prior.a_game3 != null ||
          prior.b_game1 != null || prior.b_game2 != null || prior.b_game3 != null);
-      const sameIdentity = (
+      const identityChanged = (
         priorSide: LiveSideJson | undefined,
-        sd: z.infer<typeof sideDraftSchema>,
+        submitted: LiveSideJson,
       ): boolean => {
         if (!priorSide) return false;
-        if (priorSide.status !== sd.status) return false;
-        if (sd.status === "substitute") return (priorSide.actualId ?? "") === (sd.substituteId ?? "");
-        return true;
+        if (priorSide.status !== submitted.status) return true;
+        if (submitted.status === "substitute") {
+          if ((priorSide.actualId ?? "") !== (submitted.actualId ?? "")) return true;
+        }
+        // Compare on the effective starting average (drives handicap). Any
+        // change here would silently mutate the frozen handicap used by
+        // already-saved games — must be an explicit admin override.
+        if (Math.abs(priorSide.entryAverage - submitted.entryAverage) > 1e-9) return true;
+        return false;
       };
-      const sideA = anyGameSaved && sameIdentity(prior?.side_a, m.sideA)
+      const submittedA = resolveSide(rA, m.sideA, "A");
+      const submittedB = resolveSide(rB, m.sideB, "B");
+      const changedA = anyGameSaved && identityChanged(prior?.side_a, submittedA);
+      const changedB = anyGameSaved && identityChanged(prior?.side_b, submittedB);
+      const confirmA = m.confirmIdentityChange?.a === true;
+      const confirmB = m.confirmIdentityChange?.b === true;
+      if (changedA && !confirmA) {
+        throw new Error(
+          `Slot ${slot.id} side A identity/handicap change requires explicit confirmation ` +
+          `(prior sub=${prior?.side_a.actualId ?? "-"} avg=${prior?.side_a.entryAverage}, ` +
+          `submitted sub=${submittedA.actualId ?? "-"} avg=${submittedA.entryAverage})`,
+        );
+      }
+      if (changedB && !confirmB) {
+        throw new Error(
+          `Slot ${slot.id} side B identity/handicap change requires explicit confirmation ` +
+          `(prior sub=${prior?.side_b.actualId ?? "-"} avg=${prior?.side_b.entryAverage}, ` +
+          `submitted sub=${submittedB.actualId ?? "-"} avg=${submittedB.entryAverage})`,
+        );
+      }
+      // Reuse the frozen prior JSON exactly when unchanged; adopt the fresh
+      // resolution (new identity + new handicap for every already-saved game)
+      // only when the admin explicitly confirmed the change.
+      const sideA = anyGameSaved && !changedA
         ? (prior!.side_a as LiveSideJson)
-        : resolveSide(rA, m.sideA, "A");
-      const sideB = anyGameSaved && sameIdentity(prior?.side_b, m.sideB)
+        : submittedA;
+      const sideB = anyGameSaved && !changedB
         ? (prior!.side_b as LiveSideJson)
-        : resolveSide(rB, m.sideB, "B");
+        : submittedB;
+
 
       const gameCol = (side: "A" | "B", n: 1 | 2 | 3) =>
         (side === "A" ? "a_game" : "b_game") + String(n);
@@ -324,14 +364,20 @@ async function recomputeWeekCompleted(sb: Sb, weekId: string): Promise<void> {
       .from("live_match_results")
       .select("schedule_slot_id, a_game1, a_game2, a_game3, b_game1, b_game2, b_game3")
       .in("schedule_slot_id", remaining);
-    if (!live.error) {
+    if (live.error) {
+      const code = (live.error as { code?: string }).code;
+      // ONLY the "table missing" case is tolerated — any other error
+      // (permission denied, connection, etc.) must surface so we don't
+      // silently mark the week incomplete based on a bad read.
+      if (code !== "42P01") throw new Error(live.error.message);
+    } else {
       for (const row of (live.data ?? []) as LiveMatchRow[]) {
         const mask = pairCompletedMask(row);
         if (mask[0] && mask[1] && mask[2]) completedLive += 1;
       }
     }
-    // 42P01 → treat live table as empty; nothing else must fail hard.
   }
+
   const completed = (fullSet.size + completedLive) === slotIds.length;
   await sb.from("weeks").update({ completed }).eq("id", weekId);
 }

@@ -52,7 +52,13 @@ export interface SubstituteWeekRow {
   scores: [number, number, number];
   scratchTotal: number;
   handicapTotal: number;
-  linescore: BowlerMatchLinescore;
+  linescore: BowlerMatchLinescore | null;
+  /** True for score-only (final-week live scoring) rows. */
+  scoreOnly?: boolean;
+  /** Number of paired games completed (score-only rows only). */
+  completedGameCount?: 0 | 1 | 2 | 3;
+  /** Per-game paired completion mask (score-only rows only). */
+  pairCompleted?: [boolean, boolean, boolean];
   weekStrikes: number;
   weekSpares: number;
   weekOpens: number;
@@ -69,10 +75,12 @@ export interface SubstituteWeekRow {
   weekClutchMarks: number;
   weekClutchOpportunities: number;
   weekClutchPct: number;
-  /** Per-match POA using the sub's frozen starting average for this match. */
+  /** Per-match POA using the sub's frozen starting average for this match.
+   *  For score-only partials this uses only completed pairs. */
   poaSet: number;
   poaBestGame: number;
 }
+
 
 export interface SubstituteProfile {
   id: string;
@@ -191,73 +199,130 @@ export function buildSubstituteData(
         const part = isA ? r.participationA : r.participationB;
         if (part.status !== "substitute") continue;
         const ls = isA ? r.linescoreA : r.linescoreB;
-        if (!ls) continue;
-        const subId = ls.actualId ?? part.actualId;
+        const scoreOnly = r.scoreOnly === true;
+        if (!ls && !scoreOnly) continue;
+
+        const subId = ls?.actualId ?? part.actualId;
         if (!subId) continue; // anonymous inline sub — cannot link to profile
-        const acc = ensure(subId, ls.actualName || part.actualName || "Substitute");
+
+        const fallbackName = ls?.actualName || part.actualName || "Substitute";
+        const acc = ensure(subId, fallbackName);
+
         const scratchTotal = isA ? r.scratchTotalA : r.scratchTotalB;
         const hdcpTotal = isA ? r.handicapTotalA : r.handicapTotalB;
         const scores = isA ? r.gamesA : r.gamesB;
-        const startingAvg = ls.entryAverage;
-        const hdcp = ls.handicap;
+        // Frozen starting avg / handicap. Full-linescore rows keep them on
+        // the linescore; score-only rows use the frozen MatchResult fields.
+        const startingAvg = ls?.entryAverage ?? (isA ? r.entryAverageA : r.entryAverageB);
+        const hdcp = ls?.handicap ?? (isA ? r.handicapA : r.handicapB);
         const scheduledForName = isA ? r.scheduledNameA : r.scheduledNameB;
         const scheduledForId = isA ? r.scheduledA : r.scheduledB;
         const opponentName = isA ? r.scheduledNameB : r.scheduledNameA;
         const opponentId = isA ? r.scheduledB : r.scheduledA;
 
-        acc.matches += 1;
-        acc.laneUsage.set(m.lanePair, (acc.laneUsage.get(m.lanePair) ?? 0) + 1);
-        for (const g of ls.games) {
-          acc.games += 1;
-          acc.scratchPinfall += g.scratchTotal;
-          if (g.scratchTotal > acc.highGame) acc.highGame = g.scratchTotal;
-          acc.gameScores.push(g.scratchTotal);
-          acc.strikes += g.strikes;
-          acc.spares += g.spares;
-          acc.opens += g.opens;
-          acc.openPinsLeft += g.openPinsLeft;
-          acc.framesRolled += 10;
-          acc.first5 += g.segments.first5;
-          acc.last5 += g.segments.last5;
-          acc.bigOpening += g.segments.bigOpening;
-          acc.bigFinish += g.segments.bigFinish;
-          acc.clutchMarks += g.segments.clutchMarks;
-          acc.clutchOpportunities += 2;
-          acc.poaSum += g.scratchTotal - startingAvg;
+        if (ls) {
+          acc.matches += 1;
+          acc.laneUsage.set(m.lanePair, (acc.laneUsage.get(m.lanePair) ?? 0) + 1);
+          for (const g of ls.games) {
+            acc.games += 1;
+            acc.scratchPinfall += g.scratchTotal;
+            if (g.scratchTotal > acc.highGame) acc.highGame = g.scratchTotal;
+            acc.gameScores.push(g.scratchTotal);
+            acc.strikes += g.strikes;
+            acc.spares += g.spares;
+            acc.opens += g.opens;
+            acc.openPinsLeft += g.openPinsLeft;
+            acc.framesRolled += 10;
+            acc.first5 += g.segments.first5;
+            acc.last5 += g.segments.last5;
+            acc.bigOpening += g.segments.bigOpening;
+            acc.bigFinish += g.segments.bigFinish;
+            acc.clutchMarks += g.segments.clutchMarks;
+            acc.clutchOpportunities += 2;
+            acc.poaSum += g.scratchTotal - startingAvg;
+          }
+          if (scratchTotal > acc.highSet) acc.highSet = scratchTotal;
+
+          const frames = ls.framesRolled;
+          const marks = ls.marks;
+          const spareOpp = ls.spares + ls.opens;
+          const clutchOpp = ls.segments.clutchOpportunities;
+          const poaSet = scratchTotal - 3 * startingAvg;
+          const poaBest = Math.max(...ls.games.map((g) => g.scratchTotal - startingAvg));
+
+          acc.weekRows.push({
+            week: w.week, matchId: m.id, lanePair: m.lanePair,
+            scheduledForName, scheduledForId,
+            opponentName, opponentId,
+            startingAverageAtMatch: startingAvg,
+            handicapAtMatch: hdcp,
+            scores, scratchTotal, handicapTotal: hdcpTotal,
+            linescore: ls,
+            weekStrikes: ls.strikes, weekSpares: ls.spares, weekOpens: ls.opens, weekMarks: marks,
+            weekMarkPct: frames > 0 ? (marks / frames) * 100 : 0,
+            weekStrikePct: frames > 0 ? (ls.strikes / frames) * 100 : 0,
+            weekSpareConversionPct: spareOpp > 0 ? (ls.spares / spareOpp) * 100 : 0,
+            weekOpenPct: frames > 0 ? (ls.opens / frames) * 100 : 0,
+            weekPinsLost: ls.opens > 0 ? ls.openPinsLeft / ls.opens : 0,
+            weekFirst5: ls.segments.first5, weekLast5: ls.segments.last5,
+            weekBigOpening: ls.segments.bigOpening, weekBigFinish: ls.segments.bigFinish,
+            weekClutchMarks: ls.segments.clutchMarks,
+            weekClutchOpportunities: clutchOpp,
+            weekClutchPct: clutchOpp > 0 ? (ls.segments.clutchMarks / clutchOpp) * 100 : 0,
+            poaSet, poaBestGame: poaBest,
+          });
+        } else {
+          // Score-only substitute aggregation. Frame-derived totals stay zero;
+          // completed paired games contribute to games/pinfall/avg/highGame/
+          // POA/lane usage. HighSet requires all 3 pairs complete.
+          const mask = r.pairCompleted ?? [true, true, true];
+          const completedN = (r.completedGameCount ?? 0) as 0 | 1 | 2 | 3;
+          let anyCompleted = false;
+          const completedGameScores: number[] = [];
+          for (let i = 0; i < 3; i++) {
+            if (!mask[i]) continue;
+            anyCompleted = true;
+            const s = scores[i];
+            acc.games += 1;
+            acc.scratchPinfall += s;
+            if (s > acc.highGame) acc.highGame = s;
+            acc.gameScores.push(s);
+            acc.poaSum += s - startingAvg;
+            completedGameScores.push(s);
+          }
+          if (!anyCompleted) continue;
+          acc.matches += 1;
+          acc.laneUsage.set(m.lanePair, (acc.laneUsage.get(m.lanePair) ?? 0) + 1);
+          if (completedN === 3 && scratchTotal > acc.highSet) acc.highSet = scratchTotal;
+
+          const poaSet = scratchTotal - completedN * startingAvg;
+          const poaBest = completedGameScores.length > 0
+            ? Math.max(...completedGameScores.map((s) => s - startingAvg))
+            : 0;
+
+          acc.weekRows.push({
+            week: w.week, matchId: m.id, lanePair: m.lanePair,
+            scheduledForName, scheduledForId,
+            opponentName, opponentId,
+            startingAverageAtMatch: startingAvg,
+            handicapAtMatch: hdcp,
+            scores, scratchTotal, handicapTotal: hdcpTotal,
+            linescore: null,
+            scoreOnly: true,
+            completedGameCount: completedN,
+            pairCompleted: mask,
+            weekStrikes: 0, weekSpares: 0, weekOpens: 0, weekMarks: 0,
+            weekMarkPct: 0, weekStrikePct: 0, weekSpareConversionPct: 0,
+            weekOpenPct: 0, weekPinsLost: 0,
+            weekFirst5: 0, weekLast5: 0, weekBigOpening: 0, weekBigFinish: 0,
+            weekClutchMarks: 0, weekClutchOpportunities: 0, weekClutchPct: 0,
+            poaSet, poaBestGame: poaBest,
+          });
         }
-        if (scratchTotal > acc.highSet) acc.highSet = scratchTotal;
-
-        const frames = ls.framesRolled;
-        const marks = ls.marks;
-        const spareOpp = ls.spares + ls.opens;
-        const clutchOpp = ls.segments.clutchOpportunities;
-        const poaSet = scratchTotal - 3 * startingAvg;
-        const poaBest = Math.max(...ls.games.map((g) => g.scratchTotal - startingAvg));
-
-        acc.weekRows.push({
-          week: w.week, matchId: m.id, lanePair: m.lanePair,
-          scheduledForName, scheduledForId,
-          opponentName, opponentId,
-          startingAverageAtMatch: startingAvg,
-          handicapAtMatch: hdcp,
-          scores, scratchTotal, handicapTotal: hdcpTotal,
-          linescore: ls,
-          weekStrikes: ls.strikes, weekSpares: ls.spares, weekOpens: ls.opens, weekMarks: marks,
-          weekMarkPct: frames > 0 ? (marks / frames) * 100 : 0,
-          weekStrikePct: frames > 0 ? (ls.strikes / frames) * 100 : 0,
-          weekSpareConversionPct: spareOpp > 0 ? (ls.spares / spareOpp) * 100 : 0,
-          weekOpenPct: frames > 0 ? (ls.opens / frames) * 100 : 0,
-          weekPinsLost: ls.opens > 0 ? ls.openPinsLeft / ls.opens : 0,
-          weekFirst5: ls.segments.first5, weekLast5: ls.segments.last5,
-          weekBigOpening: ls.segments.bigOpening, weekBigFinish: ls.segments.bigFinish,
-          weekClutchMarks: ls.segments.clutchMarks,
-          weekClutchOpportunities: clutchOpp,
-          weekClutchPct: clutchOpp > 0 ? (ls.segments.clutchMarks / clutchOpp) * 100 : 0,
-          poaSet, poaBestGame: poaBest,
-        });
       }
     }
   }
+
 
   // Ensure every pool sub has an entry (zero stats OK) so an active
   // unused sub appears in the public list.

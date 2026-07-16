@@ -52,8 +52,29 @@ function weeks(): WeekSummary[] {
 
 const clock = () => new Date("2026-07-01T00:00:00Z");
 
-// (0-games case is covered by the general elimination tests — a pair with
-// no live row yet is treated as fully-remaining scheduled capacity.)
+// --- 0 games completed: a published matchup with no live row and no full
+// result must expose the full 7-point (14-half) remaining capacity per side.
+{
+  const A = bowler("a", "Alex", 0);
+  const B = bowler("b", "Ben", 0);
+  // Bare Match with no `result` — the solver must treat it as a fully
+  // unresolved published matchup with 14 half-points on the wire.
+  const bareMatch: Match = {
+    id: "m0", week: 1, lanePair: "1-2", slot: 0, status: "scheduled",
+    bowlerA: "a", bowlerB: "b",
+  };
+  const snap = computeElimination({
+    activeBowlers: [A, B], weeks: weeks(),
+    matchesByWeek: { 1: [bareMatch] }, totalWeeks: 1, now: clock, nodeBudget: 10000,
+  });
+  const aRow = snap.rows.find((r) => r.bowler.id === "a")!;
+  const bRow = snap.rows.find((r) => r.bowler.id === "b")!;
+  // 0 current + up to 7 remaining = 7 max on each side (14 half-units total).
+  expect(aRow.maxFinalPoints === 7, `A max 7 with 0 games (got ${aRow.maxFinalPoints})`);
+  expect(bRow.maxFinalPoints === 7, `B max 7 with 0 games (got ${bRow.maxFinalPoints})`);
+}
+
+
 
 
 // --- 1 game completed (A wins 2-0) → 5 points remaining in pair.
