@@ -797,7 +797,7 @@ export const executePersonMerge = createServerFn({ method: "POST" })
     // Atomic execution lives in the SQL function; it repoints every
     // reference then deletes only the duplicate person + its aliases.
     // Seasonal roster/substitute/result rows are NEVER deleted.
-    const rpc = await (context.supabase.rpc as unknown as (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string; code?: string } | null }>)(
+    const rpc = await (context.supabase.rpc as unknown as (name: string, args: Record<string, unknown>) => Promise<{ error: { message: string; code?: string } | null }>)(
       "merge_people",
       { _keep: data.keepPersonId, _remove: data.removePersonId },
     );
@@ -807,7 +807,7 @@ export const executePersonMerge = createServerFn({ method: "POST" })
       }
       throw new Error(rpc.error.message);
     }
-    return { ok: true, result: rpc.data };
+    return { ok: true as const };
   });
 
 // ---------------- PUBLIC: Career profile from saved snapshots -------------

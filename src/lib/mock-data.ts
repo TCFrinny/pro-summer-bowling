@@ -103,6 +103,11 @@ export interface Bowler {
   actualGamesRolled: number;
   actualScratchPinfall: number;
   movement: number;
+  /** Optional permanent-person link. Present after the multi-season
+   *  history migration is applied and the snapshot builder threads
+   *  `person_id` from the rostered_bowlers row. Older saved snapshots
+   *  MUST still parse and render — treat as undefined when missing. */
+  personId?: string;
 }
 
 export type MatchStatus = "scheduled" | "completed";

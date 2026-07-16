@@ -34,6 +34,10 @@ export interface SubstituteIdentity {
   bowlerNumber: string | null;
   active: boolean;
   archived: boolean;
+  /** Optional permanent-person link. Present after the multi-season
+   *  history migration is applied. Older snapshots without this field
+   *  MUST still parse — treat as undefined when missing. */
+  personId?: string;
 }
 
 export interface SubstituteWeekRow {
