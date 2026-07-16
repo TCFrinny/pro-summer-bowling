@@ -52,7 +52,8 @@ function SeasonsList({
   if (seasons.length === 0) {
     return <EmptyState title="No public seasons yet" description="Archived seasons will appear here once published." />;
   }
-  const [current, ...archived] = seasons[0].status === "current" ? seasons : [null, ...seasons];
+  const current = seasons[0].status === "current" ? seasons[0] : null;
+  const archived = current ? seasons.slice(1) : seasons;
   return (
     <div className="space-y-6">
       {current && (
@@ -76,6 +77,7 @@ function SeasonsList({
     </div>
   );
 }
+
 
 function SeasonCard({
   season,

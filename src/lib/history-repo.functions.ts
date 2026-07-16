@@ -109,26 +109,25 @@ async function fetchBowlerCounts(sb: Sb, seasonIds: string[]): Promise<Record<st
   return counts;
 }
 
+function makePublicClient(): Sb {
+  const { createClient } = require("@supabase/supabase-js") as typeof import("@supabase/supabase-js");
+  return createClient<Database>(
+    (process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL)!,
+    (process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY)!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  ) as unknown as Sb;
+}
+
 /** Public — anyone may call. Filters draft/private seasons on the client
- *  via `filterPublicSeasons` from `season-history.ts`; the server returns
- *  everything so admins can reuse the same fetch. */
+ *  via `filterPublicSeasons` from `season-history.ts`. */
 export const listSeasons = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabase } = await import("@/integrations/supabase/client.server").catch(async () => {
-    // Public path: use the browser client's URL + publishable key server-side.
-    const { createClient } = await import("@supabase/supabase-js");
-    return {
-      supabase: createClient<Database>(
-        process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL!,
-        process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY!,
-        { auth: { persistSession: false, autoRefreshToken: false } },
-      ) as unknown as { from: Sb["from"] },
-    } as { supabase: Sb };
-  });
-  const { available, rows } = await fetchSeasons(supabase as Sb);
-  const counts = available ? await fetchBowlerCounts(supabase as Sb, rows.map((r) => r.id)) : {};
+  const sb = makePublicClient();
+  const { available, rows } = await fetchSeasons(sb);
+  const counts = available ? await fetchBowlerCounts(sb, rows.map((r) => r.id)) : {};
   const result: PublicSeasonListResult = { available, seasons: rows, bowlerCounts: counts };
   return result;
 });
+
 
 // ---------------- Season detail ----------------
 
@@ -161,12 +160,8 @@ async function fetchSeasonById(sb: Sb, id: string): Promise<SeasonRecord | null>
 export const getSeasonDetail = createServerFn({ method: "GET" })
   .inputValidator((v) => z.object({ seasonId: z.string().uuid() }).parse(v))
   .handler(async ({ data }) => {
-    const { createClient } = await import("@supabase/supabase-js");
-    const sb = createClient<Database>(
-      process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL!,
-      process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    ) as unknown as Sb;
+    const sb = makePublicClient();
+
 
     const season = await fetchSeasonById(sb, data.seasonId);
     if (!season) {
