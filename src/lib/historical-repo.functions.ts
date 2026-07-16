@@ -1275,7 +1275,11 @@ export const getPublicHistoricalSnapshot = createServerFn({ method: "GET" })
 export const getHistoricalCareerContributions = createServerFn({ method: "GET" })
   .inputValidator((v) => z.object({ personId: z.string().uuid() }).parse(v))
   .handler(async ({ data }) => {
-    const sb = makePublicClient();
+    // PRIVACY: raw snapshots are admin-only; load through service role and
+    // apply filterPublicHistoricalSnapshot + archived+public_visible gate
+    // before deriving any contribution. See getPublicHistoricalSnapshot.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const sb = supabaseAdmin as unknown as Sb;
     // Snapshot contributions: filter snapshots to public seasons only.
     const snaps = await (sb.from as unknown as LooseFrom)("historical_season_snapshots")
       .select("season_id,snapshot");
