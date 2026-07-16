@@ -28,6 +28,7 @@ import {
 } from "@/lib/mock-data";
 import { rosteredRowToBowler, type RosteredRow, type SubRow } from "@/lib/roster-adapter";
 import { computeLiveMatchResult, type LiveMatchRow } from "@/lib/live-scoring";
+import { compareLanePairSlotSnake } from "@/lib/lane-pair-order";
 
 type Sb = SupabaseClient<Database>;
 
@@ -199,10 +200,7 @@ export function assembleWeeksAndMatches(input: {
 
   const matchesByWeek: Record<number, Match[]> = {};
   for (const w of input.weeks) {
-    const slots = (slotsByWeekId.get(w.id) ?? []).slice().sort((a, b) => {
-      if (a.lane_pair === b.lane_pair) return a.slot - b.slot;
-      return a.lane_pair.localeCompare(b.lane_pair);
-    });
+    const slots = (slotsByWeekId.get(w.id) ?? []).slice().sort(compareLanePairSlotSnake);
     const matches: Match[] = [];
     for (const s of slots) {
       if (!LANE_SET.has(s.lane_pair)) continue;

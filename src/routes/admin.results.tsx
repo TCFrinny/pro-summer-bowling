@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { compareLanePairSlotCamel } from "@/lib/lane-pair-order";
 
 export const Route = createFileRoute("/admin/results")({
   head: () => ({
@@ -183,7 +184,7 @@ function AdminResultsPage() {
         result: resultBySlot.get(s.id) ?? null,
       });
     }
-    list.sort((a, b) => a.lanePair === b.lanePair ? a.slot - b.slot : a.lanePair.localeCompare(b.lanePair));
+    list.sort(compareLanePairSlotCamel);
     return list;
   }, [query.data, weekList, week, rosterById]);
 

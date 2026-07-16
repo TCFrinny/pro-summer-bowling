@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { AlertTriangle, Loader2, Save, Trash2 } from "lucide-react";
+import { compareLanePairSlotSnake } from "@/lib/lane-pair-order";
 
 export const Route = createFileRoute("/admin/live-scoring")({
   head: () => ({
@@ -93,7 +94,8 @@ function AdminLiveScoringPage() {
     const liveById = new Map<string, LiveMatchRow>();
     for (const r of q.data.liveRows) liveById.set(r.schedule_slot_id, r);
     const fullSet = new Set(q.data.fullResultSlotIds);
-    const drafts: RowDraft[] = (q.data.slots ?? []).map((s) => {
+    const orderedSlots = (q.data.slots ?? []).slice().sort(compareLanePairSlotSnake);
+    const drafts: RowDraft[] = orderedSlots.map((s) => {
       const live = liveById.get(s.id);
       const mask = live
         ? pairCompletedMask(live)

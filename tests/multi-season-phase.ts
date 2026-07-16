@@ -321,7 +321,7 @@ function assert(cond: unknown, msg: string): asserts cond {
 // -------------------------------------------------------------------------
 import { computeHandicapWithSeason } from "@/lib/history-repo.functions";
 
-const ADMIN_SEASONS_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.seasons.tsx"), "utf8");
+const ADMIN_SEASONS_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.seasons.index.tsx"), "utf8");
 const SEASON_EDITOR_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.seasons.$seasonId.tsx"), "utf8");
 const ADMIN_LAYOUT_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.tsx"), "utf8");
 
