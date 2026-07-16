@@ -160,6 +160,65 @@ export type Database = {
           },
         ]
       }
+      people: {
+        Row: {
+          created_at: string
+          display_name: string
+          id: string
+          normalized_name: string | null
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          display_name: string
+          id?: string
+          normalized_name?: string | null
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string
+          id?: string
+          normalized_name?: string | null
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      person_aliases: {
+        Row: {
+          alias: string
+          created_at: string
+          id: string
+          normalized_alias: string
+          person_id: string
+        }
+        Insert: {
+          alias: string
+          created_at?: string
+          id?: string
+          normalized_alias: string
+          person_id: string
+        }
+        Update: {
+          alias?: string
+          created_at?: string
+          id?: string
+          normalized_alias?: string
+          person_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_aliases_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -217,6 +276,7 @@ export type Database = {
           handicap: number
           id: string
           name: string
+          person_id: string | null
           season_id: string
           updated_at: string
         }
@@ -229,6 +289,7 @@ export type Database = {
           handicap: number
           id: string
           name: string
+          person_id?: string | null
           season_id: string
           updated_at?: string
         }
@@ -241,10 +302,18 @@ export type Database = {
           handicap?: number
           id?: string
           name?: string
+          person_id?: string | null
           season_id?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "rostered_bowlers_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rostered_bowlers_season_id_fkey"
             columns: ["season_id"]
@@ -321,29 +390,108 @@ export type Database = {
           },
         ]
       }
-      seasons: {
+      season_lane_pairs: {
         Row: {
+          active: boolean
           created_at: string
+          display_order: number
           id: string
-          is_current: boolean
           label: string
+          matchup_capacity: number
+          season_id: string
           updated_at: string
         }
         Insert: {
+          active?: boolean
           created_at?: string
+          display_order?: number
           id?: string
-          is_current?: boolean
           label: string
+          matchup_capacity: number
+          season_id: string
           updated_at?: string
         }
         Update: {
+          active?: boolean
           created_at?: string
+          display_order?: number
+          id?: string
+          label?: string
+          matchup_capacity?: number
+          season_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "season_lane_pairs_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      seasons: {
+        Row: {
+          champion_person_id: string | null
+          created_at: string
+          description: string | null
+          end_date: string | null
+          handicap_base: number | null
+          handicap_percent: number | null
+          id: string
+          is_current: boolean
+          label: string
+          point_system: number | null
+          public_visible: boolean
+          start_date: string | null
+          status: string
+          total_weeks: number | null
+          updated_at: string
+        }
+        Insert: {
+          champion_person_id?: string | null
+          created_at?: string
+          description?: string | null
+          end_date?: string | null
+          handicap_base?: number | null
+          handicap_percent?: number | null
+          id?: string
+          is_current?: boolean
+          label: string
+          point_system?: number | null
+          public_visible?: boolean
+          start_date?: string | null
+          status?: string
+          total_weeks?: number | null
+          updated_at?: string
+        }
+        Update: {
+          champion_person_id?: string | null
+          created_at?: string
+          description?: string | null
+          end_date?: string | null
+          handicap_base?: number | null
+          handicap_percent?: number | null
           id?: string
           is_current?: boolean
           label?: string
+          point_system?: number | null
+          public_visible?: boolean
+          start_date?: string | null
+          status?: string
+          total_weeks?: number | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "seasons_champion_person_id_fkey"
+            columns: ["champion_person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       substitutes: {
         Row: {
@@ -354,6 +502,7 @@ export type Database = {
           handicap: number | null
           id: string
           name: string
+          person_id: string | null
           season_id: string
           starting_average: number | null
           updated_at: string
@@ -366,6 +515,7 @@ export type Database = {
           handicap?: number | null
           id: string
           name: string
+          person_id?: string | null
           season_id: string
           starting_average?: number | null
           updated_at?: string
@@ -378,11 +528,19 @@ export type Database = {
           handicap?: number | null
           id?: string
           name?: string
+          person_id?: string | null
           season_id?: string
           starting_average?: number | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "substitutes_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "substitutes_season_id_fkey"
             columns: ["season_id"]
@@ -467,7 +625,15 @@ export type Database = {
         }
         Returns: boolean
       }
+      merge_people: {
+        Args: { _confirm: boolean; _keep: string; _remove: string }
+        Returns: Json
+      }
       substitute_referenced: { Args: { _sub_id: string }; Returns: boolean }
+      switch_current_season: {
+        Args: { _confirm: boolean; _season_id: string }
+        Returns: undefined
+      }
       week_published: { Args: { _week_id: string }; Returns: boolean }
     }
     Enums: {
