@@ -1,4 +1,20 @@
-/** PUBLIC archived-season per-bowler profile. */
+/** PUBLIC archived-season per-bowler profile.
+ *
+ *  League attribution rules (per spec):
+ *    - Points + handicap pinfall credit go to the SCHEDULED bowler even
+ *      when a substitute rolled or the bowler was absent.
+ *    - Scratch games / high game / high set / frame linescore / advanced
+ *      stats stay with the ACTUAL bowler who physically rolled. Absent
+ *      never contributes personal scratch stats.
+ *
+ *  So a single match can appear on this page in two shapes:
+ *    (a) "credit" — this bowler was scheduled but a sub rolled or they
+ *        were absent. Show points/hdcp credit only. NO scratch total.
+ *        NO frame linescore.
+ *    (b) "personal" — this bowler physically rolled (self on their own
+ *        card or as a substitute for someone else). Show scratch stats
+ *        and frame linescore when available.
+ */
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -32,6 +48,8 @@ function SeasonBowlerPage() {
                   || m.scheduledA === participantRef || m.scheduledB === participantRef)
       .map((m) => ({ w, m })),
   );
+
+  const adv = s?.advanced ?? null;
   return (
     <div className="space-y-4">
       <header className="flex items-baseline justify-between">
@@ -48,11 +66,28 @@ function SeasonBowlerPage() {
 
       <section className="grid grid-cols-2 gap-2 md:grid-cols-6 text-sm">
         <Stat label="Points" value={s?.points ?? summary?.points ?? "—"} />
+        <Stat label="Hdcp Pinfall" value={s?.handicapPinfall ?? "—"} />
         <Stat label="Games" value={s?.games ?? summary?.games ?? "—"} />
         <Stat label="Avg" value={s?.scratchAverage != null ? s.scratchAverage.toFixed(1) : (summary?.average != null ? summary.average.toFixed(1) : "—")} />
         <Stat label="High G" value={s?.highGame ?? summary?.highGame ?? "—"} />
         <Stat label="High S" value={s?.highSet ?? summary?.highSet ?? "—"} />
-        <Stat label="Finish" value={summary?.finalFinish ?? "—"} />
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-3 text-xs">
+        <div className="mb-1 font-semibold uppercase tracking-widest text-muted-foreground">
+          Advanced (frame-linescore games)
+        </div>
+        {adv ? (
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+            <Stat label="Games" value={adv.games} />
+            <Stat label="Strikes" value={adv.strikes} />
+            <Stat label="Spares" value={adv.spares} />
+            <Stat label="Opens" value={adv.opens} />
+            <Stat label="Marks" value={adv.marks} />
+          </div>
+        ) : (
+          <p className="text-muted-foreground">Unavailable — no full-linescore games recorded for this bowler.</p>
+        )}
       </section>
 
       <section className="rounded-lg border border-border bg-card">
@@ -74,43 +109,117 @@ function SeasonBowlerPage() {
 function MatchLine({ weekNumber, m, participantRef }: {
   weekNumber: number; m: HistoricalMatch; participantRef: string;
 }) {
-  const isA = m.actualA === participantRef || m.scheduledA === participantRef;
-  const mine = isA
-    ? { has: m.hasGameDataA, scr: m.scratchTotalA, hdcp: m.handicapTotalA, pts: m.finalPointsA,
-        oppName: m.actualNameB || m.scheduledNameB, line: m.linescoreA, absent: m.absentA }
-    : { has: m.hasGameDataB, scr: m.scratchTotalB, hdcp: m.handicapTotalB, pts: m.finalPointsB,
-        oppName: m.actualNameA || m.scheduledNameA, line: m.linescoreB, absent: m.absentB };
+  const scheduledSide: "A" | "B" | null =
+    m.scheduledA === participantRef ? "A" : m.scheduledB === participantRef ? "B" : null;
+  const actualSide: "A" | "B" | null =
+    m.actualA === participantRef ? "A" : m.actualB === participantRef ? "B" : null;
+
+  // Personal stats ONLY when this bowler physically rolled (not sub for
+  // this slot means they're on their own scheduled side; sub means their
+  // ref is the actual on the other's scheduled side).
+  const rolledA = actualSide === "A" && !m.absentA && !!m.scratchGamesA;
+  const rolledB = actualSide === "B" && !m.absentB && !!m.scratchGamesB;
+  const personal = rolledA
+    ? { scr: m.scratchTotalA, hdcp: m.handicapTotalA, line: m.linescoreA,
+        oppName: m.actualNameB || m.scheduledNameB,
+        subFor: m.isSubA ? m.scheduledNameA : null,
+        detailMode: m.detailMode }
+    : rolledB
+    ? { scr: m.scratchTotalB, hdcp: m.handicapTotalB, line: m.linescoreB,
+        oppName: m.actualNameA || m.scheduledNameA,
+        subFor: m.isSubB ? m.scheduledNameB : null,
+        detailMode: m.detailMode }
+    : null;
+
+  // Credit-only row when scheduled here but did NOT roll (sub took the
+  // card, or absent). Suppress when personal already covers it (self on
+  // own scheduled side): rolledSelfOnScheduled below.
+  const scheduledButDidNotRoll =
+    (scheduledSide === "A" && (m.isSubA || m.absentA)) ||
+    (scheduledSide === "B" && (m.isSubB || m.absentB));
+  const credit = scheduledButDidNotRoll ? {
+    pts: scheduledSide === "A" ? m.finalPointsA : m.finalPointsB,
+    hdcpPinfall: scheduledSide === "A" ? m.handicapTotalA : m.handicapTotalB,
+    hasHdcp: scheduledSide === "A" ? m.hasGameDataA : m.hasGameDataB,
+    oppName: scheduledSide === "A" ? (m.actualNameB || m.scheduledNameB) : (m.actualNameA || m.scheduledNameA),
+    subbedBy: scheduledSide === "A" ? (m.isSubA ? m.actualNameA : null) : (m.isSubB ? m.actualNameB : null),
+    absent: scheduledSide === "A" ? m.absentA : m.absentB,
+  } : null;
+
+  const pointsForSelf =
+    scheduledSide === "A" ? m.finalPointsA :
+    scheduledSide === "B" ? m.finalPointsB :
+    null;
+
   const [open, setOpen] = useState(false);
   return (
     <div className="p-3 text-sm" data-testid={`archived-bowler-match-${m.slotId}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      {personal && (
         <div>
-          <span className="mr-2 text-xs text-muted-foreground">Wk {weekNumber}</span>
-          vs <span className="font-medium">{mine.oppName}</span>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
-          <span>{mine.has ? `scratch ${mine.scr} · hdcp ${mine.hdcp}` : "—"}</span>
-          <span className="font-display text-sm text-gold">{mine.pts}</span>
-        </div>
-      </div>
-      {mine.line ? (
-        <div className="mt-2">
-          <button onClick={() => setOpen((v) => !v)}
-            className="flex w-full items-center justify-between rounded border border-border/60 px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground hover:bg-accent/40">
-            <span>View frame linescore</span>
-            {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          </button>
-          {open && (
-            <div className="mt-2 grid gap-2">
-              {mine.line.map((g, i) => <GameLinescore key={i} game={g} index={i} />)}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <span className="mr-2 text-xs text-muted-foreground">Wk {weekNumber}</span>
+              vs <span className="font-medium">{personal.oppName}</span>
+              {personal.subFor && (
+                <span className="ml-2 text-[10px] text-muted-foreground">
+                  (sub for {personal.subFor})
+                </span>
+              )}
+              {!personal.subFor && pointsForSelf !== null && (
+                <span className="ml-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+                  self on own card
+                </span>
+              )}
             </div>
-          )}
+            <div className="flex items-center gap-3 text-xs">
+              <span>scratch {personal.scr} · hdcp {personal.hdcp}</span>
+              {pointsForSelf !== null && !personal.subFor && (
+                <span className="font-display text-sm text-gold">{pointsForSelf}</span>
+              )}
+            </div>
+          </div>
+          {personal.line ? (
+            <div className="mt-2">
+              <button onClick={() => setOpen((v) => !v)}
+                className="flex w-full items-center justify-between rounded border border-border/60 px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground hover:bg-accent/40">
+                <span>View frame linescore</span>
+                {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </button>
+              {open && (
+                <div className="mt-2 grid gap-2">
+                  {personal.line.map((g, i) => <GameLinescore key={i} game={g} index={i} />)}
+                </div>
+              )}
+            </div>
+          ) : personal.detailMode === "game_scores" ? (
+            <div className="mt-2 rounded border border-dashed border-primary/50 px-2 py-1 text-[10px] uppercase tracking-widest text-primary">
+              Frame linescore / advanced stats unavailable — game-scores-only entry.
+            </div>
+          ) : null}
         </div>
-      ) : m.detailMode === "game_scores" && !mine.absent ? (
-        <div className="mt-2 rounded border border-dashed border-primary/50 px-2 py-1 text-[10px] uppercase tracking-widest text-primary">
-          Frame linescore / advanced stats unavailable — game-scores-only entry.
+      )}
+      {credit && (
+        <div className={personal ? "mt-2 border-t border-border/60 pt-2" : ""}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <span className="mr-2 text-xs text-muted-foreground">Wk {weekNumber}</span>
+              <span className="font-medium">Credit</span> vs {credit.oppName}
+              {credit.subbedBy && (
+                <span className="ml-2 text-[10px] text-muted-foreground">
+                  substitute {credit.subbedBy} rolled — personal scratch stats stay with the substitute
+                </span>
+              )}
+              {credit.absent && (
+                <span className="ml-2 text-[10px] text-destructive">absent — no personal scratch stats</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span>hdcp {credit.hasHdcp ? credit.hdcpPinfall : "—"}</span>
+              <span className="font-display text-sm text-gold">{credit.pts}</span>
+            </div>
+          </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

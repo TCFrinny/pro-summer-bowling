@@ -34,6 +34,7 @@ import {
 import {
   buildHistoricalStandings,
   dedupeHistoricalContributions,
+  filterPublicHistoricalSnapshot,
   type HistoricalCareerContribution,
   type HistoricalMatch,
   type HistoricalParticipantMeta,
@@ -303,10 +304,28 @@ export const adminUpdateHistoricalWeek = createServerFn({ method: "POST" })
     date: z.string().nullable().optional(),
     published: z.boolean().optional(),
     completed: z.boolean().optional(),
+    /** Required when editing date/completed on a currently-published week. */
+    allowPublished: z.boolean().optional(),
+    /** Required whenever `published` changes value (publish OR unpublish). */
+    confirmPublicationChange: z.boolean().optional(),
   }).parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    const cur = await assertWeekInSeason(context.supabase, data.id, data.seasonId);
+    const wantsPubChange = data.published !== undefined && data.published !== cur.published;
+    const wantsDateChange = data.date !== undefined;
+    const wantsCompletedChange = data.completed !== undefined;
+    if (wantsPubChange && data.confirmPublicationChange !== true) {
+      throw new Error(
+        `Toggling publication of Week ${cur.weekNumber} requires confirmPublicationChange=true.`,
+      );
+    }
+    if (cur.published && (wantsDateChange || wantsCompletedChange) && data.allowPublished !== true) {
+      throw new Error(
+        `Week ${cur.weekNumber} is published. Set allowPublished=true to modify date/completed.`,
+      );
+    }
     const patch: Record<string, unknown> = {};
     if (data.date !== undefined) patch.date = data.date;
     if (data.published !== undefined) patch.published = data.published;
@@ -408,7 +427,15 @@ export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST"
       throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
     }
     // Lane pair must exist in season_lane_pairs config; slot within capacity.
+    // FAIL CLOSED: refuse to insert new slots when the season has no lane
+    // configuration at all — a season MUST configure lane pairs before
+    // schedule entry so slot bounds/capacities are enforceable.
     const pairs = await loadLanePairConfig(context.supabase, data.seasonId);
+    if (!data.id && pairs.length === 0) {
+      throw new Error(
+        "This season has no lane pairs configured. Configure lane pairs before entering schedule slots.",
+      );
+    }
     assertLanePairAndSlot(pairs, data.lanePair, data.slot);
 
     // FAIL CLOSED: roster query throws on error. When inserting, an empty
@@ -768,10 +795,15 @@ export const adminUpsertHistoricalSummary = createServerFn({ method: "POST" })
       throw new Error(`Participant ${data.participantRef} is not registered as ${data.role} for this season.`);
     }
     // Look up personId server-side too, to keep career profiles honest.
+    // FAIL CLOSED: a DB error must not silently save null person_id and
+    // orphan the summary row from the person's career.
     const personLookup = await (context.supabase.from as unknown as LooseFrom)(
       data.role === "rostered" ? "rostered_bowlers" : "substitutes",
     ).select("person_id").eq("id", data.participantRef).eq("season_id", data.seasonId).maybeSingle();
-    const frozenPersonId = personLookup.error ? null : (personLookup.data?.person_id as string | null) ?? null;
+    if (personLookup.error) {
+      throw new Error(`person_id lookup failed: ${personLookup.error.message}`);
+    }
+    const frozenPersonId = (personLookup.data?.person_id as string | null) ?? null;
     const payload = {
       season_id: data.seasonId,
       participant_ref: data.participantRef,
@@ -1105,10 +1137,12 @@ export const getPublicHistoricalSnapshot = createServerFn({ method: "GET" })
       throw new Error(q.error.message);
     }
     if (!q.data) return { available: true as const, forbidden: false, snapshot: null, season };
+    // PRIVACY: strip unpublished weeks and rebuild standings for public view.
+    const filtered = filterPublicHistoricalSnapshot(q.data.snapshot as HistoricalSnapshot);
     return {
       available: true as const,
       forbidden: false,
-      snapshot: q.data.snapshot as HistoricalSnapshot,
+      snapshot: filtered,
       builtAt: q.data.built_at as string,
       season,
     };

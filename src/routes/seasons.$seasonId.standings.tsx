@@ -1,4 +1,5 @@
-/** PUBLIC archived-season Standings. */
+/** PUBLIC archived-season Standings.
+ *  League tiebreaker: points DESC, handicap pinfall DESC, scratch pinfall DESC. */
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
@@ -16,12 +17,10 @@ function StandingsPage() {
   });
   const snap = q.data?.snapshot;
   if (!snap) return <EmptyState title="No standings yet" description="No cached snapshot for this season." />;
-  const rows = [...snap.standings].sort((a, b) => {
-    const ap = a.points ?? -Infinity, bp = b.points ?? -Infinity;
-    if (bp !== ap) return bp - ap;
-    const api = a.scratchPinfall ?? -Infinity, bpi = b.scratchPinfall ?? -Infinity;
-    return bpi - api;
-  });
+  // Snapshot standings are already sorted server-side by points → handicap
+  // pinfall → scratch pinfall; render in that same order without local
+  // re-sort so the tiebreaker is not accidentally masked.
+  const rows = snap.standings;
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <table className="min-w-full text-sm">
@@ -32,6 +31,7 @@ function StandingsPage() {
             <th className="px-3 py-2 text-right">Matches</th>
             <th className="px-3 py-2 text-right">Points</th>
             <th className="px-3 py-2 text-right">Points lost</th>
+            <th className="px-3 py-2 text-right">Hdcp pinfall</th>
             <th className="px-3 py-2 text-right">Games</th>
             <th className="px-3 py-2 text-right">Pinfall</th>
             <th className="px-3 py-2 text-right">Avg</th>
@@ -39,9 +39,9 @@ function StandingsPage() {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((r, i) => (
+          {rows.map((r) => (
             <tr key={r.participantRef}>
-              <td className="px-3 py-2">{i + 1}</td>
+              <td className="px-3 py-2">{r.rank}</td>
               <td className="px-3 py-2">
                 <Link to="/seasons/$seasonId/bowlers/$participantRef"
                   params={{ seasonId, participantRef: r.participantRef }}
@@ -51,6 +51,7 @@ function StandingsPage() {
               <td className="px-3 py-2 text-right">{r.matchesPlayed}</td>
               <td className="px-3 py-2 text-right">{r.points ?? "—"}</td>
               <td className="px-3 py-2 text-right">{r.pointsLost ?? "—"}</td>
+              <td className="px-3 py-2 text-right">{r.handicapPinfall ?? "—"}</td>
               <td className="px-3 py-2 text-right">{r.games ?? "—"}</td>
               <td className="px-3 py-2 text-right">{r.scratchPinfall ?? "—"}</td>
               <td className="px-3 py-2 text-right">{r.scratchAverage != null ? r.scratchAverage.toFixed(1) : "—"}</td>
