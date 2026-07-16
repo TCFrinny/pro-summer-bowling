@@ -637,13 +637,13 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       const sid = String(s.id);
       const r = resultBySlot.get(sid);
       if (!r) continue;
-      const derived = (r.derived as {
+      const derived = r.derived as (null | {
         detailMode: HistoricalDetailMode;
         a: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
         b: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
         finalPointsA: number; finalPointsB: number; winner: "A" | "B" | "T";
         override: { pointsA: number; pointsB: number } | null;
-      }) | null;
+      });
       if (!derived) continue;
       const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number };
       const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number };
