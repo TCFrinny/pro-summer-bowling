@@ -561,34 +561,79 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     await ensureAdmin(context);
     const season = await ensureNonCurrentSeason(context.supabase, data.seasonId);
     const week = await assertWeekInSeason(context.supabase, data.weekId, data.seasonId);
-    await assertSlotInWeekAndSeason(context.supabase, data.slotId, data.weekId, data.seasonId);
+    const slot = await assertSlotInWeekAndSeason(context.supabase, data.slotId, data.weekId, data.seasonId);
     if (week.published && data.allowPublished !== true) {
       throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
     }
 
+    // Authoritative participant validation — freeze identity server-side.
+    const subIds = await loadSubstituteIds(context.supabase, data.seasonId);
+    async function resolveSide(sideLabel: "A" | "B", side: z.infer<typeof participationSchema>) {
+      const scheduledRef = sideLabel === "A" ? slot.bowlerARef : slot.bowlerBRef;
+      if (side.status === "rostered" || side.status === "absent") {
+        if (side.actualRef !== scheduledRef) {
+          throw new Error(`Side ${sideLabel}: ${side.status} actualRef must equal the scheduled bowler.`);
+        }
+        const id = await loadFrozenIdentity(context.supabase, data.seasonId, scheduledRef, "rostered");
+        if (!id) throw new Error(`Side ${sideLabel}: scheduled rostered bowler not found.`);
+        return id;
+      }
+      // substitute
+      if (!subIds.has(side.actualRef)) {
+        throw new Error(`Side ${sideLabel}: substitute is not registered for this season.`);
+      }
+      const id = await loadFrozenIdentity(context.supabase, data.seasonId, side.actualRef, "substitute");
+      if (!id) throw new Error(`Side ${sideLabel}: substitute not found.`);
+      return id;
+    }
+    const frozenA = await resolveSide("A", data.sideA);
+    const frozenB = await resolveSide("B", data.sideB);
+
     const bowledA = data.sideA.status !== "absent";
     const bowledB = data.sideB.status !== "absent";
-    if (bowledA && (!data.gameScoresA)) {
-      throw new Error(`${data.sideA.actualName || "Side A"}: three game scores required.`);
+    if (bowledA && !data.gameScoresA) {
+      throw new Error(`${frozenA.name || "Side A"}: three game scores required.`);
     }
-    if (bowledB && (!data.gameScoresB)) {
-      throw new Error(`${data.sideB.actualName || "Side B"}: three game scores required.`);
+    if (bowledB && !data.gameScoresB) {
+      throw new Error(`${frozenB.name || "Side B"}: three game scores required.`);
     }
-    if (data.detailMode === "full_linescore" && (!data.linescoreA || !data.linescoreB)) {
-      throw new Error("Full-linescore save requires a complete linescore for each side that bowled.");
+    // Per-side linescore requirement — only require it for the sides that
+    // are NOT absent. Absent side never has a linescore.
+    if (data.detailMode === "full_linescore") {
+      if (bowledA && !data.linescoreA) {
+        throw new Error(`Full-linescore save: ${frozenA.name || "Side A"} linescore missing.`);
+      }
+      if (bowledB && !data.linescoreB) {
+        throw new Error(`Full-linescore save: ${frozenB.name || "Side B"} linescore missing.`);
+      }
     }
 
-    // Absent semantics — match 2026 rules exactly. Absent-without-scores is
-    // only valid when an explicit points override is supplied; otherwise
-    // the standings would silently credit fabricated 0-0 points.
     const aHas = sideHasScores(data.sideA);
     const bHas = sideHasScores(data.sideB);
     if ((!aHas || !bHas) && !data.pointOverride) {
-      throw new Error("Absent side without three absent scores requires an explicit points override (points A / points B).");
+      throw new Error("Absent side without three absent scores requires an explicit points override.");
     }
 
-    const sideA = participationInput(data.sideA, data.gameScoresA ?? null);
-    const sideB = participationInput(data.sideB, data.gameScoresB ?? null);
+    // Rebuild the frozen side payload from authoritative DB values.
+    const frozenSideA = {
+      status: data.sideA.status,
+      actualRef: frozenA.ref,
+      actualName: frozenA.name,
+      entryAverage: frozenA.entryAverage,
+      handicap: frozenA.handicap,
+      absentScores: data.sideA.absentScores ?? null,
+    };
+    const frozenSideB = {
+      status: data.sideB.status,
+      actualRef: frozenB.ref,
+      actualName: frozenB.name,
+      entryAverage: frozenB.entryAverage,
+      handicap: frozenB.handicap,
+      absentScores: data.sideB.absentScores ?? null,
+    };
+
+    const sideA = participationInput(frozenSideA, data.gameScoresA ?? null);
+    const sideB = participationInput(frozenSideB, data.gameScoresB ?? null);
     const outcome = computeHistoricalMatch({
       pointSystem: season.pointSystem, sideA, sideB,
       override: data.pointOverride ?? null,
@@ -608,7 +653,7 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     const payload = {
       season_id: data.seasonId, week_id: data.weekId, slot_id: data.slotId,
       detail_mode: data.detailMode,
-      side_a: data.sideA, side_b: data.sideB,
+      side_a: frozenSideA, side_b: frozenSideB,
       linescore_a: data.detailMode === "full_linescore" ? data.linescoreA ?? null : null,
       linescore_b: data.detailMode === "full_linescore" ? data.linescoreB ?? null : null,
       game_scores_a: data.gameScoresA,
@@ -622,7 +667,6 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
       .upsert(payload, { onConflict: "slot_id" });
     if (up.error) throw new Error(up.error.message);
 
-    // Rebuild the historical snapshot immediately (cheap — no solver).
     await rebuildHistoricalSnapshotServer(context.supabase, data.seasonId);
     return { ok: true, points: { a: outcome.finalPointsA, b: outcome.finalPointsB } };
   });
