@@ -322,10 +322,15 @@ export const adminDeleteHistoricalWeek = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => z.object({
     id: z.string().uuid(), seasonId: z.string().uuid(), confirm: z.literal(true),
+    allowPublished: z.boolean().optional(),
   }).parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    const w = await assertWeekInSeason(context.supabase, data.id, data.seasonId);
+    if (w.published && data.allowPublished !== true) {
+      throw new Error(`Week ${w.weekNumber} is published. Set allowPublished=true to delete.`);
+    }
     const del = await (context.supabase.from as unknown as LooseFrom)("historical_weeks")
       .delete().eq("id", data.id).eq("season_id", data.seasonId);
     if (del.error) throw new Error(del.error.message);
