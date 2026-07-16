@@ -261,8 +261,6 @@ function assert(cond: unknown, msg: string): asserts cond {
   assert(existsSync(pendingPath), "pending migration file must exist");
   const supaMigDir = resolve(__dirname, "../supabase/migrations");
   if (existsSync(supaMigDir)) {
-    // no historical-phase copy allowed in supabase/migrations/
-    const { readdirSync } = require("node:fs") as typeof import("node:fs"); // eslint-disable-line @typescript-eslint/no-require-imports
     const files = readdirSync(supaMigDir);
     for (const f of files) {
       assert(!f.includes("seasons_people_phase"),
