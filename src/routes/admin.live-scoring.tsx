@@ -192,7 +192,7 @@ function AdminLiveScoringPage() {
   if (q.isLoading) {
     return (
       <>
-        <PageHeader title="Final Week Live Scoring" description="Compact per-game entry." />
+        <PageHeader title="Final Week Live Scoring" subtitle="Compact per-game entry." />
         <div className="flex items-center justify-center py-10 text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading…
         </div>
@@ -226,7 +226,7 @@ function AdminLiveScoringPage() {
     <>
       <PageHeader
         title={`Final Week Live Scoring — Week ${week.weekNumber}`}
-        description="Enter scratch scores per game. Points award automatically as pairs complete."
+        subtitle="Enter scratch scores per game. Points award automatically as pairs complete."
       />
       {banner && (
         <div

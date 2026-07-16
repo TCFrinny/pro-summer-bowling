@@ -25,6 +25,7 @@ import { Route as LeaderboardsAdvancedRouteImport } from './routes/leaderboards.
 import { Route as BowlersBowlerIdRouteImport } from './routes/bowlers.$bowlerId'
 import { Route as AdminScheduleRouteImport } from './routes/admin.schedule'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
+import { Route as AdminLiveScoringRouteImport } from './routes/admin.live-scoring'
 import { Route as AdminBowlersRouteImport } from './routes/admin.bowlers'
 import { Route as BowlersSubSubstituteIdRouteImport } from './routes/bowlers.sub.$substituteId'
 
@@ -108,6 +109,11 @@ const AdminResultsRoute = AdminResultsRouteImport.update({
   path: '/results',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminLiveScoringRoute = AdminLiveScoringRouteImport.update({
+  id: '/live-scoring',
+  path: '/live-scoring',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminBowlersRoute = AdminBowlersRouteImport.update({
   id: '/bowlers',
   path: '/bowlers',
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/admin/bowlers': typeof AdminBowlersRoute
+  '/admin/live-scoring': typeof AdminLiveScoringRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/admin/bowlers': typeof AdminBowlersRoute
+  '/admin/live-scoring': typeof AdminLiveScoringRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -172,6 +180,7 @@ export interface FileRoutesById {
   '/statistics': typeof StatisticsRoute
   '/weekly-results': typeof WeeklyResultsRoute
   '/admin/bowlers': typeof AdminBowlersRoute
+  '/admin/live-scoring': typeof AdminLiveScoringRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
@@ -194,6 +203,7 @@ export interface FileRouteTypes {
     | '/statistics'
     | '/weekly-results'
     | '/admin/bowlers'
+    | '/admin/live-scoring'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -213,6 +223,7 @@ export interface FileRouteTypes {
     | '/statistics'
     | '/weekly-results'
     | '/admin/bowlers'
+    | '/admin/live-scoring'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -233,6 +244,7 @@ export interface FileRouteTypes {
     | '/statistics'
     | '/weekly-results'
     | '/admin/bowlers'
+    | '/admin/live-scoring'
     | '/admin/results'
     | '/admin/schedule'
     | '/bowlers/$bowlerId'
@@ -369,6 +381,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminResultsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/live-scoring': {
+      id: '/admin/live-scoring'
+      path: '/live-scoring'
+      fullPath: '/admin/live-scoring'
+      preLoaderRoute: typeof AdminLiveScoringRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/bowlers': {
       id: '/admin/bowlers'
       path: '/bowlers'
@@ -388,12 +407,14 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminBowlersRoute: typeof AdminBowlersRoute
+  AdminLiveScoringRoute: typeof AdminLiveScoringRoute
   AdminResultsRoute: typeof AdminResultsRoute
   AdminScheduleRoute: typeof AdminScheduleRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminBowlersRoute: AdminBowlersRoute,
+  AdminLiveScoringRoute: AdminLiveScoringRoute,
   AdminResultsRoute: AdminResultsRoute,
   AdminScheduleRoute: AdminScheduleRoute,
 }
