@@ -263,25 +263,11 @@ export const saveLiveGameBatch = createServerFn({ method: "POST" })
         prior != null &&
         (prior.a_game1 != null || prior.a_game2 != null || prior.a_game3 != null ||
          prior.b_game1 != null || prior.b_game2 != null || prior.b_game3 != null);
-      const identityChanged = (
-        priorSide: LiveSideJson | undefined,
-        submitted: LiveSideJson,
-      ): boolean => {
-        if (!priorSide) return false;
-        if (priorSide.status !== submitted.status) return true;
-        if (submitted.status === "substitute") {
-          if ((priorSide.actualId ?? "") !== (submitted.actualId ?? "")) return true;
-        }
-        // Compare on the effective starting average (drives handicap). Any
-        // change here would silently mutate the frozen handicap used by
-        // already-saved games — must be an explicit admin override.
-        if (Math.abs(priorSide.entryAverage - submitted.entryAverage) > 1e-9) return true;
-        return false;
-      };
       const submittedA = resolveSide(rA, m.sideA, "A");
       const submittedB = resolveSide(rB, m.sideB, "B");
-      const changedA = anyGameSaved && identityChanged(prior?.side_a, submittedA);
-      const changedB = anyGameSaved && identityChanged(prior?.side_b, submittedB);
+      const changedA = anyGameSaved && isLiveIdentityChanged(prior?.side_a, submittedA);
+      const changedB = anyGameSaved && isLiveIdentityChanged(prior?.side_b, submittedB);
+
       const confirmA = m.confirmIdentityChange?.a === true;
       const confirmB = m.confirmIdentityChange?.b === true;
       if (changedA && !confirmA) {
