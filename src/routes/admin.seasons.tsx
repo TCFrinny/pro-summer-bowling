@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { PageHeader, EmptyState } from "@/components/layout/AppShell";
-import { listSeasons } from "@/lib/history-repo.functions";
-import { Loader2 } from "lucide-react";
+import { adminListSeasons, adminUpsertSeason } from "@/lib/history-repo.functions";
+import { Loader2, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/admin/seasons")({
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
@@ -10,12 +11,16 @@ export const Route = createFileRoute("/admin/seasons")({
 });
 
 function AdminSeasonsPage() {
-  const q = useQuery({ queryKey: ["admin", "seasons"], queryFn: () => listSeasons() });
+  const q = useQuery({ queryKey: ["admin", "seasons"], queryFn: () => adminListSeasons() });
+  const [newLabel, setNewLabel] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
   return (
     <>
       <PageHeader
         title="Seasons"
-        subtitle="Create, configure, and archive seasons. Historical season editing is scaffolded here; full historical results land in the next phase."
+        subtitle="Create, configure, and archive seasons. New seasons are created as Draft — an explicit action makes one current."
       />
       {q.isLoading && (
         <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
@@ -27,44 +32,79 @@ function AdminSeasonsPage() {
         />
       )}
       {q.data && q.data.available && (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table className="min-w-full text-sm">
-            <thead className="bg-accent/40 text-xs uppercase tracking-widest text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 text-left">Label</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Visibility</th>
-                <th className="px-3 py-2 text-right">Points</th>
-                <th className="px-3 py-2 text-right">Weeks</th>
-                <th className="px-3 py-2 text-left">Dates</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {q.data.seasons.map((s) => (
-                <tr key={s.id}>
-                  <td className="px-3 py-2 font-medium">{s.label}</td>
-                  <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
-                  <td className="px-3 py-2 text-xs">{s.publicVisible ? "Public" : "Private"}</td>
-                  <td className="px-3 py-2 text-right">{s.pointSystem ?? "—"}</td>
-                  <td className="px-3 py-2 text-right">{s.totalWeeks ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {s.startDate ? new Date(s.startDate).toLocaleDateString() : "—"}
-                    {" – "}
-                    {s.endDate ? new Date(s.endDate).toLocaleDateString() : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Link to="/seasons/$seasonId" params={{ seasonId: s.id }} className="text-xs underline">View</Link>
-                  </td>
+        <>
+          <form
+            className="mb-4 flex flex-wrap items-center gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const label = newLabel.trim();
+              if (!label || creating) return;
+              setCreating(true);
+              setMsg(null);
+              try {
+                await adminUpsertSeason({ data: { label } });
+                setNewLabel("");
+                setMsg("Draft season created.");
+                await q.refetch();
+              } catch (err) {
+                setMsg(err instanceof Error ? err.message : "Create failed");
+              } finally {
+                setCreating(false);
+              }
+            }}
+          >
+            <input
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+              placeholder="New season label (e.g. 2027 Winter)"
+              className="w-72 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={creating || !newLabel.trim()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" /> {creating ? "Creating…" : "New draft season"}
+            </button>
+            {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+          </form>
+
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <table className="min-w-full text-sm">
+              <thead className="bg-accent/40 text-xs uppercase tracking-widest text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">Label</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Visibility</th>
+                  <th className="px-3 py-2 text-right">Points</th>
+                  <th className="px-3 py-2 text-right">Weeks</th>
+                  <th className="px-3 py-2 text-left">Dates</th>
+                  <th className="px-3 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {q.data.seasons.map((s) => (
+                  <tr key={s.id}>
+                    <td className="px-3 py-2 font-medium">{s.label}</td>
+                    <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
+                    <td className="px-3 py-2 text-xs">{s.publicVisible ? "Public" : "Private"}</td>
+                    <td className="px-3 py-2 text-right">{s.pointSystem ?? "—"}</td>
+                    <td className="px-3 py-2 text-right">{s.totalWeeks ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {s.startDate ? new Date(s.startDate).toLocaleDateString() : "—"}
+                      {" – "}
+                      {s.endDate ? new Date(s.endDate).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Link to="/admin/seasons/$seasonId" params={{ seasonId: s.id }} className="text-xs underline">Edit</Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
-      <p className="mt-6 text-xs text-muted-foreground">
-        Full season create/edit/lane-pair configuration forms will be added in the next phase. Backing tables and safe reads are wired now so the current season is never disturbed.
-      </p>
     </>
   );
 }

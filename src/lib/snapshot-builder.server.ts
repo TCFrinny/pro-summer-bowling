@@ -33,7 +33,22 @@ type Sb = SupabaseClient<Database>;
 
 const LANE_SET = new Set<string>(LANE_PAIRS);
 
+/** Load roster, threading optional `person_id` when the column exists.
+ *  BACKWARD-SAFE: if the migration adding `person_id` hasn't been applied
+ *  (Postgres 42703 "undefined_column") retries with the legacy column set
+ *  so the current-season snapshot builder keeps working exactly as before. */
 async function loadRoster(sb: Sb, seasonId: string): Promise<RosteredRow[]> {
+  const wide = await (sb.from as unknown as (t: string) => any)("rostered_bowlers") // eslint-disable-line @typescript-eslint/no-explicit-any
+    .select("id, name, entry_average, handicap, active, archived, bowler_number, season_id, person_id")
+    .eq("season_id", seasonId);
+  if (!wide.error) {
+    return (wide.data ?? []).map((r: Record<string, unknown>) => ({
+      ...r,
+      entry_average: Number(r.entry_average),
+    })) as RosteredRow[];
+  }
+  const code = (wide.error as { code?: string }).code;
+  if (code !== "42703") throw new Error(wide.error.message);
   const res = await sb
     .from("rostered_bowlers")
     .select("id, name, entry_average, handicap, active, archived, bowler_number, season_id")
@@ -43,6 +58,17 @@ async function loadRoster(sb: Sb, seasonId: string): Promise<RosteredRow[]> {
 }
 
 async function loadSubstitutes(sb: Sb, seasonId: string): Promise<SubRow[]> {
+  const wide = await (sb.from as unknown as (t: string) => any)("substitutes") // eslint-disable-line @typescript-eslint/no-explicit-any
+    .select("id, name, starting_average, handicap, active, archived, bowler_number, season_id, person_id")
+    .eq("season_id", seasonId);
+  if (!wide.error) {
+    return (wide.data ?? []).map((r: Record<string, unknown>) => ({
+      ...r,
+      starting_average: r.starting_average != null ? Number(r.starting_average) : null,
+    })) as SubRow[];
+  }
+  const code = (wide.error as { code?: string }).code;
+  if (code !== "42703") throw new Error(wide.error.message);
   const res = await sb
     .from("substitutes")
     .select("id, name, starting_average, handicap, active, archived, bowler_number, season_id")
@@ -57,7 +83,7 @@ async function loadSubstitutes(sb: Sb, seasonId: string): Promise<SubRow[]> {
 /** Convert a substitute row into the identity shape buildSnapshot expects. */
 function subRowToIdentity(row: SubRow): SubstituteIdentity {
   const starting = row.starting_average;
-  return {
+  const identity: SubstituteIdentity = {
     id: row.id,
     name: row.name,
     startingAverage: starting,
@@ -66,6 +92,8 @@ function subRowToIdentity(row: SubRow): SubstituteIdentity {
     active: row.active,
     archived: row.archived,
   };
+  if (row.person_id) identity.personId = row.person_id;
+  return identity;
 }
 
 interface WeekRow {

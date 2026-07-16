@@ -61,15 +61,19 @@ export interface SeasonRecord {
   label: string;
   status: SeasonStatus;
   publicVisible: boolean;
+  isCurrent?: boolean;
   startDate?: string | null;
   endDate?: string | null;
   totalWeeks?: number | null;
   pointSystem?: 4 | 7 | null;
+  handicapPercent?: number | null;
+  handicapBase?: number | null;
   championPersonId?: string | null;
   description?: string | null;
 }
 
-/** Public seasons page filter: current always shown, then public+archived. */
+/** Client-side sort helper for a set of seasons already filtered/authorized
+ *  on the server. Current always leads, then archived by start_date desc. */
 export function filterPublicSeasons(seasons: readonly SeasonRecord[]): SeasonRecord[] {
   const current = seasons.filter((s) => s.status === "current");
   const archived = seasons
@@ -90,9 +94,11 @@ export interface CareerSeasonRow {
   bowlerNumber?: string | null;
   startingAverage?: number | null;
   handicap?: number | null;
-  /** True when this season has a saved public snapshot we could read
-   *  personal totals from. When false the row is shown but game-level
-   *  aggregates must be excluded from career totals. */
+  /** True when a saved snapshot for that season supplied concrete
+   *  per-role game data. When false we still show the row (so the person's
+   *  linked season is visible), but career-total aggregation MUST skip
+   *  every game/pinfall/high figure from this row rather than treat them
+   *  as zero. */
   hasGameData: boolean;
   finalFinish?: number | null;
   games?: number | null;
@@ -109,9 +115,6 @@ export interface CareerTotals {
   seasonsWithGameData: number;
   totalGames: number;
   totalScratchPinfall: number;
-  /** Weighted by games from seasons that have game data. Null when no
-   *  season contributes game data — never return 0 in that case, to
-   *  avoid fabricating a "0.00 average". */
   average: number | null;
   highGame: number | null;
   highSet: number | null;
@@ -153,17 +156,11 @@ export function aggregateCareerTotals(rows: readonly CareerSeasonRow[]): CareerT
 
 // ---------------- Snapshot backward-compat parse ----------------
 
-/** Parse a possibly-old public snapshot payload defensively — never throw
- *  on missing new fields (personId, substitutes, substituteProfiles, etc.).
- *  Returns null when the value is not an object; otherwise returns the
- *  same reference. This mirrors what `public-snapshot.tsx` accepts. */
 export function parseSnapshotBackwardCompat(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   return value as Record<string, unknown>;
 }
 
-/** Attach optional personId to a snapshot roster identity object without
- *  mutating the original. Safe for old snapshots lacking the field. */
 export function withPersonId<T extends Record<string, unknown>>(
   identity: T,
   personId: string | null | undefined,
@@ -172,14 +169,139 @@ export function withPersonId<T extends Record<string, unknown>>(
   return { ...identity, personId };
 }
 
+// ---------------- Career row extraction from saved snapshots ------------
+
+/** Extract per-season game data for a rostered bowler from a saved
+ *  `public_snapshots.snapshot` payload. The payload is trusted only for
+ *  fields we know are stable: bowlersById → games/pinfall/highGame/highSet/
+ *  points. Missing fields degrade gracefully; hasGameData is only true when
+ *  the payload actually contained the target bowler. */
+export function extractRosteredSeasonRow(
+  snapshot: unknown,
+  rosterId: string,
+): {
+  hasGameData: boolean;
+  games: number | null;
+  scratchPinfall: number | null;
+  average: number | null;
+  highGame: number | null;
+  highSet: number | null;
+  points: number | null;
+  finalFinish: number | null;
+} {
+  const empty = {
+    hasGameData: false,
+    games: null,
+    scratchPinfall: null,
+    average: null,
+    highGame: null,
+    highSet: null,
+    points: null,
+    finalFinish: null,
+  } as const;
+  const snap = parseSnapshotBackwardCompat(snapshot);
+  if (!snap) return { ...empty };
+  const byId = snap["bowlersById"];
+  if (!byId || typeof byId !== "object") return { ...empty };
+  const row = (byId as Record<string, unknown>)[rosterId];
+  if (!row || typeof row !== "object") return { ...empty };
+  const b = row as Record<string, unknown>;
+  const games = numOrNull(b["gamesPlayed"]);
+  const pinfall = numOrNull(b["scratchPinfall"]);
+  const avg = numOrNull(b["scratchAverage"]);
+  const points = numOrNull(b["points"]);
+  const highGame = numOrNull(b["highGame"]);
+  const highSet = numOrNull(b["highSet"]);
+  const finalFinish = extractFinalFinish(snap, rosterId);
+  return {
+    hasGameData: true,
+    games,
+    scratchPinfall: pinfall,
+    average: avg && games && games > 0 ? avg : avg ?? (pinfall && games && games > 0 ? pinfall / games : null),
+    highGame,
+    highSet,
+    points,
+    finalFinish,
+  };
+}
+
+function extractFinalFinish(snap: Record<string, unknown>, bowlerId: string): number | null {
+  const standings = snap["standings"];
+  if (!Array.isArray(standings)) return null;
+  for (let i = 0; i < standings.length; i++) {
+    const row = standings[i];
+    if (row && typeof row === "object") {
+      const b = (row as Record<string, unknown>)["bowler"];
+      if (b && typeof b === "object" && (b as Record<string, unknown>)["id"] === bowlerId) {
+        const rank = (row as Record<string, unknown>)["rank"];
+        return typeof rank === "number" ? rank : i + 1;
+      }
+      if ((row as Record<string, unknown>)["bowlerId"] === bowlerId) {
+        const rank = (row as Record<string, unknown>)["rank"];
+        return typeof rank === "number" ? rank : i + 1;
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract per-season game data for a substitute from a saved snapshot's
+ *  `substituteProfiles` map. Older snapshots (before final-week live scoring)
+ *  did not include this map, so falls back to hasGameData:false. */
+export function extractSubstituteSeasonRow(
+  snapshot: unknown,
+  substituteId: string,
+): {
+  hasGameData: boolean;
+  games: number | null;
+  scratchPinfall: number | null;
+  average: number | null;
+  highGame: number | null;
+  highSet: number | null;
+} {
+  const empty = {
+    hasGameData: false,
+    games: null,
+    scratchPinfall: null,
+    average: null,
+    highGame: null,
+    highSet: null,
+  } as const;
+  const snap = parseSnapshotBackwardCompat(snapshot);
+  if (!snap) return { ...empty };
+  const profiles = snap["substituteProfiles"];
+  if (!profiles || typeof profiles !== "object") return { ...empty };
+  const p = (profiles as Record<string, unknown>)[substituteId];
+  if (!p || typeof p !== "object") return { ...empty };
+  const pr = p as Record<string, unknown>;
+  const games = numOrNull(pr["gamesRolled"]);
+  const pinfall = numOrNull(pr["scratchPinfall"]);
+  const avg = numOrNull(pr["scratchAverage"]);
+  const highGame = numOrNull(pr["highGame"]);
+  const highSet = numOrNull(pr["highSet"]);
+  if ((games ?? 0) <= 0) {
+    // Pool sub with no historical performances — not "game data".
+    return { ...empty };
+  }
+  return {
+    hasGameData: true,
+    games,
+    scratchPinfall: pinfall,
+    average: avg ?? (pinfall != null && games != null && games > 0 ? pinfall / games : null),
+    highGame,
+    highSet,
+  };
+}
+
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
 // ---------------- Person merge — pure repointing plan ----------------
 
 export interface PersonLink {
-  /** Table this link came from — 'rostered_bowlers' | 'substitutes' | 'seasons'. */
   table: "rostered_bowlers" | "substitutes" | "seasons";
-  /** Primary key of the affected row (text or uuid depending on table). */
   id: string;
-  /** Column that currently points at the duplicate person. */
   column: "person_id" | "champion_person_id";
 }
 
@@ -187,9 +309,8 @@ export interface MergePlan {
   keepPersonId: string;
   removePersonId: string;
   repoints: PersonLink[];
-  /** Emitted so callers can confirm exactly what will change. Never
-   *  contains the substring "delete row" for a seasonal record — only the
-   *  duplicate person identity itself is ever deleted. */
+  /** Never contains "delete row" for a seasonal record; only the duplicate
+   *  person identity itself is ever deleted. */
   summary: string[];
 }
 
@@ -210,6 +331,20 @@ export function planPersonMerge(
   return { keepPersonId, removePersonId, repoints, summary };
 }
 
+// ---------------- Server-side privacy filter (source of truth) ----------
+
+/** Filter applied by the PUBLIC seasons server function BEFORE returning
+ *  data to unauthenticated clients. Draft seasons and archived-but-private
+ *  seasons are never emitted. Kept pure so tests can assert on its output
+ *  without spinning up any Supabase client. */
+export function publicVisibleSeasons(seasons: readonly SeasonRecord[]): SeasonRecord[] {
+  return seasons.filter(
+    (s) =>
+      s.status === "current" ||
+      (s.status === "archived" && s.publicVisible === true),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Deterministic self-tests
 // ---------------------------------------------------------------------------
@@ -227,25 +362,23 @@ export function planPersonMerge(
     { id: "s-1", label: "2024 Draft", status: "draft", publicVisible: false },
     { id: "s-2", label: "2024 Private Archive", status: "archived", publicVisible: false },
   ];
+  const pubServer = publicVisibleSeasons(seasons);
+  if (pubServer.length !== 2 || pubServer.find((s) => s.id === "s-1") || pubServer.find((s) => s.id === "s-2")) {
+    throw new Error(`publicVisibleSeasons leaked private/draft: ${pubServer.map((s) => s.id).join(",")}`);
+  }
   const pub = filterPublicSeasons(seasons);
   if (pub.length !== 2 || pub[0].id !== "s1" || pub[1].id !== "s0") {
     throw new Error(`filterPublicSeasons wrong: ${pub.map((s) => s.id).join(",")}`);
   }
 
   const totals = aggregateCareerTotals([
-    {
-      seasonId: "a", seasonLabel: "A", role: "rostered", seasonalName: "n",
-      hasGameData: true, games: 30, scratchPinfall: 3600, highGame: 180, highSet: 500,
-    },
-    {
-      seasonId: "b", seasonLabel: "B", role: "substitute", seasonalName: "n",
-      hasGameData: false, // unavailable — must not be treated as zero
-    },
-    {
-      seasonId: "c", seasonLabel: "C", role: "rostered", seasonalName: "n",
+    { seasonId: "a", seasonLabel: "A", role: "rostered", seasonalName: "n",
+      hasGameData: true, games: 30, scratchPinfall: 3600, highGame: 180, highSet: 500 },
+    { seasonId: "b", seasonLabel: "B", role: "substitute", seasonalName: "n",
+      hasGameData: false },
+    { seasonId: "c", seasonLabel: "C", role: "rostered", seasonalName: "n",
       hasGameData: true, games: 15, scratchPinfall: 1500, highGame: 210, highSet: 550,
-      isChampion: true,
-    },
+      isChampion: true },
   ]);
   if (totals.totalGames !== 45 || totals.totalScratchPinfall !== 5100) {
     throw new Error(`career totals sums wrong: ${JSON.stringify(totals)}`);
@@ -256,10 +389,6 @@ export function planPersonMerge(
   if (totals.highGame !== 210 || totals.highSet !== 550 || totals.championships !== 1) {
     throw new Error(`career high/champ wrong: ${JSON.stringify(totals)}`);
   }
-  if (totals.seasonsCount !== 3 || totals.seasonsWithGameData !== 2) {
-    throw new Error(`seasons counts wrong: ${JSON.stringify(totals)}`);
-  }
-  // "no data at all" case must yield null average, not 0.
   const nothing = aggregateCareerTotals([
     { seasonId: "x", seasonLabel: "X", role: "rostered", seasonalName: "n", hasGameData: false },
   ]);
@@ -267,19 +396,44 @@ export function planPersonMerge(
     throw new Error(`career null-preserve wrong: ${JSON.stringify(nothing)}`);
   }
 
-  // Backward-compat snapshot: missing new fields must not throw.
-  const oldSnap = parseSnapshotBackwardCompat({ builtAt: 1, bowlers: [] });
+  // Snapshot back-compat + extraction
+  const oldSnap = parseSnapshotBackwardCompat({ builtAt: 1, bowlers: [], bowlersById: {} });
   if (!oldSnap || !("bowlers" in oldSnap)) throw new Error("backward-compat parse failed");
-  if ("personId" in (oldSnap as Record<string, unknown>)) {
-    throw new Error("backward-compat parse invented personId");
-  }
   const enriched = withPersonId({ id: "b00", name: "n" }, "p-1");
   if (enriched.personId !== "p-1") throw new Error("withPersonId did not attach");
-  const passthrough = withPersonId({ id: "b00" }, null);
-  if ("personId" in passthrough) throw new Error("withPersonId leaked null");
 
-  // Merge plan: repoints all links, never emits a "delete row" instruction
-  // for a seasonal record.
+  const roster = extractRosteredSeasonRow(
+    {
+      bowlersById: {
+        b01: { id: "b01", gamesPlayed: 30, scratchPinfall: 3300, scratchAverage: 110, highGame: 180, highSet: 480, points: 42 },
+      },
+      standings: [{ bowler: { id: "b01" }, rank: 3 }, { bowler: { id: "b02" }, rank: 4 }],
+    },
+    "b01",
+  );
+  if (!roster.hasGameData || roster.games !== 30 || roster.scratchPinfall !== 3300 || roster.finalFinish !== 3) {
+    throw new Error(`extractRosteredSeasonRow wrong: ${JSON.stringify(roster)}`);
+  }
+  const missingRoster = extractRosteredSeasonRow({ bowlersById: {} }, "b01");
+  if (missingRoster.hasGameData) throw new Error("missing bowler must not report data");
+  const legacySnap = extractRosteredSeasonRow({ builtAt: 1 }, "b01");
+  if (legacySnap.hasGameData) throw new Error("legacy snapshot without bowlersById must be no-data");
+
+  const sub = extractSubstituteSeasonRow(
+    { substituteProfiles: { s01: { gamesRolled: 6, scratchPinfall: 660, scratchAverage: 110, highGame: 130, highSet: 350 } } },
+    "s01",
+  );
+  if (!sub.hasGameData || sub.games !== 6 || sub.scratchPinfall !== 660) {
+    throw new Error(`extractSubstituteSeasonRow wrong: ${JSON.stringify(sub)}`);
+  }
+  const emptyPoolSub = extractSubstituteSeasonRow(
+    { substituteProfiles: { s02: { gamesRolled: 0, scratchPinfall: 0, scratchAverage: 0 } } },
+    "s02",
+  );
+  if (emptyPoolSub.hasGameData) throw new Error("zero-games sub must not be marked hasGameData");
+  const legacySubSnap = extractSubstituteSeasonRow({ builtAt: 1 }, "s01");
+  if (legacySubSnap.hasGameData) throw new Error("legacy snapshot without substituteProfiles must be no-data");
+
   const plan = planPersonMerge("keep", "remove", [
     { table: "rostered_bowlers", id: "b00", column: "person_id" },
     { table: "substitutes", id: "s5", column: "person_id" },

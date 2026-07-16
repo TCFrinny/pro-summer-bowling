@@ -25,6 +25,9 @@ export interface RosteredRow {
   archived: boolean;
   bowler_number: string | null;
   season_id: string;
+  /** Populated after the multi-season history migration is applied;
+   *  optional so pre-migration reads keep working. */
+  person_id?: string | null;
 }
 
 export interface SubRow {
@@ -36,6 +39,7 @@ export interface SubRow {
   archived: boolean;
   bowler_number: string | null;
   season_id: string;
+  person_id?: string | null;
 }
 
 // -- Adapters ------------------------------------------------------------
@@ -48,7 +52,7 @@ export interface SubRow {
  *  cannot break the invariant seen by public pages. */
 export function rosteredRowToBowler(row: RosteredRow): Bowler {
   const entryAverage = Number(row.entry_average);
-  return {
+  const b: Bowler = {
     id: row.id,
     name: row.name,
     entryAverage,
@@ -68,6 +72,8 @@ export function rosteredRowToBowler(row: RosteredRow): Bowler {
     actualScratchPinfall: 0,
     movement: 0,
   };
+  if (row.person_id) b.personId = row.person_id;
+  return b;
 }
 
 /** Build a PublicSnapshot from the raw Supabase rows for a single season.
