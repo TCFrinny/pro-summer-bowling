@@ -96,7 +96,11 @@ function assert(cond: unknown, msg: string): asserts cond {
   for (const name of publicHandlers) {
     const idx = HISTORY_SRC.indexOf(`export const ${name} `);
     assert(idx >= 0, `public export not found: ${name}`);
-    const chunk = HISTORY_SRC.slice(idx, idx + 3500);
+    // Slice ONLY up to the next `export const` so we don't misread the
+    // following (admin) function's middleware as belonging to this one.
+    const rest = HISTORY_SRC.slice(idx + 10);
+    const nextExport = rest.indexOf("export const ");
+    const chunk = nextExport > 0 ? rest.slice(0, nextExport) : rest;
     assert(!chunk.includes(".middleware([requireSupabaseAuth])"),
       `${name} must NOT require auth — it is a public endpoint`);
   }
