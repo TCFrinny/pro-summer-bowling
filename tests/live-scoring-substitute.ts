@@ -133,7 +133,8 @@ assert(profile.strikes === 0 && profile.spares === 0 && profile.opens === 0,
   "score-only: strikes/spares/opens must be 0");
 assert(profile.marks === 0 && profile.framesRolled === 0,
   "score-only: marks/framesRolled must be 0");
-assert(profile.openPinsLeft === 0, "score-only: openPinsLeft must be 0");
+assert(profile.pinsLost === 0, "score-only: pinsLost must be 0");
+
 assert(profile.first5 === 0 && profile.last5 === 0,
   "score-only: first5/last5 must be 0");
 assert(profile.bigOpening === 0 && profile.bigFinish === 0,
