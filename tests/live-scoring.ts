@@ -99,9 +99,11 @@ function liveRow(overrides: Partial<LiveMatchRow>): LiveMatchRow {
     id: "m1", week: 1, lanePair: "1-2", slot: 0,
     status: "completed", bowlerA: "a", bowlerB: "b", result: mr,
   };
-  const snap = buildSnapshot([A, B], [
-    { week: 1, date: "", completed: true, published: true },
-  ], { 1: [match] });
+  const snap = buildSnapshot({
+    bowlers: [A, B],
+    weeks: [{ week: 1, date: "", completed: true, published: true }],
+    matchesByWeek: { 1: [match] },
+  });
   const a = snap.bowlers.find((x) => x.id === "a")!;
   expect(a.points > 0, `A points 6 (got ${a.points})`);
   expect(a.matchesPlayed === 1, "score-only complete counts as match");
