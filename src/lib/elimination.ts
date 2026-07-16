@@ -109,8 +109,8 @@ function prepare(input: EliminationInput): Prep | PrepFail {
   const pastPairsPreFinal = new Set<string>();
   const weekSlots: WeekSlot[] = [];
   const publishedNextOpp = new Map<BowlerId, { week: number; opp: BowlerId } | undefined>();
+  const pairUnits = new Map<string, number>();
 
-  // Index week metadata by number.
   const weekMeta = new Map<number, WeekSummary>();
   for (const w of input.weeks) weekMeta.set(w.week, w);
 
@@ -131,8 +131,13 @@ function prepare(input: EliminationInput): Prep | PrepFail {
         return { ok: false, reason: `Week ${w} has a self-match (${m.bowlerA}).` };
       const aActive = activeSet.has(m.bowlerA);
       const bActive = activeSet.has(m.bowlerB);
-      if (m.result) {
-        // Completed. Count active endpoints as covered.
+      // A "fully resolved" result contributes 0 unawarded units. A live-
+      // partial score-only result contributes 6/10/14 depending on games
+      // saved and is treated as a fixed-but-unresolved pair.
+      const resultUnits = m.result ? unawardedUnitsForMatch(m.result as MatchResult) : 14;
+      const isFullyResolved = m.result != null && resultUnits === 0;
+
+      if (isFullyResolved) {
         if (aActive) {
           if (seenThisWeek.has(m.bowlerA))
             return { ok: false, reason: `Week ${w}: bowler ${m.bowlerA} appears in multiple matches.` };
@@ -158,9 +163,11 @@ function prepare(input: EliminationInput): Prep | PrepFail {
             pastPairsPreFinal.add(key);
           }
         }
-      } else if (published) {
-        // Fixed unresolved.
-        if (!aActive || !bActive) continue; // schedule references an inactive bowler; skip
+      } else if (published || m.result != null) {
+        // Fixed unresolved pair. Includes:
+        //  - normal published-unresolved (14 units)
+        //  - final-week live-partial score-only (6 or 10 units)
+        if (!aActive || !bActive) continue;
         if (seenThisWeek.has(m.bowlerA))
           return { ok: false, reason: `Week ${w}: bowler ${m.bowlerA} appears in multiple matches.` };
         if (seenThisWeek.has(m.bowlerB))
@@ -170,6 +177,7 @@ function prepare(input: EliminationInput): Prep | PrepFail {
         fixedPairs.push([m.bowlerA, m.bowlerB]);
         fixedForBowler.set(m.bowlerA, m.bowlerB);
         fixedForBowler.set(m.bowlerB, m.bowlerA);
+        pairUnits.set(pairUnitKey(w, m.bowlerA, m.bowlerB), resultUnits);
         if (!isFinal) {
           const key = pk(m.bowlerA, m.bowlerB);
           if (pastPairsPreFinal.has(key))
@@ -179,7 +187,6 @@ function prepare(input: EliminationInput): Prep | PrepFail {
             };
           pastPairsPreFinal.add(key);
         }
-        // Earliest-week published opponent per bowler.
         for (const [a, b] of [[m.bowlerA, m.bowlerB], [m.bowlerB, m.bowlerA]] as const) {
           const cur = publishedNextOpp.get(a);
           if (!cur || cur.week > w) publishedNextOpp.set(a, { week: w, opp: b });
@@ -192,7 +199,6 @@ function prepare(input: EliminationInput): Prep | PrepFail {
       if (!completedBowlers.has(b.id)) unresolvedActive.add(b.id);
 
     if (published) {
-      // Every active bowler must be covered exactly once by completed+fixed.
       const covered = new Set<BowlerId>(completedBowlers);
       for (const [a, b] of fixedPairs) { covered.add(a); covered.add(b); }
       for (const b of active) {
@@ -226,7 +232,7 @@ function prepare(input: EliminationInput): Prep | PrepFail {
   }
 
   const weeksRemaining = weekSlots.filter((s) => s.unresolvedActive.size > 0).length;
-  return { ok: true, active, activeSet, currUnits, weekSlots, finalWeek, pastPairsPreFinal, publishedNextOpp, weeksRemaining };
+  return { ok: true, active, activeSet, currUnits, weekSlots, finalWeek, pastPairsPreFinal, publishedNextOpp, weeksRemaining, pairUnits };
 }
 
 // -----------------------------------------------------------------------
