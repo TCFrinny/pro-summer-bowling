@@ -603,14 +603,41 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   const tCurr = prep.currUnits.get(target.id) ?? 0;
   const opponents = prep.active.filter((b) => b.id !== target.id);
 
-  // Remaining match counts per bowler (over all unresolved weeks).
-  const remaining = new Map<BowlerId, number>();
-  for (const b of prep.active) remaining.set(b.id, 0);
-  for (const s of prep.weekSlots)
-    for (const id of s.unresolvedActive) remaining.set(id, (remaining.get(id) ?? 0) + 1);
+  // Per-bowler remaining UNIT capacity.
+  // - Unresolved active bowlers on published weeks with fixed pairs
+  //   contribute the actual pairUnits value (14 for open, 6/10 for
+  //   score-only partials).
+  // - Unresolved active bowlers on unpublished weeks contribute 14 each
+  //   (full 7-point matchup — pairing to be determined).
+  const remainingUnits = new Map<BowlerId, number>();
+  for (const b of prep.active) remainingUnits.set(b.id, 0);
+  let totalUnits = 0;
+  for (const s of prep.weekSlots) {
+    if (s.unresolvedActive.size === 0) continue;
+    // Fixed unresolved pairs from prepare()
+    const covered = new Set<BowlerId>();
+    for (const [a, b] of s.fixedPairs) {
+      const u = prep.pairUnits.get(pairUnitKey(s.week, a, b)) ?? 14;
+      remainingUnits.set(a, (remainingUnits.get(a) ?? 0) + u);
+      remainingUnits.set(b, (remainingUnits.get(b) ?? 0) + u);
+      totalUnits += u;
+      covered.add(a); covered.add(b);
+    }
+    // Any leftover unresolved bowlers are in unpublished weeks — each still
+    // has one match worth 14 units to distribute (2 bowlers × 14 = 28 total
+    // per two players, but as a per-match unit total it's 14; count once
+    // per pair by halving after the loop).
+    let extraSlots = 0;
+    for (const id of s.unresolvedActive) {
+      if (covered.has(id)) continue;
+      remainingUnits.set(id, (remainingUnits.get(id) ?? 0) + 14);
+      extraSlots += 1;
+    }
+    totalUnits += 14 * (extraSlots / 2);
+  }
 
-  const tRem = remaining.get(target.id) ?? 0;
-  const tFinal = tCurr + 14 * tRem;
+  const tRemUnits = remainingUnits.get(target.id) ?? 0;
+  const tFinal = tCurr + tRemUnits;
 
   const publishedNext = prep.publishedNextOpp.get(target.id);
   const nextOpponent = publishedNext
@@ -620,7 +647,7 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   // --- Bound 1: CLINCHED ---------------------------------------------------
   let bestOppMax = { id: "" as BowlerId, name: "", max: -Infinity };
   for (const o of opponents) {
-    const oMax = (prep.currUnits.get(o.id) ?? 0) + 14 * (remaining.get(o.id) ?? 0);
+    const oMax = (prep.currUnits.get(o.id) ?? 0) + (remainingUnits.get(o.id) ?? 0);
     if (oMax > bestOppMax.max) bestOppMax = { id: o.id, name: o.name, max: oMax };
   }
   if (opponents.length > 0 && tCurr > bestOppMax.max) {
@@ -651,17 +678,9 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
   }
 
   // --- Capacity bound (schedule independent) -------------------------------
-  // Every unresolved match not involving target still distributes exactly
-  // 14 units among the two participants (opponents). Sum of opponent
-  // allowances must be at least that total or the target cannot avoid tie/beat.
-  let numTargetMatches = 0;
-  let numTotalMatches = 0;
-  for (const s of prep.weekSlots) {
-    numTotalMatches += s.unresolvedActive.size / 2;
-    if (s.unresolvedActive.has(target.id)) numTargetMatches += 1;
-  }
-  const nonTargetMatches = numTotalMatches - numTargetMatches;
-  const totalNonTargetUnits = 14 * nonTargetMatches;
+  // Non-target unit demand = total unawarded units minus units on target's own matches.
+  const nonTargetUnits = totalUnits - tRemUnits;
+  const nonTargetMatches = Math.round(nonTargetUnits / 14); // reporting only
 
   let sumStrictCap = 0;
   let sumTieCap = 0;
