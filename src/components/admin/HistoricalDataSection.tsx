@@ -164,7 +164,7 @@ function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels }: { seasonId: st
       )}
       {(weeks.data?.weeks ?? []).length > 0 && (
         <div className="space-y-1">
-          {(weeks.data?.weeks ?? []).map((w) => (
+          {(weeks.data?.weeks ?? []).map((w: HistoricalWeekRow) => (
             <WeekRow key={w.id} week={w} seasonId={seasonId}
               expanded={selectedWeek === w.id}
               onToggle={() => setSelectedWeek(selectedWeek === w.id ? null : w.id)}
@@ -282,7 +282,7 @@ function WeekScheduleEditor({
           )}
           <table className="mb-2 w-full text-xs">
             <tbody>
-              {(sched.data?.slots ?? []).map((s) => (
+              {(sched.data?.slots ?? []).map((s: HistoricalSlotRow) => (
                 <SlotRow key={s.id} slot={s} seasonId={seasonId}
                   weekId={week.id} rosterOptions={rosterOptions}
                   onChanged={() => {
