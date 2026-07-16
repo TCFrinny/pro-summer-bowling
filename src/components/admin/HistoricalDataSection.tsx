@@ -588,7 +588,7 @@ function SummaryRecordsBlock({ seasonId }: { seasonId: string }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {(q.data?.records ?? []).map((r) => (
+            {((q.data?.records ?? []) as SummaryRow[]).map((r) => (
               <tr key={r.id}>
                 <td>{r.displayName}</td>
                 <td>{r.role}</td>
