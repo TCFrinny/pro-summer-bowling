@@ -114,13 +114,15 @@ grant select                             on public.historical_weeks to anon;
 grant select, insert, update, delete     on public.historical_weeks to authenticated;
 grant all                                on public.historical_weeks to service_role;
 alter table public.historical_weeks enable row level security;
+-- Public/admin SELECT policies. Recreated idempotently because earlier
+-- drafts used `if not exists`, which never corrects an already-created
+-- policy with a weaker predicate. Public callers must ONLY see PUBLISHED
+-- weeks of a public archived season.
+drop policy if exists "public reads historical weeks" on public.historical_weeks;
+create policy "public reads historical weeks" on public.historical_weeks
+  for select to anon, authenticated
+  using (public.season_is_public_archive(season_id) and published = true);
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_weeks'
-                  and policyname='public reads historical weeks') then
-    create policy "public reads historical weeks" on public.historical_weeks
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_weeks'
                   and policyname='admin reads all historical weeks') then
     create policy "admin reads all historical weeks" on public.historical_weeks
