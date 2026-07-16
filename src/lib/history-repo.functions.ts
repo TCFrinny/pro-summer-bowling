@@ -799,7 +799,7 @@ export const executePersonMerge = createServerFn({ method: "POST" })
     // Seasonal roster/substitute/result rows are NEVER deleted.
     const rpc = await (context.supabase.rpc as unknown as (name: string, args: Record<string, unknown>) => Promise<{ error: { message: string; code?: string } | null }>)(
       "merge_people",
-      { _keep: data.keepPersonId, _remove: data.removePersonId },
+      { _keep: data.keepPersonId, _remove: data.removePersonId, _confirm: true },
     );
     if (rpc.error) {
       if (/does not exist/i.test(rpc.error.message)) {
