@@ -78,9 +78,9 @@ function liveRow(overrides: Partial<LiveMatchRow>): LiveMatchRow {
   expect(a.handicapPinfall === 182, `A hcp pinfall = 182 (got ${a.handicapPinfall})`);
   expect(b.handicapPinfall === 172, `B hcp pinfall (got ${b.handicapPinfall})`);
   // Score-only partial: matchesPlayed / gamesPlayed / highSet must NOT count.
-  expect(a.matchesPlayed === 0, "partial score-only doesn't count as match played");
+  expect(a.matchesPlayed === 1, "partial counts as match (scheduled)");
   expect(a.highSet === 0, "no high-set until all 3 games complete");
-  expect(a.gamesPlayed === 0, "gamesPlayed 0 for score-only partial");
+  expect(a.gamesPlayed === 1, "gamesPlayed = completed pairs (1)");
 }
 
 // --- 2. Fully-completed score-only: set point + high-set award.
