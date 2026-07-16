@@ -398,6 +398,8 @@ const lanePairSchema = z.object({
   active: z.boolean().optional(),
 });
 
+const UNIQUE_VIOLATION = "23505";
+
 export const adminUpsertLanePair = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => lanePairSchema.parse(v))
@@ -413,7 +415,12 @@ export const adminUpsertLanePair = createServerFn({ method: "POST" })
     if (data.id) {
       const upd = await (context.supabase.from as unknown as LooseFrom)("season_lane_pairs")
         .update(payload).eq("id", data.id).eq("season_id", data.seasonId).select("id").single();
-      if (upd.error) throw new Error(upd.error.message);
+      if (upd.error) {
+        if (upd.error.code === UNIQUE_VIOLATION) {
+          throw new Error(`A lane pair labeled "${data.label.trim()}" already exists in this season.`);
+        }
+        throw new Error(upd.error.message);
+      }
       return { id: String(upd.data.id) };
     }
     const ins = await (context.supabase.from as unknown as LooseFrom)("season_lane_pairs")
@@ -421,6 +428,9 @@ export const adminUpsertLanePair = createServerFn({ method: "POST" })
     if (ins.error) {
       if (isMissingTable(ins.error.code)) {
         throw new Error("Lane pair configuration requires the pending migration first.");
+      }
+      if (ins.error.code === UNIQUE_VIOLATION) {
+        throw new Error(`A lane pair labeled "${data.label.trim()}" already exists in this season.`);
       }
       throw new Error(ins.error.message);
     }
