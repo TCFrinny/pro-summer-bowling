@@ -207,6 +207,22 @@ function WeekRow({
   async function save() {
     setSaving(true);
     try {
+      const wasPub = week.published;
+      const nowPub = pub;
+      const dateChanged = (week.date ?? "") !== date;
+      const completedChanged = week.completed !== done;
+      // Publication toggles and edits to published-week metadata are
+      // gated behind an explicit confirmation.
+      if (wasPub !== nowPub) {
+        const msg = nowPub
+          ? `Publish Week ${week.weekNumber}? Public archived pages will show this week.`
+          : `UNPUBLISH Week ${week.weekNumber}? This hides it from public archived pages.`;
+        if (!window.confirm(msg)) { setSaving(false); return; }
+      } else if (wasPub && (dateChanged || completedChanged)) {
+        if (!window.confirm(`Week ${week.weekNumber} is PUBLISHED. Change date/completed anyway?`)) {
+          setSaving(false); return;
+        }
+      }
       await adminUpdateHistoricalWeek({ data: {
         id: week.id, seasonId, date: date || null, published: pub, completed: done,
       } });
@@ -231,8 +247,17 @@ function WeekRow({
         )}
         <button
           onClick={async () => {
-            if (!window.confirm(`Delete Week ${week.weekNumber}? All schedule and result rows in it will cascade.`)) return;
-            await adminDeleteHistoricalWeek({ data: { id: week.id, seasonId, confirm: true } });
+            const highRisk = week.published;
+            const prompt = highRisk
+              ? `Week ${week.weekNumber} is PUBLISHED. Type DELETE to remove it (cascades all schedules and results):`
+              : `Delete Week ${week.weekNumber}? All schedule and result rows in it will cascade.`;
+            if (highRisk) {
+              const t = window.prompt(prompt);
+              if (t !== "DELETE") return;
+            } else if (!window.confirm(prompt)) { return; }
+            await adminDeleteHistoricalWeek({ data: {
+              id: week.id, seasonId, confirm: true, allowPublished: highRisk,
+            } });
             onChanged();
           }}
           className="ml-auto inline-flex items-center gap-1 rounded border border-destructive/40 px-1.5 text-xs text-destructive"
@@ -519,9 +544,28 @@ function ResultEntryForm({
       setOvrB(String(r.pointOverride.pointsB));
       setOvrReason(r.pointOverride.reason ?? "");
     }
-    // Linescore hydration is intentionally NOT rehydrated frame-by-frame
-    // (the stored jsonb is already the authoritative source). Admin can
-    // re-enter or switch to game_scores to edit computed totals.
+    // Rehydrate FULL_LINESCORE frame editor by reading the saved
+    // GameLinescore array back into per-frame mark/cumulative strings.
+    if (r.detailMode === "full_linescore") {
+      const rehydrate = (raw: unknown): SideEditorState => {
+        const empty = emptySideEditorState();
+        if (!Array.isArray(raw) || raw.length !== 3) return empty;
+        for (let gi = 0; gi < 3; gi++) {
+          const g = raw[gi] as { frames?: Array<{ mark?: string; cumulativeScore?: number }> } | null;
+          if (!g || !Array.isArray(g.frames) || g.frames.length !== 10) continue;
+          const marks: string[] = [];
+          const cums: string[] = [];
+          for (const f of g.frames) {
+            marks.push(String(f.mark ?? ""));
+            cums.push(f.cumulativeScore != null ? String(f.cumulativeScore) : "");
+          }
+          empty.games[gi] = { marks, cumulatives: cums };
+        }
+        return empty;
+      };
+      if (A.status !== "absent") setLineA(rehydrate(r.linescoreA));
+      if (B.status !== "absent") setLineB(rehydrate(r.linescoreB));
+    }
   }, [existing.data]);
 
   function actualFor(status: Status, scheduled: ParticipantRow | undefined, subId: string) {

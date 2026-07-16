@@ -1,8 +1,12 @@
 /** PUBLIC archived-season per-bowler profile. */
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
 import { EmptyState } from "@/components/layout/AppShell";
+import { GameLinescore } from "@/components/linescore/GameLinescore";
+import type { HistoricalMatch, HistoricalWeekSummary } from "@/lib/historical-snapshot";
 
 export const Route = createFileRoute("/seasons/$seasonId/bowlers/$participantRef")({
   component: SeasonBowlerPage,
@@ -22,10 +26,12 @@ function SeasonBowlerPage() {
   if (!p && !summary) {
     return <EmptyState title="Bowler not found" description="No matching participant in this season." />;
   }
-  const matches = snap.weeks.flatMap((w) => w.matches.filter(
-    (m) => m.actualA === participantRef || m.actualB === participantRef
-        || m.scheduledA === participantRef || m.scheduledB === participantRef,
-  ).map((m) => ({ w, m })));
+  const matches: Array<{ w: HistoricalWeekSummary; m: HistoricalMatch }> = snap.weeks.flatMap((w) =>
+    w.matches
+      .filter((m) => m.actualA === participantRef || m.actualB === participantRef
+                  || m.scheduledA === participantRef || m.scheduledB === participantRef)
+      .map((m) => ({ w, m })),
+  );
   return (
     <div className="space-y-4">
       <header className="flex items-baseline justify-between">
@@ -54,36 +60,57 @@ function SeasonBowlerPage() {
         {matches.length === 0 ? (
           <p className="p-3 text-xs text-muted-foreground">No matches recorded.</p>
         ) : (
-          <table className="min-w-full text-sm">
-            <thead className="bg-accent/30 text-[10px] uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-1 text-left">Wk</th>
-                <th className="px-3 py-1 text-left">Opponent</th>
-                <th className="px-2 py-1 text-right">Scratch</th>
-                <th className="px-2 py-1 text-right">HDCP set</th>
-                <th className="px-2 py-1 text-right">Points</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {matches.map(({ w, m }) => {
-                const isA = m.actualA === participantRef || m.scheduledA === participantRef;
-                const mine = isA
-                  ? { has: m.hasGameDataA, scr: m.scratchTotalA, hdcp: m.handicapTotalA, pts: m.finalPointsA, oppName: m.actualNameB || m.scheduledB }
-                  : { has: m.hasGameDataB, scr: m.scratchTotalB, hdcp: m.handicapTotalB, pts: m.finalPointsB, oppName: m.actualNameA || m.scheduledA };
-                return (
-                  <tr key={m.slotId}>
-                    <td className="px-3 py-1">{w.weekNumber}</td>
-                    <td className="px-3 py-1">{mine.oppName}</td>
-                    <td className="px-2 py-1 text-right">{mine.has ? mine.scr : "—"}</td>
-                    <td className="px-2 py-1 text-right">{mine.has ? mine.hdcp : "—"}</td>
-                    <td className="px-2 py-1 text-right font-semibold">{mine.pts}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="divide-y divide-border">
+            {matches.map(({ w, m }) => (
+              <MatchLine key={m.slotId} weekNumber={w.weekNumber} m={m} participantRef={participantRef} />
+            ))}
+          </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function MatchLine({ weekNumber, m, participantRef }: {
+  weekNumber: number; m: HistoricalMatch; participantRef: string;
+}) {
+  const isA = m.actualA === participantRef || m.scheduledA === participantRef;
+  const mine = isA
+    ? { has: m.hasGameDataA, scr: m.scratchTotalA, hdcp: m.handicapTotalA, pts: m.finalPointsA,
+        oppName: m.actualNameB || m.scheduledNameB, line: m.linescoreA, absent: m.absentA }
+    : { has: m.hasGameDataB, scr: m.scratchTotalB, hdcp: m.handicapTotalB, pts: m.finalPointsB,
+        oppName: m.actualNameA || m.scheduledNameA, line: m.linescoreB, absent: m.absentB };
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="p-3 text-sm" data-testid={`archived-bowler-match-${m.slotId}`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <span className="mr-2 text-xs text-muted-foreground">Wk {weekNumber}</span>
+          vs <span className="font-medium">{mine.oppName}</span>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <span>{mine.has ? `scratch ${mine.scr} · hdcp ${mine.hdcp}` : "—"}</span>
+          <span className="font-display text-sm text-gold">{mine.pts}</span>
+        </div>
+      </div>
+      {mine.line ? (
+        <div className="mt-2">
+          <button onClick={() => setOpen((v) => !v)}
+            className="flex w-full items-center justify-between rounded border border-border/60 px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground hover:bg-accent/40">
+            <span>View frame linescore</span>
+            {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
+          {open && (
+            <div className="mt-2 grid gap-2">
+              {mine.line.map((g, i) => <GameLinescore key={i} game={g} index={i} />)}
+            </div>
+          )}
+        </div>
+      ) : m.detailMode === "game_scores" && !mine.absent ? (
+        <div className="mt-2 rounded border border-dashed border-primary/50 px-2 py-1 text-[10px] uppercase tracking-widest text-primary">
+          Frame linescore / advanced stats unavailable — game-scores-only entry.
+        </div>
+      ) : null}
     </div>
   );
 }

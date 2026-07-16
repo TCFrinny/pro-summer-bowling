@@ -11,6 +11,7 @@
  */
 
 import type { HistoricalDetailMode, HistoricalPointSystem } from "./historical-scoring";
+import type { GameLinescore } from "./duckpin";
 
 export interface HistoricalParticipantMeta {
   ref: string;                  // participant_ref (rostered_bowlers.id / substitutes.id / etc)
@@ -22,6 +23,18 @@ export interface HistoricalParticipantMeta {
   role: "rostered" | "substitute";
 }
 
+/** One scheduled slot, whether or not a result exists yet. Public Schedule
+ *  reads this; Weekly Results reads `matches` (result rows only). */
+export interface HistoricalScheduledSlot {
+  slotId: string;
+  weekNumber: number;
+  lanePair: string;
+  slot: number;
+  scheduledA: string; scheduledB: string;
+  nameA: string; nameB: string;
+  hasResult: boolean;
+}
+
 export interface HistoricalMatch {
   slotId: string;
   weekNumber: number;
@@ -29,20 +42,17 @@ export interface HistoricalMatch {
   slot: number;
   detailMode: HistoricalDetailMode;
   scheduledA: string; scheduledB: string;
+  /** Frozen scheduled display names captured at schedule time. */
+  scheduledNameA: string; scheduledNameB: string;
   actualA: string; actualB: string;
   actualNameA: string; actualNameB: string;
   isSubA: boolean; isSubB: boolean;
   absentA: boolean; absentB: boolean;
   entryAverageA: number; entryAverageB: number;
   handicapA: number; handicapB: number;
-  /** Explicit availability flags. Distinct from `absent`: a side may be
-   *  absent WITH scores (scores entered by admin so standings credit
-   *  works) or bowled with a legitimate zero. Snapshot readers MUST use
-   *  these flags to decide whether to display game/pinfall data — do not
-   *  fall back on truthiness checks like `scratchTotal > 0`. */
   hasGameDataA: boolean;
   hasGameDataB: boolean;
-  scratchGamesA: [number, number, number] | null; // null iff !hasGameDataA
+  scratchGamesA: [number, number, number] | null;
   scratchGamesB: [number, number, number] | null;
   handicapGamesA: [number, number, number];
   handicapGamesB: [number, number, number];
@@ -56,6 +66,11 @@ export interface HistoricalMatch {
   finalPointsA: number; finalPointsB: number;
   overrideEnabled: boolean;
   winner: "A" | "B" | "T";
+  /** Frame-level linescore for FULL_LINESCORE rows only. `null` for
+   *  GAME_SCORES / SUMMARY_ONLY — readers must render "frame linescore
+   *  unavailable" instead of fabricating frames. */
+  linescoreA: [GameLinescore, GameLinescore, GameLinescore] | null;
+  linescoreB: [GameLinescore, GameLinescore, GameLinescore] | null;
 }
 
 export interface HistoricalWeekSummary {
@@ -64,6 +79,9 @@ export interface HistoricalWeekSummary {
   published: boolean;
   completed: boolean;
   matches: HistoricalMatch[];
+  /** Every scheduled slot in the week, ordered by natural lane-pair.
+   *  Included regardless of whether a result exists. */
+  schedule: HistoricalScheduledSlot[];
 }
 
 export interface HistoricalStandingRow {

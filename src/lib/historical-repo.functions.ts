@@ -134,7 +134,13 @@ interface LanePairCfg { label: string; matchupCapacity: number; active: boolean 
 async function loadLanePairConfig(sb: Sb, seasonId: string): Promise<LanePairCfg[]> {
   const q = await (sb.from as unknown as LooseFrom)("season_lane_pairs")
     .select("label,matchup_capacity,active").eq("season_id", seasonId);
-  if (q.error) return [];
+  // FAIL CLOSED: any DB error blocks writes. Only a missing-table code —
+  // which means the multi-season migration hasn't run — falls back to
+  // "unconfigured" (assertLanePairAndSlot returns immediately).
+  if (q.error) {
+    if (isMissingTable(q.error.code)) return [];
+    throw new Error(`lane pair config unavailable: ${q.error.message}`);
+  }
   return ((q.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
     label: String(r.label),
     matchupCapacity: Number(r.matchup_capacity ?? 0),
@@ -153,16 +159,53 @@ function assertLanePairAndSlot(pairs: LanePairCfg[], lanePair: string, slot: num
   }
 }
 
-/** Look up rostered_bowlers ids for this season; used to gate scheduled
- *  A/B pickers to roster-only participants (substitutes may only appear
- *  as ACTUAL participants inside a result). Returns an empty set if the
- *  table is unreachable — callers should treat that as "unknown" and
- *  fall back on the DB constraint. */
+/** Roster ids for the season. FAIL CLOSED: query errors throw. Callers
+ *  refuse an empty roster when they attempt to schedule new slots. */
 async function loadRosterIds(sb: Sb, seasonId: string): Promise<Set<string>> {
   const q = await (sb.from as unknown as LooseFrom)("rostered_bowlers")
     .select("id").eq("season_id", seasonId);
-  if (q.error) return new Set();
+  if (q.error) throw new Error(`roster unavailable: ${q.error.message}`);
   return new Set(((q.data as Array<{ id: string }>) ?? []).map((r) => String(r.id)));
+}
+
+/** Substitute ids for the season, fail-closed. */
+async function loadSubstituteIds(sb: Sb, seasonId: string): Promise<Set<string>> {
+  const q = await (sb.from as unknown as LooseFrom)("substitutes")
+    .select("id").eq("season_id", seasonId);
+  if (q.error) throw new Error(`substitutes unavailable: ${q.error.message}`);
+  return new Set(((q.data as Array<{ id: string }>) ?? []).map((r) => String(r.id)));
+}
+
+/** Load authoritative identity + handicap/entry-average for a rostered
+ *  bowler or substitute id in this season. Server-side freeze — never
+ *  trust names/averages/handicaps supplied by the browser. */
+async function loadFrozenIdentity(sb: Sb, seasonId: string, id: string, role: "rostered" | "substitute"): Promise<{
+  ref: string; name: string; bowlerNumber: string | null; entryAverage: number; handicap: number;
+} | null> {
+  if (role === "rostered") {
+    const q = await (sb.from as unknown as LooseFrom)("rostered_bowlers")
+      .select("id,name,bowler_number,entry_average,handicap")
+      .eq("id", id).eq("season_id", seasonId).maybeSingle();
+    if (q.error) throw new Error(q.error.message);
+    if (!q.data) return null;
+    return {
+      ref: String(q.data.id), name: String(q.data.name ?? ""),
+      bowlerNumber: (q.data.bowler_number as string | null) ?? null,
+      entryAverage: q.data.entry_average != null ? Number(q.data.entry_average) : 0,
+      handicap: q.data.handicap != null ? Number(q.data.handicap) : 0,
+    };
+  }
+  const q = await (sb.from as unknown as LooseFrom)("substitutes")
+    .select("id,name,bowler_number,starting_average,handicap")
+    .eq("id", id).eq("season_id", seasonId).maybeSingle();
+  if (q.error) throw new Error(q.error.message);
+  if (!q.data) return null;
+  return {
+    ref: String(q.data.id), name: String(q.data.name ?? ""),
+    bowlerNumber: (q.data.bowler_number as string | null) ?? null,
+    entryAverage: q.data.starting_average != null ? Number(q.data.starting_average) : 0,
+    handicap: q.data.handicap != null ? Number(q.data.handicap) : 0,
+  };
 }
 
 // -------------------- Server publishable client (public reads) --------------
@@ -279,10 +322,15 @@ export const adminDeleteHistoricalWeek = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v) => z.object({
     id: z.string().uuid(), seasonId: z.string().uuid(), confirm: z.literal(true),
+    allowPublished: z.boolean().optional(),
   }).parse(v))
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    const w = await assertWeekInSeason(context.supabase, data.id, data.seasonId);
+    if (w.published && data.allowPublished !== true) {
+      throw new Error(`Week ${w.weekNumber} is published. Set allowPublished=true to delete.`);
+    }
     const del = await (context.supabase.from as unknown as LooseFrom)("historical_weeks")
       .delete().eq("id", data.id).eq("season_id", data.seasonId);
     if (del.error) throw new Error(del.error.message);
@@ -363,40 +411,45 @@ export const adminUpsertHistoricalScheduleSlot = createServerFn({ method: "POST"
     const pairs = await loadLanePairConfig(context.supabase, data.seasonId);
     assertLanePairAndSlot(pairs, data.lanePair, data.slot);
 
-    // Scheduled A/B must be rostered bowlers only. Substitutes may appear
-    // only as ACTUAL participants inside a result.
+    // FAIL CLOSED: roster query throws on error. When inserting, an empty
+    // roster means there is nobody legitimately schedulable — refuse.
     const rosterIds = await loadRosterIds(context.supabase, data.seasonId);
-    if (rosterIds.size > 0) {
-      if (!rosterIds.has(data.bowlerARef)) {
-        throw new Error(`${data.nameA ?? data.bowlerARef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
-      }
-      if (!rosterIds.has(data.bowlerBRef)) {
-        throw new Error(`${data.nameB ?? data.bowlerBRef} is not a rostered bowler for this season. Substitutes cannot be scheduled — they can only appear as an actual participant in results.`);
-      }
+    if (!data.id && rosterIds.size === 0) {
+      throw new Error("This season has no rostered bowlers yet — add rostered participants before scheduling.");
+    }
+    if (!rosterIds.has(data.bowlerARef)) {
+      throw new Error(`Bowler A is not a rostered bowler for this season. Substitutes may only appear as an actual participant in results, never as a scheduled bowler.`);
+    }
+    if (!rosterIds.has(data.bowlerBRef)) {
+      throw new Error(`Bowler B is not a rostered bowler for this season.`);
     }
     if (data.bowlerARef === data.bowlerBRef) {
       throw new Error("A bowler cannot face themselves.");
     }
+    // Freeze display names/numbers from the DB — never trust the client.
+    const idA = await loadFrozenIdentity(context.supabase, data.seasonId, data.bowlerARef, "rostered");
+    const idB = await loadFrozenIdentity(context.supabase, data.seasonId, data.bowlerBRef, "rostered");
+    if (!idA || !idB) throw new Error("Rostered bowler lookup failed.");
+
     // Duplicate-participant-in-week guard.
     const dup = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
       .select("id,bowler_a_ref,bowler_b_ref").eq("week_id", data.weekId);
-    if (!dup.error) {
-      for (const r of (dup.data as Array<{ id: string; bowler_a_ref: string; bowler_b_ref: string }>) ?? []) {
-        if (data.id && r.id === data.id) continue;
-        if (r.bowler_a_ref === data.bowlerARef || r.bowler_b_ref === data.bowlerARef) {
-          throw new Error(`${data.nameA ?? data.bowlerARef} is already scheduled in another slot this week.`);
-        }
-        if (r.bowler_a_ref === data.bowlerBRef || r.bowler_b_ref === data.bowlerBRef) {
-          throw new Error(`${data.nameB ?? data.bowlerBRef} is already scheduled in another slot this week.`);
-        }
+    if (dup.error) throw new Error(`schedule read failed: ${dup.error.message}`);
+    for (const r of (dup.data as Array<{ id: string; bowler_a_ref: string; bowler_b_ref: string }>) ?? []) {
+      if (data.id && r.id === data.id) continue;
+      if (r.bowler_a_ref === data.bowlerARef || r.bowler_b_ref === data.bowlerARef) {
+        throw new Error(`${idA.name} is already scheduled in another slot this week.`);
+      }
+      if (r.bowler_a_ref === data.bowlerBRef || r.bowler_b_ref === data.bowlerBRef) {
+        throw new Error(`${idB.name} is already scheduled in another slot this week.`);
       }
     }
     const payload = {
       season_id: data.seasonId, week_id: data.weekId,
       lane_pair: data.lanePair, slot: data.slot,
       bowler_a_ref: data.bowlerARef, bowler_b_ref: data.bowlerBRef,
-      name_a: data.nameA, name_b: data.nameB,
-      bowler_number_a: data.bowlerNumberA, bowler_number_b: data.bowlerNumberB,
+      name_a: idA.name, name_b: idB.name,
+      bowler_number_a: idA.bowlerNumber, bowler_number_b: idB.bowlerNumber,
     };
     if (data.id) {
       const upd = await (context.supabase.from as unknown as LooseFrom)("historical_schedule_slots")
@@ -508,34 +561,79 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     await ensureAdmin(context);
     const season = await ensureNonCurrentSeason(context.supabase, data.seasonId);
     const week = await assertWeekInSeason(context.supabase, data.weekId, data.seasonId);
-    await assertSlotInWeekAndSeason(context.supabase, data.slotId, data.weekId, data.seasonId);
+    const slot = await assertSlotInWeekAndSeason(context.supabase, data.slotId, data.weekId, data.seasonId);
     if (week.published && data.allowPublished !== true) {
       throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
     }
 
+    // Authoritative participant validation — freeze identity server-side.
+    const subIds = await loadSubstituteIds(context.supabase, data.seasonId);
+    async function resolveSide(sideLabel: "A" | "B", side: z.infer<typeof participationSchema>) {
+      const scheduledRef = sideLabel === "A" ? slot.bowlerARef : slot.bowlerBRef;
+      if (side.status === "rostered" || side.status === "absent") {
+        if (side.actualRef !== scheduledRef) {
+          throw new Error(`Side ${sideLabel}: ${side.status} actualRef must equal the scheduled bowler.`);
+        }
+        const id = await loadFrozenIdentity(context.supabase, data.seasonId, scheduledRef, "rostered");
+        if (!id) throw new Error(`Side ${sideLabel}: scheduled rostered bowler not found.`);
+        return id;
+      }
+      // substitute
+      if (!subIds.has(side.actualRef)) {
+        throw new Error(`Side ${sideLabel}: substitute is not registered for this season.`);
+      }
+      const id = await loadFrozenIdentity(context.supabase, data.seasonId, side.actualRef, "substitute");
+      if (!id) throw new Error(`Side ${sideLabel}: substitute not found.`);
+      return id;
+    }
+    const frozenA = await resolveSide("A", data.sideA);
+    const frozenB = await resolveSide("B", data.sideB);
+
     const bowledA = data.sideA.status !== "absent";
     const bowledB = data.sideB.status !== "absent";
-    if (bowledA && (!data.gameScoresA)) {
-      throw new Error(`${data.sideA.actualName || "Side A"}: three game scores required.`);
+    if (bowledA && !data.gameScoresA) {
+      throw new Error(`${frozenA.name || "Side A"}: three game scores required.`);
     }
-    if (bowledB && (!data.gameScoresB)) {
-      throw new Error(`${data.sideB.actualName || "Side B"}: three game scores required.`);
+    if (bowledB && !data.gameScoresB) {
+      throw new Error(`${frozenB.name || "Side B"}: three game scores required.`);
     }
-    if (data.detailMode === "full_linescore" && (!data.linescoreA || !data.linescoreB)) {
-      throw new Error("Full-linescore save requires a complete linescore for each side that bowled.");
+    // Per-side linescore requirement — only require it for the sides that
+    // are NOT absent. Absent side never has a linescore.
+    if (data.detailMode === "full_linescore") {
+      if (bowledA && !data.linescoreA) {
+        throw new Error(`Full-linescore save: ${frozenA.name || "Side A"} linescore missing.`);
+      }
+      if (bowledB && !data.linescoreB) {
+        throw new Error(`Full-linescore save: ${frozenB.name || "Side B"} linescore missing.`);
+      }
     }
 
-    // Absent semantics — match 2026 rules exactly. Absent-without-scores is
-    // only valid when an explicit points override is supplied; otherwise
-    // the standings would silently credit fabricated 0-0 points.
     const aHas = sideHasScores(data.sideA);
     const bHas = sideHasScores(data.sideB);
     if ((!aHas || !bHas) && !data.pointOverride) {
-      throw new Error("Absent side without three absent scores requires an explicit points override (points A / points B).");
+      throw new Error("Absent side without three absent scores requires an explicit points override.");
     }
 
-    const sideA = participationInput(data.sideA, data.gameScoresA ?? null);
-    const sideB = participationInput(data.sideB, data.gameScoresB ?? null);
+    // Rebuild the frozen side payload from authoritative DB values.
+    const frozenSideA = {
+      status: data.sideA.status,
+      actualRef: frozenA.ref,
+      actualName: frozenA.name,
+      entryAverage: frozenA.entryAverage,
+      handicap: frozenA.handicap,
+      absentScores: data.sideA.absentScores ?? null,
+    };
+    const frozenSideB = {
+      status: data.sideB.status,
+      actualRef: frozenB.ref,
+      actualName: frozenB.name,
+      entryAverage: frozenB.entryAverage,
+      handicap: frozenB.handicap,
+      absentScores: data.sideB.absentScores ?? null,
+    };
+
+    const sideA = participationInput(frozenSideA, data.gameScoresA ?? null);
+    const sideB = participationInput(frozenSideB, data.gameScoresB ?? null);
     const outcome = computeHistoricalMatch({
       pointSystem: season.pointSystem, sideA, sideB,
       override: data.pointOverride ?? null,
@@ -555,7 +653,7 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     const payload = {
       season_id: data.seasonId, week_id: data.weekId, slot_id: data.slotId,
       detail_mode: data.detailMode,
-      side_a: data.sideA, side_b: data.sideB,
+      side_a: frozenSideA, side_b: frozenSideB,
       linescore_a: data.detailMode === "full_linescore" ? data.linescoreA ?? null : null,
       linescore_b: data.detailMode === "full_linescore" ? data.linescoreB ?? null : null,
       game_scores_a: data.gameScoresA,
@@ -569,7 +667,6 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
       .upsert(payload, { onConflict: "slot_id" });
     if (up.error) throw new Error(up.error.message);
 
-    // Rebuild the historical snapshot immediately (cheap — no solver).
     await rebuildHistoricalSnapshotServer(context.supabase, data.seasonId);
     return { ok: true, points: { a: outcome.finalPointsA, b: outcome.finalPointsB } };
   });
@@ -664,13 +761,24 @@ export const adminUpsertHistoricalSummary = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    // Freeze participant identity + role from the DB — never trust the
+    // caller's role/displayName/personId claim.
+    const id = await loadFrozenIdentity(context.supabase, data.seasonId, data.participantRef, data.role);
+    if (!id) {
+      throw new Error(`Participant ${data.participantRef} is not registered as ${data.role} for this season.`);
+    }
+    // Look up personId server-side too, to keep career profiles honest.
+    const personLookup = await (context.supabase.from as unknown as LooseFrom)(
+      data.role === "rostered" ? "rostered_bowlers" : "substitutes",
+    ).select("person_id").eq("id", data.participantRef).eq("season_id", data.seasonId).maybeSingle();
+    const frozenPersonId = personLookup.error ? null : (personLookup.data?.person_id as string | null) ?? null;
     const payload = {
       season_id: data.seasonId,
       participant_ref: data.participantRef,
-      person_id: data.personId ?? null,
+      person_id: frozenPersonId,
       role: data.role,
-      display_name: data.displayName.trim(),
-      bowler_number: data.bowlerNumber ?? null,
+      display_name: id.name,
+      bowler_number: id.bowlerNumber,
       games: data.games ?? null,
       scratch_pinfall: data.scratchPinfall ?? null,
       average: data.average ?? null,
@@ -809,17 +917,30 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     const wid = String(w.id);
     const slotList = (slotsByWeek.get(wid) ?? [])
       .slice()
-      .sort((a, b) => {
-        const la = String(a.lane_pair), lb = String(b.lane_pair);
-        return compareLanePairSlotSnake(
-          { lane_pair: la, slot: Number(a.slot) },
-          { lane_pair: lb, slot: Number(b.slot) },
-        );
-      });
+      .sort((a, b) => compareLanePairSlotSnake(
+        { lane_pair: String(a.lane_pair), slot: Number(a.slot) },
+        { lane_pair: String(b.lane_pair), slot: Number(b.slot) },
+      ));
     const matches: HistoricalMatch[] = [];
+    const schedule: HistoricalSnapshot["weeks"][number]["schedule"] = [];
     for (const s of slotList) {
       const sid = String(s.id);
+      const scheduledA = String(s.bowler_a_ref);
+      const scheduledB = String(s.bowler_b_ref);
+      const nameA = (s.name_a as string | null) ?? scheduledA;
+      const nameB = (s.name_b as string | null) ?? scheduledB;
       const r = resultBySlot.get(sid);
+      // ALWAYS include the slot in `schedule` — public Schedule shows
+      // every scheduled matchup, played or not.
+      schedule.push({
+        slotId: sid,
+        weekNumber: Number(w.week_number),
+        lanePair: String(s.lane_pair),
+        slot: Number(s.slot),
+        scheduledA, scheduledB,
+        nameA, nameB,
+        hasResult: !!r,
+      });
       if (!r) continue;
       const derived = r.derived as (null | {
         detailMode: HistoricalDetailMode;
@@ -832,20 +953,25 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       if (!derived) continue;
       const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
       const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
-      // Explicit availability. Prefer the flag saved in `derived` (new
-      // rows); for legacy rows fall back to the participation shape:
-      // a side has data iff it bowled OR is absent-with-absent-scores.
       const hasA = typeof derived.hasGameDataA === "boolean" ? derived.hasGameDataA
         : (sideA.status !== "absent" || Array.isArray(sideA.absentScores));
       const hasB = typeof derived.hasGameDataB === "boolean" ? derived.hasGameDataB
         : (sideB.status !== "absent" || Array.isArray(sideB.absentScores));
+      const isFull = derived.detailMode === "full_linescore";
+      const rawLA = r.linescore_a;
+      const rawLB = r.linescore_b;
+      const lineA = isFull && Array.isArray(rawLA) && rawLA.length === 3
+        ? (rawLA as HistoricalMatch["linescoreA"]) : null;
+      const lineB = isFull && Array.isArray(rawLB) && rawLB.length === 3
+        ? (rawLB as HistoricalMatch["linescoreB"]) : null;
       matches.push({
         slotId: sid,
         weekNumber: Number(w.week_number),
         lanePair: String(s.lane_pair),
         slot: Number(s.slot),
         detailMode: derived.detailMode,
-        scheduledA: String(s.bowler_a_ref), scheduledB: String(s.bowler_b_ref),
+        scheduledA, scheduledB,
+        scheduledNameA: nameA, scheduledNameB: nameB,
         actualA: sideA.actualRef, actualB: sideB.actualRef,
         actualNameA: sideA.actualName, actualNameB: sideB.actualName,
         isSubA: sideA.status === "substitute", isSubB: sideB.status === "substitute",
@@ -853,9 +979,6 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         entryAverageA: sideA.entryAverage,   entryAverageB: sideB.entryAverage,
         handicapA: sideA.handicap,           handicapB: sideB.handicap,
         hasGameDataA: hasA, hasGameDataB: hasB,
-        // Personal / raw stats are only exposed when the side has data
-        // AND actually bowled (absent-with-scores contributes to
-        // standings but NOT to personal stats — matches 2026 semantics).
         scratchGamesA: hasA && sideA.status !== "absent" ? derived.a.gameScoresScratch : null,
         scratchGamesB: hasB && sideB.status !== "absent" ? derived.b.gameScoresScratch : null,
         handicapGamesA: derived.a.gameScoresHandicap,
@@ -869,6 +992,8 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         finalPointsA: derived.finalPointsA, finalPointsB: derived.finalPointsB,
         overrideEnabled: !!derived.override,
         winner: derived.winner,
+        linescoreA: lineA,
+        linescoreB: lineB,
       });
     }
     return {
@@ -877,6 +1002,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       published: w.published === true,
       completed: w.completed === true,
       matches,
+      schedule,
     };
   });
 
