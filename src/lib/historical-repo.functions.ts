@@ -917,17 +917,30 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     const wid = String(w.id);
     const slotList = (slotsByWeek.get(wid) ?? [])
       .slice()
-      .sort((a, b) => {
-        const la = String(a.lane_pair), lb = String(b.lane_pair);
-        return compareLanePairSlotSnake(
-          { lane_pair: la, slot: Number(a.slot) },
-          { lane_pair: lb, slot: Number(b.slot) },
-        );
-      });
+      .sort((a, b) => compareLanePairSlotSnake(
+        { lane_pair: String(a.lane_pair), slot: Number(a.slot) },
+        { lane_pair: String(b.lane_pair), slot: Number(b.slot) },
+      ));
     const matches: HistoricalMatch[] = [];
+    const schedule: HistoricalSnapshot["weeks"][number]["schedule"] = [];
     for (const s of slotList) {
       const sid = String(s.id);
+      const scheduledA = String(s.bowler_a_ref);
+      const scheduledB = String(s.bowler_b_ref);
+      const nameA = (s.name_a as string | null) ?? scheduledA;
+      const nameB = (s.name_b as string | null) ?? scheduledB;
       const r = resultBySlot.get(sid);
+      // ALWAYS include the slot in `schedule` — public Schedule shows
+      // every scheduled matchup, played or not.
+      schedule.push({
+        slotId: sid,
+        weekNumber: Number(w.week_number),
+        lanePair: String(s.lane_pair),
+        slot: Number(s.slot),
+        scheduledA, scheduledB,
+        nameA, nameB,
+        hasResult: !!r,
+      });
       if (!r) continue;
       const derived = r.derived as (null | {
         detailMode: HistoricalDetailMode;
@@ -940,20 +953,25 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       if (!derived) continue;
       const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
       const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
-      // Explicit availability. Prefer the flag saved in `derived` (new
-      // rows); for legacy rows fall back to the participation shape:
-      // a side has data iff it bowled OR is absent-with-absent-scores.
       const hasA = typeof derived.hasGameDataA === "boolean" ? derived.hasGameDataA
         : (sideA.status !== "absent" || Array.isArray(sideA.absentScores));
       const hasB = typeof derived.hasGameDataB === "boolean" ? derived.hasGameDataB
         : (sideB.status !== "absent" || Array.isArray(sideB.absentScores));
+      const isFull = derived.detailMode === "full_linescore";
+      const rawLA = r.linescore_a;
+      const rawLB = r.linescore_b;
+      const lineA = isFull && Array.isArray(rawLA) && rawLA.length === 3
+        ? (rawLA as HistoricalMatch["linescoreA"]) : null;
+      const lineB = isFull && Array.isArray(rawLB) && rawLB.length === 3
+        ? (rawLB as HistoricalMatch["linescoreB"]) : null;
       matches.push({
         slotId: sid,
         weekNumber: Number(w.week_number),
         lanePair: String(s.lane_pair),
         slot: Number(s.slot),
         detailMode: derived.detailMode,
-        scheduledA: String(s.bowler_a_ref), scheduledB: String(s.bowler_b_ref),
+        scheduledA, scheduledB,
+        scheduledNameA: nameA, scheduledNameB: nameB,
         actualA: sideA.actualRef, actualB: sideB.actualRef,
         actualNameA: sideA.actualName, actualNameB: sideB.actualName,
         isSubA: sideA.status === "substitute", isSubB: sideB.status === "substitute",
@@ -961,9 +979,6 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         entryAverageA: sideA.entryAverage,   entryAverageB: sideB.entryAverage,
         handicapA: sideA.handicap,           handicapB: sideB.handicap,
         hasGameDataA: hasA, hasGameDataB: hasB,
-        // Personal / raw stats are only exposed when the side has data
-        // AND actually bowled (absent-with-scores contributes to
-        // standings but NOT to personal stats — matches 2026 semantics).
         scratchGamesA: hasA && sideA.status !== "absent" ? derived.a.gameScoresScratch : null,
         scratchGamesB: hasB && sideB.status !== "absent" ? derived.b.gameScoresScratch : null,
         handicapGamesA: derived.a.gameScoresHandicap,
@@ -977,6 +992,8 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         finalPointsA: derived.finalPointsA, finalPointsB: derived.finalPointsB,
         overrideEnabled: !!derived.override,
         winner: derived.winner,
+        linescoreA: lineA,
+        linescoreB: lineB,
       });
     }
     return {
@@ -985,6 +1002,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
       published: w.published === true,
       completed: w.completed === true,
       matches,
+      schedule,
     };
   });
 
