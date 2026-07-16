@@ -31,6 +31,7 @@ import "./weekly-results-lane-order";
 import "./historical-phase";
 import "./historical-phase-hardening";
 import "./historical-phase-final";
+import "./historical-privacy-migration";
 
 
 

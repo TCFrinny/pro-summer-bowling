@@ -114,13 +114,15 @@ grant select                             on public.historical_weeks to anon;
 grant select, insert, update, delete     on public.historical_weeks to authenticated;
 grant all                                on public.historical_weeks to service_role;
 alter table public.historical_weeks enable row level security;
+-- Public/admin SELECT policies. Recreated idempotently because earlier
+-- drafts used `if not exists`, which never corrects an already-created
+-- policy with a weaker predicate. Public callers must ONLY see PUBLISHED
+-- weeks of a public archived season.
+drop policy if exists "public reads historical weeks" on public.historical_weeks;
+create policy "public reads historical weeks" on public.historical_weeks
+  for select to anon, authenticated
+  using (public.season_is_public_archive(season_id) and published = true);
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_weeks'
-                  and policyname='public reads historical weeks') then
-    create policy "public reads historical weeks" on public.historical_weeks
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_weeks'
                   and policyname='admin reads all historical weeks') then
     create policy "admin reads all historical weeks" on public.historical_weeks
@@ -171,13 +173,19 @@ grant select                             on public.historical_schedule_slots to 
 grant select, insert, update, delete     on public.historical_schedule_slots to authenticated;
 grant all                                on public.historical_schedule_slots to service_role;
 alter table public.historical_schedule_slots enable row level security;
+drop policy if exists "public reads historical slots" on public.historical_schedule_slots;
+create policy "public reads historical slots" on public.historical_schedule_slots
+  for select to anon, authenticated
+  using (
+    public.season_is_public_archive(season_id)
+    and exists (
+      select 1 from public.historical_weeks w
+      where w.id = historical_schedule_slots.week_id
+        and w.season_id = historical_schedule_slots.season_id
+        and w.published = true
+    )
+  );
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_schedule_slots'
-                  and policyname='public reads historical slots') then
-    create policy "public reads historical slots" on public.historical_schedule_slots
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_schedule_slots'
                   and policyname='admin reads all historical slots') then
     create policy "admin reads all historical slots" on public.historical_schedule_slots
@@ -232,13 +240,19 @@ grant select                             on public.historical_match_results to a
 grant select, insert, update, delete     on public.historical_match_results to authenticated;
 grant all                                on public.historical_match_results to service_role;
 alter table public.historical_match_results enable row level security;
+drop policy if exists "public reads historical results" on public.historical_match_results;
+create policy "public reads historical results" on public.historical_match_results
+  for select to anon, authenticated
+  using (
+    public.season_is_public_archive(season_id)
+    and exists (
+      select 1 from public.historical_weeks w
+      where w.id = historical_match_results.week_id
+        and w.season_id = historical_match_results.season_id
+        and w.published = true
+    )
+  );
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_match_results'
-                  and policyname='public reads historical results') then
-    create policy "public reads historical results" on public.historical_match_results
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_match_results'
                   and policyname='admin reads all historical results') then
     create policy "admin reads all historical results" on public.historical_match_results
@@ -331,17 +345,17 @@ create table if not exists public.historical_season_snapshots (
   snapshot jsonb not null,
   built_at timestamptz not null default now()
 );
-grant select                             on public.historical_season_snapshots to anon;
-grant select, insert, update, delete     on public.historical_season_snapshots to authenticated;
-grant all                                on public.historical_season_snapshots to service_role;
+-- PRIVACY: the stored snapshot is the FULL admin snapshot including
+-- unpublished weeks. Anon and non-admin authenticated callers must NEVER
+-- see the raw row; the server-only public reader filters with
+-- filterPublicHistoricalSnapshot before returning any data.
+revoke select on public.historical_season_snapshots from anon;
+grant  select, insert, update, delete on public.historical_season_snapshots to authenticated;
+grant  all                            on public.historical_season_snapshots to service_role;
 alter table public.historical_season_snapshots enable row level security;
+-- Drop any previously-created public policy so a rerun corrects it.
+drop policy if exists "public reads historical snapshot" on public.historical_season_snapshots;
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_season_snapshots'
-                  and policyname='public reads historical snapshot') then
-    create policy "public reads historical snapshot" on public.historical_season_snapshots
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_season_snapshots'
                   and policyname='admin reads all historical snapshot') then
     create policy "admin reads all historical snapshot" on public.historical_season_snapshots

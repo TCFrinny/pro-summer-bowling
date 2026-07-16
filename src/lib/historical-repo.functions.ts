@@ -1240,7 +1240,13 @@ async function ensurePublicArchive(sb: Sb, seasonId: string): Promise<{
 export const getPublicHistoricalSnapshot = createServerFn({ method: "GET" })
   .inputValidator((v) => z.object({ seasonId: z.string().uuid() }).parse(v))
   .handler(async ({ data }) => {
-    const sb = makePublicClient();
+    // PRIVACY: raw historical_season_snapshots contains unpublished
+    // weeks by design. The RLS policy on that table refuses anon/non-admin
+    // SELECT. Read it here through the service-role client and ALWAYS run
+    // filterPublicHistoricalSnapshot before returning anything. Never
+    // return the raw snapshot in a response.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const sb = supabaseAdmin as unknown as Sb;
     const season = await ensurePublicArchive(sb, data.seasonId);
     if (!season) return { available: false as const, forbidden: true, snapshot: null };
     const q = await (sb.from as unknown as LooseFrom)("historical_season_snapshots")
@@ -1269,7 +1275,11 @@ export const getPublicHistoricalSnapshot = createServerFn({ method: "GET" })
 export const getHistoricalCareerContributions = createServerFn({ method: "GET" })
   .inputValidator((v) => z.object({ personId: z.string().uuid() }).parse(v))
   .handler(async ({ data }) => {
-    const sb = makePublicClient();
+    // PRIVACY: raw snapshots are admin-only; load through service role and
+    // apply filterPublicHistoricalSnapshot + archived+public_visible gate
+    // before deriving any contribution. See getPublicHistoricalSnapshot.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const sb = supabaseAdmin as unknown as Sb;
     // Snapshot contributions: filter snapshots to public seasons only.
     const snaps = await (sb.from as unknown as LooseFrom)("historical_season_snapshots")
       .select("season_id,snapshot");
