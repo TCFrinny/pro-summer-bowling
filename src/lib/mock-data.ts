@@ -231,6 +231,16 @@ export interface MatchResult {
   totalPointsB: number;
   pointsOverride: PointsOverride | null;
   winner: "A" | "B" | "T";
+  /** Final-week live score-only marker. When true, no frame linescores exist
+   *  for this match; downstream aggregation MUST skip frame-derived stats
+   *  (Mark %, Strike %, Pins Lost, First 5 / Last 5, Clutch, etc.) and MUST
+   *  use `completedGameCount` + `pairCompleted` to gate credit. */
+  scoreOnly?: boolean;
+  /** 0..3, pairs where BOTH sides have entered a scratch score. Only present
+   *  when `scoreOnly === true`. Full linescore rows treat this as 3. */
+  completedGameCount?: 0 | 1 | 2 | 3;
+  /** Per-game completion mask (indexed 0..2). Only present when scoreOnly. */
+  pairCompleted?: [boolean, boolean, boolean];
 }
 
 export interface AwardedPoints {
@@ -893,9 +903,16 @@ export function buildSnapshot(input: {
     // scratch scores those scores must feed standings handicap pinfall
     // (handicapTotalA is already computed with the scheduled handicap by
     // computeMatchResult; it is 0 when no scores were entered).
+    // Score-only (live final-week) matches credit ONLY the completed pairs
+    // to gamesPlayed / scratchPinfall / high-game; high-set only awards when
+    // all three games exist so it represents a real 3-game total.
+    const scoreOnly = r.scoreOnly === true;
+    const completed = scoreOnly ? (r.completedGameCount ?? 0) : 3;
+    const mask: [boolean, boolean, boolean] = r.pairCompleted ?? [true, true, true];
+
     a.matchesPlayed += 1;
     if (r.participationA.status !== "absent") {
-      a.gamesPlayed += 3;
+      a.gamesPlayed += completed;
     }
     a.handicapPinfall += r.handicapTotalA;
     a.gamePoints += r.gamePointsA; a.setPoints += r.setPointA;
@@ -904,7 +921,7 @@ export function buildSnapshot(input: {
 
     b.matchesPlayed += 1;
     if (r.participationB.status !== "absent") {
-      b.gamesPlayed += 3;
+      b.gamesPlayed += completed;
     }
     b.handicapPinfall += r.handicapTotalB;
     b.gamePoints += r.gamePointsB; b.setPoints += r.setPointB;
@@ -912,12 +929,23 @@ export function buildSnapshot(input: {
     b.pointsLost += awarded.pointsA;
 
     const lsA = r.linescoreA;
+    // Frame-linescore path (existing) — unchanged for weeks 1..10.
     if (lsA && !lsA.isSub && r.participationA.status !== "absent") {
       a.actualGamesRolled += 3;
       a.actualScratchPinfall += r.scratchTotalA;
       a.scratchPinfall += r.scratchTotalA;
       for (const g of r.gamesA) if (g > a.highGame) a.highGame = g;
       if (r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
+    } else if (scoreOnly && !r.isSubA && r.participationA.status !== "absent") {
+      // Score-only rostered credit — only completed pairs contribute.
+      for (let i = 0; i < 3; i++) {
+        if (!mask[i]) continue;
+        a.actualGamesRolled += 1;
+        a.actualScratchPinfall += r.gamesA[i];
+        a.scratchPinfall += r.gamesA[i];
+        if (r.gamesA[i] > a.highGame) a.highGame = r.gamesA[i];
+      }
+      if (completed === 3 && r.scratchTotalA > a.highSet) a.highSet = r.scratchTotalA;
     }
     const lsB = r.linescoreB;
     if (lsB && !lsB.isSub && r.participationB.status !== "absent") {
@@ -926,6 +954,15 @@ export function buildSnapshot(input: {
       b.scratchPinfall += r.scratchTotalB;
       for (const g of r.gamesB) if (g > b.highGame) b.highGame = g;
       if (r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
+    } else if (scoreOnly && !r.isSubB && r.participationB.status !== "absent") {
+      for (let i = 0; i < 3; i++) {
+        if (!mask[i]) continue;
+        b.actualGamesRolled += 1;
+        b.actualScratchPinfall += r.gamesB[i];
+        b.scratchPinfall += r.gamesB[i];
+        if (r.gamesB[i] > b.highGame) b.highGame = r.gamesB[i];
+      }
+      if (completed === 3 && r.scratchTotalB > b.highSet) b.highSet = r.scratchTotalB;
     }
   }
   for (const bowler of allBowlers) {
