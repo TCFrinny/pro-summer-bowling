@@ -761,13 +761,24 @@ export const adminUpsertHistoricalSummary = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     await ensureAdmin(context);
     await ensureNonCurrentSeason(context.supabase, data.seasonId);
+    // Freeze participant identity + role from the DB — never trust the
+    // caller's role/displayName/personId claim.
+    const id = await loadFrozenIdentity(context.supabase, data.seasonId, data.participantRef, data.role);
+    if (!id) {
+      throw new Error(`Participant ${data.participantRef} is not registered as ${data.role} for this season.`);
+    }
+    // Look up personId server-side too, to keep career profiles honest.
+    const personLookup = await (context.supabase.from as unknown as LooseFrom)(
+      data.role === "rostered" ? "rostered_bowlers" : "substitutes",
+    ).select("person_id").eq("id", data.participantRef).eq("season_id", data.seasonId).maybeSingle();
+    const frozenPersonId = personLookup.error ? null : (personLookup.data?.person_id as string | null) ?? null;
     const payload = {
       season_id: data.seasonId,
       participant_ref: data.participantRef,
-      person_id: data.personId ?? null,
+      person_id: frozenPersonId,
       role: data.role,
-      display_name: data.displayName.trim(),
-      bowler_number: data.bowlerNumber ?? null,
+      display_name: id.name,
+      bowler_number: id.bowlerNumber,
       games: data.games ?? null,
       scratch_pinfall: data.scratchPinfall ?? null,
       average: data.average ?? null,
