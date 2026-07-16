@@ -38,6 +38,7 @@ function SeasonBowlerPage() {
   if (!snap) return <EmptyState title="Not available" description="No cached snapshot for this season." />;
   const p = snap.participants.find((x) => x.ref === participantRef);
   const s = snap.standings.find((x) => x.participantRef === participantRef);
+  const personal = (snap.participantStats ?? []).find((x) => x.participantRef === participantRef) ?? null;
   const summary = snap.summaryRecords.find((x) => x.participantRef === participantRef);
   if (!p && !summary) {
     return <EmptyState title="Bowler not found" description="No matching participant in this season." />;
@@ -49,7 +50,7 @@ function SeasonBowlerPage() {
       .map((m) => ({ w, m })),
   );
 
-  const adv = s?.advanced ?? null;
+  const adv = personal?.advanced ?? null;
   return (
     <div className="space-y-4">
       <header className="flex items-baseline justify-between">
@@ -64,26 +65,60 @@ function SeasonBowlerPage() {
         )}
       </header>
 
-      <section className="grid grid-cols-2 gap-2 md:grid-cols-6 text-sm">
-        <Stat label="Points" value={s?.points ?? summary?.points ?? "—"} />
-        <Stat label="Hdcp Pinfall" value={s?.handicapPinfall ?? "—"} />
-        <Stat label="Games" value={s?.games ?? summary?.games ?? "—"} />
-        <Stat label="Avg" value={s?.scratchAverage != null ? s.scratchAverage.toFixed(1) : (summary?.average != null ? summary.average.toFixed(1) : "—")} />
-        <Stat label="High G" value={s?.highGame ?? summary?.highGame ?? "—"} />
-        <Stat label="High S" value={s?.highSet ?? summary?.highSet ?? "—"} />
+      <section>
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Scheduled credit — points & handicap-pinfall credit assigned to the scheduled bowler
+        </h3>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 text-sm">
+          <Stat label="Points" value={s?.points ?? summary?.points ?? "—"} />
+          <Stat label="Points Lost" value={s?.pointsLost ?? summary?.pointsLost ?? "—"} />
+          <Stat label="Hdcp Pinfall" value={s?.handicapPinfall ?? "—"} />
+          <Stat label="Matches (credit)" value={s?.matchesPlayed ?? "—"} />
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Personal bowling — this bowler's own physical performance (rostered or substitute)
+        </h3>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 text-sm">
+          <Stat label="Games" value={personal?.games ?? summary?.games ?? "—"} />
+          <Stat label="Scratch Pinfall" value={personal?.scratchPinfall ?? summary?.scratchPinfall ?? "—"} />
+          <Stat label="Avg" value={personal?.scratchAverage != null ? personal.scratchAverage.toFixed(1) : (summary?.average != null ? summary.average.toFixed(1) : "—")} />
+          <Stat label="High G" value={personal?.highGame ?? summary?.highGame ?? "—"} />
+          <Stat label="High S" value={personal?.highSet ?? summary?.highSet ?? "—"} />
+          <Stat label="Season POA" value={personal?.seasonPOA != null ? personal.seasonPOA.toFixed(1) : "—"} />
+          <Stat label="Best Game POA" value={personal?.bestGamePOA != null ? personal.bestGamePOA.toFixed(1) : "—"} />
+          <Stat label="Best Set POA" value={personal?.bestSetPOA != null ? personal.bestSetPOA.toFixed(1) : "—"} />
+        </div>
       </section>
 
       <section className="rounded-lg border border-border bg-card p-3 text-xs">
         <div className="mb-1 font-semibold uppercase tracking-widest text-muted-foreground">
-          Advanced (frame-linescore games)
+          Advanced (frame-linescore games only)
         </div>
         {adv ? (
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
             <Stat label="Games" value={adv.games} />
+            <Stat label="Frames" value={adv.framesRolled} />
             <Stat label="Strikes" value={adv.strikes} />
             <Stat label="Spares" value={adv.spares} />
             <Stat label="Opens" value={adv.opens} />
             <Stat label="Marks" value={adv.marks} />
+            <Stat label="Clean Frames" value={adv.cleanFrames} />
+            <Stat label="Clean Games" value={adv.cleanGames} />
+            <Stat label="Mark %" value={`${adv.markPct.toFixed(1)}%`} />
+            <Stat label="Strike %" value={`${adv.strikePct.toFixed(1)}%`} />
+            <Stat label="Spare %" value={`${adv.sparePct.toFixed(1)}%`} />
+            <Stat label="Open %" value={`${adv.openPct.toFixed(1)}%`} />
+            <Stat label="Spare Conv %" value={`${adv.spareConversionPct.toFixed(1)}%`} />
+            <Stat label="Pins Lost / G" value={adv.pinsLostPerGame.toFixed(2)} />
+            <Stat label="Consistency (σ)" value={adv.consistency.toFixed(2)} />
+            <Stat label="First 5 / G" value={adv.first5PerGame.toFixed(1)} />
+            <Stat label="Last 5 / G" value={adv.last5PerGame.toFixed(1)} />
+            <Stat label="Big Opening / G" value={adv.bigOpeningPerGame.toFixed(1)} />
+            <Stat label="Big Finish / G" value={adv.bigFinishPerGame.toFixed(1)} />
+            <Stat label="Clutch %" value={`${adv.clutchPct.toFixed(1)}% (${adv.clutchMarks}/${adv.clutchOpportunities})`} />
           </div>
         ) : (
           <p className="text-muted-foreground">Unavailable — no full-linescore games recorded for this bowler.</p>
