@@ -690,19 +690,19 @@ function proveTarget(prep: Prep, target: Bowler, nodeBudget: number): Eliminatio
     sumTieCap += Math.max(0, tFinal - oCurr);
   }
 
-  const tieImpossibleByCapacity = sumTieCap < totalNonTargetUnits;
+  const tieImpossibleByCapacity = sumTieCap < nonTargetUnits;
   if (tieImpossibleByCapacity) {
     return {
       bowler: target,
       status: "eliminated",
-      note: `Even with ${target.name} winning every remaining match (final ${fmt(tFinal)}), opponent points available in the ${nonTargetMatches} non-target match(es) exceed the combined room to stay at or below ${fmt(tFinal)} (capacity ${fmt(sumTieCap)} < needed ${fmt(totalNonTargetUnits)}).`,
+      note: `Even with ${target.name} winning every remaining match (final ${fmt(tFinal)}), opponent points available in the ${nonTargetMatches} non-target match(es) exceed the combined room to stay at or below ${fmt(tFinal)} (capacity ${fmt(sumTieCap)} < needed ${fmt(nonTargetUnits)}).`,
       maxFinalPoints: tFinal / 2,
       nextOpponent,
     };
   }
 
   const strictImpossibleIndependent =
-    sumStrictCap < totalNonTargetUnits ||
+    sumStrictCap < nonTargetUnits ||
     opponents.some((o) => (prep.currUnits.get(o.id) ?? 0) >= tFinal);
 
   // --- Try to prove ALIVE ---------------------------------------------------
