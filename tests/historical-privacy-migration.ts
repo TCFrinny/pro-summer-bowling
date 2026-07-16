@@ -19,7 +19,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const migPath = resolve(__dirname, "../db/pending-migrations/20260717_100000_historical_data_phase.sql");
+const migPath = resolve(__dirname, "../db/applied-migrations/20260717_100000_historical_data_phase.sql");
 const repoPath = resolve(__dirname, "../src/lib/historical-repo.functions.ts");
 const sql = readFileSync(migPath, "utf8");
 const repo = readFileSync(repoPath, "utf8");
