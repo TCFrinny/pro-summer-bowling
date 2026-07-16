@@ -577,19 +577,23 @@ export interface HistoricalCareerContribution {
 }
 
 /** Deduplicate season+role contributions from possibly overlapping sources
- *  (snapshot vs summary record). Prefer snapshot-derived rows (they have
- *  real game data) over summary-only fallbacks. */
+ *  (snapshot vs summary record). A row with real game data ALWAYS beats a
+ *  row without — otherwise a summary-only substitute (no weekly rows, so
+ *  the snapshot projection is empty) would lose its real career stats to
+ *  the empty snapshot contribution. When both rows carry data, prefer
+ *  `historical_snapshot` (frame-derived). When neither carries data, also
+ *  prefer `historical_snapshot` for determinism. */
 export function dedupeHistoricalContributions(
   rows: readonly HistoricalCareerContribution[],
 ): HistoricalCareerContribution[] {
   const byKey = new Map<string, HistoricalCareerContribution>();
+  const score = (r: HistoricalCareerContribution) =>
+    (r.hasGameData ? 2 : 0) + (r.source === "historical_snapshot" ? 1 : 0);
   for (const r of rows) {
     const key = `${r.seasonId}::${r.role}`;
     const prev = byKey.get(key);
     if (!prev) { byKey.set(key, r); continue; }
-    const prevScore = (prev.source === "historical_snapshot" ? 2 : 0) + (prev.hasGameData ? 1 : 0);
-    const nextScore = (r.source === "historical_snapshot" ? 2 : 0) + (r.hasGameData ? 1 : 0);
-    if (nextScore > prevScore) byKey.set(key, r);
+    if (score(r) > score(prev)) byKey.set(key, r);
   }
   return Array.from(byKey.values());
 }
