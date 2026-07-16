@@ -1290,11 +1290,18 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
       for (const row of (snaps.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>)) {
         const meta = seasonMeta.get(row.season_id);
         if (!meta) continue;
-        const snap = row.snapshot;
+        // PRIVACY: apply the same public filter used by the archived-
+        // season page. Otherwise unpublished-week points, games, and
+        // frame stats leak onto the permanent career profile.
+        const snap = filterPublicHistoricalSnapshot(row.snapshot);
         // Match participants by personId.
         for (const p of snap.participants ?? []) {
           if (p.personId !== data.personId) continue;
           const standings = (snap.standings ?? []).find((s) => s.participantRef === p.ref) ?? null;
+          // Personal bowling stats (games/pinfall/highs/etc) come from the
+          // participantStats projection so substitutes retain them and
+          // rostered-with-a-sub-that-match do not inherit sub totals.
+          const personal = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref) ?? null;
           rows.push({
             seasonId: row.season_id,
             seasonLabel: meta.label,
@@ -1303,15 +1310,15 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             bowlerNumber: p.bowlerNumber ?? null,
             startingAverage: p.startingAverage ?? null,
             handicap: p.handicap ?? null,
-            games: standings?.games ?? null,
-            scratchPinfall: standings?.scratchPinfall ?? null,
-            average: standings?.scratchAverage ?? null,
-            highGame: standings?.highGame ?? null,
-            highSet: standings?.highSet ?? null,
+            games: personal?.games ?? standings?.games ?? null,
+            scratchPinfall: personal?.scratchPinfall ?? standings?.scratchPinfall ?? null,
+            average: personal?.scratchAverage ?? standings?.scratchAverage ?? null,
+            highGame: personal?.highGame ?? standings?.highGame ?? null,
+            highSet: personal?.highSet ?? standings?.highSet ?? null,
             points: standings?.points ?? null,
             finalFinish: standings?.rank ?? null,
             isChampion: (snap.summaryRecords ?? []).some((s) => s.participantRef === p.ref && s.isChampion),
-            hasGameData: standings != null && standings.games != null,
+            hasGameData: (personal?.games ?? standings?.games ?? null) != null,
             source: "historical_snapshot",
           });
         }
