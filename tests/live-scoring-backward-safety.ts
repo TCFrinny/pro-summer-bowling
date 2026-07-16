@@ -28,15 +28,26 @@ const slots = [
     bowler_number_a: "1", bowler_number_b: "2" },
 ];
 
-// A pre-existing full result row (side_a/side_b are opaque JSON; assembler
-// forwards them through computeMatchResult inputs which tolerate simple shapes).
+// A pre-existing full result row. The assembler forwards `derived` (the
+// precomputed MatchResult) straight through, so populate it.
+const fullMatchResult: MatchResult = {
+  scratchTotalA: 400, scratchTotalB: 380,
+  handicapTotalA: 496, handicapTotalB: 476,
+  gamePointsA: 3, gamePointsB: 3, setPointsA: 1, setPointsB: 0,
+  totalPointsA: 4, totalPointsB: 3,
+  winnerSide: "A",
+  linescoreA: null, linescoreB: null,
+  participationA: { scheduledId: "a", status: "rostered", actualId: "a", actualName: "Alex" },
+  participationB: { scheduledId: "b", status: "rostered", actualId: "b", actualName: "Ben" },
+  handicapA: 32, handicapB: 32,
+};
 const dummyResult = {
   schedule_slot_id: "s1", week_id: "w1",
-  side_a: { scheduledId: "a", status: "rostered", actualId: "a", actualName: "Alex" },
-  side_b: { scheduledId: "b", status: "rostered", actualId: "b", actualName: "Ben" },
+  side_a: fullMatchResult.participationA,
+  side_b: fullMatchResult.participationB,
   linescore_a: null, linescore_b: null,
   override: { enabled: true, pointsA: 4, pointsB: 3, reason: "seed" },
-  derived: null,
+  derived: fullMatchResult,
 };
 
 // --- 1 & 2. Missing / empty liveResults must both work.
