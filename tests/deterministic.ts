@@ -30,6 +30,7 @@ import "./lane-pair-order";
 import "./weekly-results-lane-order";
 import "./historical-phase";
 import "./historical-phase-hardening";
+import "./historical-phase-final";
 
 
 

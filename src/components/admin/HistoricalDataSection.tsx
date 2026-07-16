@@ -209,11 +209,10 @@ function WeekRow({
     try {
       const wasPub = week.published;
       const nowPub = pub;
+      const pubChanged = wasPub !== nowPub;
       const dateChanged = (week.date ?? "") !== date;
       const completedChanged = week.completed !== done;
-      // Publication toggles and edits to published-week metadata are
-      // gated behind an explicit confirmation.
-      if (wasPub !== nowPub) {
+      if (pubChanged) {
         const msg = nowPub
           ? `Publish Week ${week.weekNumber}? Public archived pages will show this week.`
           : `UNPUBLISH Week ${week.weekNumber}? This hides it from public archived pages.`;
@@ -224,7 +223,13 @@ function WeekRow({
         }
       }
       await adminUpdateHistoricalWeek({ data: {
-        id: week.id, seasonId, date: date || null, published: pub, completed: done,
+        id: week.id, seasonId,
+        date: dateChanged ? (date || null) : undefined,
+        published: pubChanged ? pub : undefined,
+        completed: completedChanged ? done : undefined,
+        // Server requires these acknowledgements — pass them explicitly.
+        allowPublished: wasPub && (dateChanged || completedChanged) ? true : undefined,
+        confirmPublicationChange: pubChanged ? true : undefined,
       } });
       onChanged();
     } finally { setSaving(false); }

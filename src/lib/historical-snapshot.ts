@@ -84,6 +84,15 @@ export interface HistoricalWeekSummary {
   schedule: HistoricalScheduledSlot[];
 }
 
+export interface HistoricalAdvancedTotals {
+  /** Number of full-linescore games contributing to these totals. */
+  games: number;
+  strikes: number;
+  spares: number;
+  opens: number;
+  marks: number;
+}
+
 export interface HistoricalStandingRow {
   participantRef: string;
   displayName: string;
@@ -91,11 +100,19 @@ export interface HistoricalStandingRow {
   matchesPlayed: number;
   points: number | null;
   pointsLost: number | null;
+  /** League tiebreaker after points. Sum of handicap totals for weeks the
+   *  scheduled bowler received credit (self, substitute, or absent-with-
+   *  scores). Null when we have no weekly data. */
+  handicapPinfall: number | null;
   games: number | null;
   scratchPinfall: number | null;
   scratchAverage: number | null;
   highGame: number | null;
   highSet: number | null;
+  /** Aggregated advanced stats from FULL_LINESCORE rows where THIS bowler
+   *  actually rolled. null when no full-linescore data is available (game-
+   *  scores-only or summary-only). Never returns zeros as a stand-in. */
+  advanced: HistoricalAdvancedTotals | null;
   rank: number;
   fromSummaryOnly: boolean;
 }
@@ -141,12 +158,14 @@ export function buildHistoricalStandings(input: {
 }): HistoricalStandingRow[] {
   // key = participantRef (scheduled). Absent scores credit the scheduled
   // side. Substitute performance stays with the substitute for personal
-  // stats but points go to the scheduled bowler.
+  // stats but points/handicap pinfall go to the scheduled bowler.
   type Acc = {
     ref: string;
     matches: number;
     points: number;
     pointsLost: number;
+    handicapPinfall: number;
+    hasHandicapData: boolean;
     games: number;
     pinfall: number;
     highGame: number | null;
@@ -155,12 +174,20 @@ export function buildHistoricalStandings(input: {
     /** True when this participant only ever appeared as a substitute in
      *  another slot (personal stats collector). */
     personalStatsOnly?: boolean;
+    // Advanced (full-linescore only) — attributed to the ACTUAL bowler.
+    advGames: number;
+    advStrikes: number;
+    advSpares: number;
+    advOpens: number;
+    advMarks: number;
   };
   const acc = new Map<string, Acc>();
   function ensure(ref: string): Acc {
     let a = acc.get(ref);
     if (!a) {
-      a = { ref, matches: 0, points: 0, pointsLost: 0, games: 0, pinfall: 0, highGame: null, highSet: null, hasWeekly: false };
+      a = { ref, matches: 0, points: 0, pointsLost: 0, handicapPinfall: 0, hasHandicapData: false,
+        games: 0, pinfall: 0, highGame: null, highSet: null, hasWeekly: false,
+        advGames: 0, advStrikes: 0, advSpares: 0, advOpens: 0, advMarks: 0 };
       acc.set(ref, a);
     }
     return a;
@@ -168,7 +195,7 @@ export function buildHistoricalStandings(input: {
 
   for (const w of input.weeks) {
     for (const m of w.matches) {
-      // POINTS credit scheduled bowler
+      // POINTS + HANDICAP-PINFALL credit scheduled bowler
       const sa = ensure(m.scheduledA);
       const sb = ensure(m.scheduledB);
       sa.hasWeekly = true; sb.hasWeekly = true;
@@ -177,8 +204,13 @@ export function buildHistoricalStandings(input: {
       sb.points += m.finalPointsB;
       sa.pointsLost += m.finalPointsB;
       sb.pointsLost += m.finalPointsA;
+      if (m.hasGameDataA) { sa.handicapPinfall += m.handicapTotalA; sa.hasHandicapData = true; }
+      if (m.hasGameDataB) { sb.handicapPinfall += m.handicapTotalB; sb.hasHandicapData = true; }
 
-      // PERSONAL stats credit the actual bowler (or nobody if absent-w/o-scores)
+      // PERSONAL scratch stats (games/pinfall/highs) + ADVANCED linescore
+      // stats credit the ACTUAL bowler ONLY when they physically rolled.
+      // Absent-without-scores and absent-with-scores never add personal
+      // scratch to anyone (absent scores are handicap-only credit above).
       if (!m.absentA && m.scratchGamesA) {
         const target = m.isSubA ? ensure(m.actualA) : sa;
         target.games += 3;
@@ -187,6 +219,15 @@ export function buildHistoricalStandings(input: {
         target.highGame = target.highGame === null ? hg : Math.max(target.highGame, hg);
         target.highSet = target.highSet === null ? m.scratchTotalA : Math.max(target.highSet, m.scratchTotalA);
         if (m.isSubA) target.personalStatsOnly = target.hasWeekly ? target.personalStatsOnly : true;
+        if (m.linescoreA) {
+          for (const g of m.linescoreA) {
+            target.advGames += 1;
+            target.advStrikes += g.strikes;
+            target.advSpares += g.spares;
+            target.advOpens += g.opens;
+            target.advMarks += g.marks;
+          }
+        }
       }
       if (!m.absentB && m.scratchGamesB) {
         const target = m.isSubB ? ensure(m.actualB) : sb;
@@ -196,6 +237,15 @@ export function buildHistoricalStandings(input: {
         target.highGame = target.highGame === null ? hg : Math.max(target.highGame, hg);
         target.highSet = target.highSet === null ? m.scratchTotalB : Math.max(target.highSet, m.scratchTotalB);
         if (m.isSubB) target.personalStatsOnly = target.hasWeekly ? target.personalStatsOnly : true;
+        if (m.linescoreB) {
+          for (const g of m.linescoreB) {
+            target.advGames += 1;
+            target.advStrikes += g.strikes;
+            target.advSpares += g.spares;
+            target.advOpens += g.opens;
+            target.advMarks += g.marks;
+          }
+        }
       }
     }
   }
@@ -208,14 +258,10 @@ export function buildHistoricalStandings(input: {
     if (!acc.has(r.participantRef)) {
       acc.set(r.participantRef, {
         ref: r.participantRef,
-        matches: 0,
-        points: 0,
-        pointsLost: 0,
-        games: 0,
-        pinfall: 0,
-        highGame: null,
-        highSet: null,
-        hasWeekly: false,
+        matches: 0, points: 0, pointsLost: 0,
+        handicapPinfall: 0, hasHandicapData: false,
+        games: 0, pinfall: 0, highGame: null, highSet: null, hasWeekly: false,
+        advGames: 0, advStrikes: 0, advSpares: 0, advOpens: 0, advMarks: 0,
       });
     }
   }
@@ -237,25 +283,48 @@ export function buildHistoricalStandings(input: {
     const highSet = usingSummaryOnly ? s?.highSet ?? null : a.highSet;
     const points = usingSummaryOnly ? s?.points ?? null : (a.hasWeekly ? a.points : null);
     const pointsLost = usingSummaryOnly ? s?.pointsLost ?? null : (a.hasWeekly ? a.pointsLost : null);
+    const handicapPinfall = usingSummaryOnly ? null : (a.hasHandicapData ? a.handicapPinfall : null);
+    const advanced: HistoricalAdvancedTotals | null = a.advGames > 0 ? {
+      games: a.advGames, strikes: a.advStrikes, spares: a.advSpares, opens: a.advOpens, marks: a.advMarks,
+    } : null;
     rows.push({
       participantRef: a.ref,
       displayName: p?.displayName ?? s?.displayName ?? a.ref,
       personId: p?.personId ?? s?.personId ?? null,
       matchesPlayed: a.matches,
-      points,
-      pointsLost,
-      games,
-      scratchPinfall: pinfall,
-      scratchAverage: avg,
-      highGame,
-      highSet,
+      points, pointsLost, handicapPinfall,
+      games, scratchPinfall: pinfall, scratchAverage: avg,
+      highGame, highSet, advanced,
       rank: 0,
       fromSummaryOnly: usingSummaryOnly,
     });
   }
-  rows.sort((x, y) => (y.points ?? -1) - (x.points ?? -1) || (y.scratchPinfall ?? -1) - (x.scratchPinfall ?? -1));
+  // League tiebreaker: points DESC, handicap pinfall DESC, scratch pinfall DESC.
+  rows.sort((x, y) =>
+    (y.points ?? -1) - (x.points ?? -1) ||
+    (y.handicapPinfall ?? -1) - (x.handicapPinfall ?? -1) ||
+    (y.scratchPinfall ?? -1) - (x.scratchPinfall ?? -1));
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
+}
+
+/** Public-facing snapshot filter: strip unpublished weeks and rebuild
+ *  standings from the visible subset. Admin snapshot writer always stores
+ *  the FULL snapshot; this function is what public readers must apply
+ *  before rendering anything a spectator sees. */
+export function filterPublicHistoricalSnapshot(snap: HistoricalSnapshot): HistoricalSnapshot {
+  const publishedWeeks = snap.weeks.filter((w) => w.published);
+  const standings = buildHistoricalStandings({
+    participants: snap.participants,
+    weeks: publishedWeeks,
+    summaryRecords: snap.summaryRecords,
+  });
+  return {
+    ...snap,
+    weeks: publishedWeeks,
+    standings,
+    summaryOnly: publishedWeeks.every((w) => w.matches.length === 0) && snap.summaryRecords.length > 0,
+  };
 }
 
 // ---------------- Career aggregation from historical snapshots -----------
