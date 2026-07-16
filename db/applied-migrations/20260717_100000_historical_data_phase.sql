@@ -1,10 +1,9 @@
 -- ============================================================
 -- Historical data phase (Phase D) — ADDITIVE.
 --
--- ⚠️ PENDING — NOT YET APPLIED.
--- Stored outside supabase/migrations/ so the migration tool does not pick
--- it up. Apply manually after review; the app degrades gracefully to
--- "historical data not available yet" until then.
+-- ✅ APPLIED MANUALLY on 2026-07-16 to the connected Supabase project.
+-- Historical record — DO NOT rerun automatically. Stored outside
+-- supabase/migrations/ so the migration tool does not pick it up.
 --
 -- All new tables are strictly scoped by season_id. Nothing here touches
 -- the 2026 tables (weeks, schedule_slots, match_results,
