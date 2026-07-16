@@ -32,6 +32,7 @@ import {
   type HistoricalSideInput,
 } from "@/lib/historical-scoring";
 import {
+  buildHistoricalParticipantStats,
   buildHistoricalStandings,
   dedupeHistoricalContributions,
   filterPublicHistoricalSnapshot,
@@ -42,6 +43,76 @@ import {
   type HistoricalWeekSummary,
 } from "@/lib/historical-snapshot";
 import { compareLanePairSlotCamel, compareLanePairSlotSnake } from "@/lib/lane-pair-order";
+import { summarizeGame, validateGame, type FrameLinescore, type GameLinescore } from "@/lib/duckpin";
+
+// ---------------------------------------------------------------
+// Canonical linescore parser — NEVER trust browser-supplied derived
+// counts (strikes, spares, opens, marks, scratchTotal, segments). The
+// only ground truth is the array of frames {frameNumber, mark,
+// cumulativeScore}. We re-run summarizeGame + validateGame here, and
+// cross-check that the submitted game score matches the recomputed
+// scratchTotal. Any mismatch or malformed shape is rejected.
+// ---------------------------------------------------------------
+
+function coerceFrameArray(raw: unknown, ctx: string): FrameLinescore[] {
+  const framesRaw = Array.isArray(raw) ? raw
+    : (raw && typeof raw === "object" && Array.isArray((raw as { frames?: unknown }).frames))
+      ? (raw as { frames: unknown[] }).frames
+      : null;
+  if (!framesRaw) throw new Error(`${ctx}: linescore game must supply a 10-frame array.`);
+  if (framesRaw.length !== 10) {
+    throw new Error(`${ctx}: linescore game must have exactly 10 frames (got ${framesRaw.length}).`);
+  }
+  const frames: FrameLinescore[] = [];
+  for (let i = 0; i < 10; i++) {
+    const f = framesRaw[i] as { frameNumber?: unknown; mark?: unknown; cumulativeScore?: unknown };
+    if (!f || typeof f !== "object") throw new Error(`${ctx}: frame ${i + 1} malformed.`);
+    const fn = Number(f.frameNumber);
+    if (!Number.isInteger(fn) || fn !== i + 1) {
+      throw new Error(`${ctx}: frame ${i + 1} numbered ${String(f.frameNumber)}.`);
+    }
+    if (typeof f.mark !== "string") throw new Error(`${ctx}: frame ${i + 1} mark missing.`);
+    const cs = Number(f.cumulativeScore);
+    if (!Number.isInteger(cs) || cs < 0) throw new Error(`${ctx}: frame ${i + 1} cumulative invalid.`);
+    frames.push({ frameNumber: fn, mark: f.mark, cumulativeScore: cs });
+  }
+  return frames;
+}
+
+/** Parse and canonicalize one side's three-game linescore. Recomputes
+ *  strikes/spares/opens/marks/segments/scratchTotal from frames only,
+ *  validates with the shared duckpin validator, and rejects if the
+ *  submitted per-game total does not equal the recomputed scratchTotal. */
+export function canonicalizeSideLinescore(
+  rawSide: unknown,
+  submittedGameScores: readonly [number, number, number] | null,
+  ctx: string,
+): [GameLinescore, GameLinescore, GameLinescore] {
+  const gamesRaw = Array.isArray(rawSide) ? rawSide
+    : (rawSide && typeof rawSide === "object" && Array.isArray((rawSide as { games?: unknown }).games))
+      ? (rawSide as { games: unknown[] }).games
+      : null;
+  if (!gamesRaw || gamesRaw.length !== 3) {
+    throw new Error(`${ctx}: linescore must contain exactly 3 games.`);
+  }
+  const out: GameLinescore[] = [];
+  for (let gi = 0; gi < 3; gi++) {
+    const gameCtx = `${ctx} game ${gi + 1}`;
+    const frames = coerceFrameArray(gamesRaw[gi], gameCtx);
+    const canonical = summarizeGame(frames);
+    validateGame(canonical, gameCtx);
+    if (submittedGameScores) {
+      const submitted = submittedGameScores[gi];
+      if (canonical.scratchTotal !== submitted) {
+        throw new Error(
+          `${gameCtx}: submitted game score ${submitted} disagrees with recomputed frame total ${canonical.scratchTotal}.`,
+        );
+      }
+    }
+    out.push(canonical);
+  }
+  return [out[0], out[1], out[2]];
+}
 
 type Sb = SupabaseClient<Database>;
 type AuthedCtx = { supabase: Sb; userId: string };
@@ -677,12 +748,30 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
       override: outcome.override,
     };
 
+    // Canonicalize FULL_LINESCORE payloads — recompute frames-only
+    // metrics via summarizeGame; reject any tampered derived count or
+    // any submitted game score that disagrees with the recomputed total.
+    let canonicalLineA: [GameLinescore, GameLinescore, GameLinescore] | null = null;
+    let canonicalLineB: [GameLinescore, GameLinescore, GameLinescore] | null = null;
+    if (data.detailMode === "full_linescore") {
+      if (bowledA) {
+        canonicalLineA = canonicalizeSideLinescore(
+          data.linescoreA, data.gameScoresA, `Side A (${frozenA.name || "A"})`,
+        );
+      }
+      if (bowledB) {
+        canonicalLineB = canonicalizeSideLinescore(
+          data.linescoreB, data.gameScoresB, `Side B (${frozenB.name || "B"})`,
+        );
+      }
+    }
+
     const payload = {
       season_id: data.seasonId, week_id: data.weekId, slot_id: data.slotId,
       detail_mode: data.detailMode,
       side_a: frozenSideA, side_b: frozenSideB,
-      linescore_a: data.detailMode === "full_linescore" ? data.linescoreA ?? null : null,
-      linescore_b: data.detailMode === "full_linescore" ? data.linescoreB ?? null : null,
+      linescore_a: canonicalLineA,
+      linescore_b: canonicalLineB,
       game_scores_a: data.gameScoresA,
       game_scores_b: data.gameScoresB,
       points_a: outcome.finalPointsA,
@@ -889,8 +978,20 @@ async function loadParticipants(sb: Sb, seasonId: string): Promise<HistoricalPar
     (sb.from as unknown as LooseFrom)("substitutes")
       .select("id,name,bowler_number,starting_average,handicap,person_id").eq("season_id", seasonId),
   ]);
+  // FAIL CLOSED: never silently return an empty roster on a DB error and
+  // let the caller overwrite a good snapshot with empty data. Missing
+  // multi-season migration remains the one clear-cut cause of a missing
+  // table — propagate that as a targeted error.
+  if (rb.error) {
+    if (isMissingTable(rb.error.code)) throw new Error("Historical data requires the multi-season migration.");
+    throw new Error(`rostered_bowlers load failed: ${rb.error.message}`);
+  }
+  if (sub.error) {
+    if (isMissingTable(sub.error.code)) throw new Error("Historical data requires the multi-season migration.");
+    throw new Error(`substitutes load failed: ${sub.error.message}`);
+  }
   const out: HistoricalParticipantMeta[] = [];
-  for (const r of ((rb.error ? [] : rb.data) as Array<Record<string, unknown>>) ?? []) {
+  for (const r of (rb.data as Array<Record<string, unknown>>) ?? []) {
     out.push({
       ref: String(r.id), personId: (r.person_id as string | null) ?? null,
       displayName: String(r.name ?? ""),
@@ -900,7 +1001,7 @@ async function loadParticipants(sb: Sb, seasonId: string): Promise<HistoricalPar
       role: "rostered",
     });
   }
-  for (const r of ((sub.error ? [] : sub.data) as Array<Record<string, unknown>>) ?? []) {
+  for (const r of (sub.data as Array<Record<string, unknown>>) ?? []) {
     out.push({
       ref: String(r.id), personId: (r.person_id as string | null) ?? null,
       displayName: String(r.name ?? ""),
@@ -930,10 +1031,20 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     loadParticipants(sb, seasonId),
   ]);
 
-  const weeksRaw = (weeksQ.error ? [] : weeksQ.data) as Array<Record<string, unknown>>;
-  const slotsRaw = (slotsQ.error ? [] : slotsQ.data) as Array<Record<string, unknown>>;
-  const resultsRaw = (resultsQ.error ? [] : resultsQ.data) as Array<Record<string, unknown>>;
-  const summaryRaw = (summaryQ.error ? [] : summaryQ.data) as Array<Record<string, unknown>>;
+  // FAIL CLOSED: refuse to build a snapshot from partial data. Missing-
+  // table produces the targeted migration message; any other DB error is
+  // rethrown so we never overwrite a good snapshot with empty results.
+  function unwrap<T>(q: { data: T; error: { code?: string; message: string } | null }, label: string): T {
+    if (q.error) {
+      if (isMissingTable(q.error.code)) throw new Error("Historical data requires the multi-season migration.");
+      throw new Error(`${label} load failed: ${q.error.message}`);
+    }
+    return q.data;
+  }
+  const weeksRaw = (unwrap(weeksQ, "historical_weeks") ?? []) as Array<Record<string, unknown>>;
+  const slotsRaw = (unwrap(slotsQ, "historical_schedule_slots") ?? []) as Array<Record<string, unknown>>;
+  const resultsRaw = (unwrap(resultsQ, "historical_match_results") ?? []) as Array<Record<string, unknown>>;
+  const summaryRaw = (unwrap(summaryQ, "historical_season_summary_records") ?? []) as Array<Record<string, unknown>>;
 
   const slotsByWeek = new Map<string, Array<Record<string, unknown>>>();
   for (const s of slotsRaw) {
@@ -1040,6 +1151,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
 
   const summaryRecords = summaryRaw.map(mapSummaryRow);
   const standings = buildHistoricalStandings({ participants, weeks, summaryRecords });
+  const participantStats = buildHistoricalParticipantStats({ participants, weeks });
   const snapshot: HistoricalSnapshot = {
     version: 1,
     builtAt: Date.now(),
@@ -1050,6 +1162,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     participants,
     weeks,
     standings,
+    participantStats,
     summaryOnly: weeks.every((w) => w.matches.length === 0) && summaryRecords.length > 0,
     summaryRecords,
   };
@@ -1177,11 +1290,18 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
       for (const row of (snaps.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>)) {
         const meta = seasonMeta.get(row.season_id);
         if (!meta) continue;
-        const snap = row.snapshot;
+        // PRIVACY: apply the same public filter used by the archived-
+        // season page. Otherwise unpublished-week points, games, and
+        // frame stats leak onto the permanent career profile.
+        const snap = filterPublicHistoricalSnapshot(row.snapshot);
         // Match participants by personId.
         for (const p of snap.participants ?? []) {
           if (p.personId !== data.personId) continue;
           const standings = (snap.standings ?? []).find((s) => s.participantRef === p.ref) ?? null;
+          // Personal bowling stats (games/pinfall/highs/etc) come from the
+          // participantStats projection so substitutes retain them and
+          // rostered-with-a-sub-that-match do not inherit sub totals.
+          const personal = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref) ?? null;
           rows.push({
             seasonId: row.season_id,
             seasonLabel: meta.label,
@@ -1190,15 +1310,15 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             bowlerNumber: p.bowlerNumber ?? null,
             startingAverage: p.startingAverage ?? null,
             handicap: p.handicap ?? null,
-            games: standings?.games ?? null,
-            scratchPinfall: standings?.scratchPinfall ?? null,
-            average: standings?.scratchAverage ?? null,
-            highGame: standings?.highGame ?? null,
-            highSet: standings?.highSet ?? null,
+            games: personal?.games ?? standings?.games ?? null,
+            scratchPinfall: personal?.scratchPinfall ?? standings?.scratchPinfall ?? null,
+            average: personal?.scratchAverage ?? standings?.scratchAverage ?? null,
+            highGame: personal?.highGame ?? standings?.highGame ?? null,
+            highSet: personal?.highSet ?? standings?.highSet ?? null,
             points: standings?.points ?? null,
             finalFinish: standings?.rank ?? null,
             isChampion: (snap.summaryRecords ?? []).some((s) => s.participantRef === p.ref && s.isChampion),
-            hasGameData: standings != null && standings.games != null,
+            hasGameData: (personal?.games ?? standings?.games ?? null) != null,
             source: "historical_snapshot",
           });
         }

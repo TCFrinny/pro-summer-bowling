@@ -11,7 +11,7 @@
  */
 
 import type { HistoricalDetailMode, HistoricalPointSystem } from "./historical-scoring";
-import type { GameLinescore } from "./duckpin";
+import { stdev, type GameLinescore } from "./duckpin";
 
 export interface HistoricalParticipantMeta {
   ref: string;                  // participant_ref (rostered_bowlers.id / substitutes.id / etc)
@@ -87,10 +87,32 @@ export interface HistoricalWeekSummary {
 export interface HistoricalAdvancedTotals {
   /** Number of full-linescore games contributing to these totals. */
   games: number;
+  framesRolled: number;
   strikes: number;
   spares: number;
   opens: number;
   marks: number;
+  cleanFrames: number;
+  cleanGames: number;
+  openPinsLeft: number;
+  markPct: number;
+  strikePct: number;
+  sparePct: number;
+  openPct: number;
+  spareConversionPct: number;
+  pinsLostPerGame: number;
+  consistency: number;
+  first5Total: number;
+  first5PerGame: number;
+  last5Total: number;
+  last5PerGame: number;
+  bigOpeningTotal: number;
+  bigOpeningPerGame: number;
+  bigFinishTotal: number;
+  bigFinishPerGame: number;
+  clutchMarks: number;
+  clutchOpportunities: number;
+  clutchPct: number;
 }
 
 export interface HistoricalStandingRow {
@@ -117,6 +139,31 @@ export interface HistoricalStandingRow {
   fromSummaryOnly: boolean;
 }
 
+/** Per-participant personal bowling projection. INCLUDES substitutes so
+ *  their personal games / advanced stats survive alongside the roster-only
+ *  standings board. Never carries points / handicap-pinfall credit —
+ *  those live only on HistoricalStandingRow for the SCHEDULED (rostered)
+ *  bowler. */
+export interface HistoricalParticipantStats {
+  participantRef: string;
+  personId: string | null;
+  role: "rostered" | "substitute";
+  displayName: string;
+  bowlerNumber: string | null;
+  matches: number;
+  games: number | null;
+  scratchPinfall: number | null;
+  scratchAverage: number | null;
+  highGame: number | null;
+  highSet: number | null;
+  seasonPOA: number | null;
+  bestGamePOA: number | null;
+  bestSetPOA: number | null;
+  /** Advanced (frame-derived) stats — null when the participant has NO
+   *  FULL_LINESCORE games. Never zero-as-stand-in. */
+  advanced: HistoricalAdvancedTotals | null;
+}
+
 export interface HistoricalSnapshot {
   version: 1;
   builtAt: number;
@@ -127,6 +174,10 @@ export interface HistoricalSnapshot {
   participants: HistoricalParticipantMeta[];
   weeks: HistoricalWeekSummary[];
   standings: HistoricalStandingRow[];
+  /** Personal bowling stats for ALL actual participants (rostered +
+   *  substitutes). Older snapshots may omit this; readers must tolerate
+   *  `undefined`. */
+  participantStats?: HistoricalParticipantStats[];
   /** True when the season only has summary-only records (no weekly matches). */
   summaryOnly: boolean;
   /** Rows fed straight from historical_season_summary_records. Never null;
@@ -149,16 +200,198 @@ export interface HistoricalSnapshot {
   }>;
 }
 
-/** Build standings by aggregating computed weekly matches. Falls back to
- *  summary-only records for participants who have no weekly data. */
+// -----------------------------------------------------------------------
+// Shared accumulator: personal stats + advanced from full linescores.
+// -----------------------------------------------------------------------
+
+interface PersonalAcc {
+  ref: string;
+  role: "rostered" | "substitute";
+  matches: number;
+  games: number;
+  pinfall: number;
+  highGame: number | null;
+  highSet: number | null;
+  gameScores: number[];
+  poaSum: number;
+  poaGames: number;
+  poaBestGame: number | null;
+  poaBestSet: number | null;
+  // advanced (full linescore) — attributed to ACTUAL bowler ONLY
+  advGames: number;
+  advFrames: number;
+  advStrikes: number;
+  advSpares: number;
+  advOpens: number;
+  advCleanFrames: number;
+  advCleanGames: number;
+  advOpenPinsLeft: number;
+  advFirst5: number;
+  advLast5: number;
+  advBigOpening: number;
+  advBigFinish: number;
+  advClutchMarks: number;
+  advClutchOpp: number;
+}
+
+function newPersonal(ref: string, role: "rostered" | "substitute"): PersonalAcc {
+  return {
+    ref, role,
+    matches: 0, games: 0, pinfall: 0, highGame: null, highSet: null,
+    gameScores: [], poaSum: 0, poaGames: 0, poaBestGame: null, poaBestSet: null,
+    advGames: 0, advFrames: 0, advStrikes: 0, advSpares: 0, advOpens: 0,
+    advCleanFrames: 0, advCleanGames: 0, advOpenPinsLeft: 0,
+    advFirst5: 0, advLast5: 0, advBigOpening: 0, advBigFinish: 0,
+    advClutchMarks: 0, advClutchOpp: 0,
+  };
+}
+
+function addLinescoreToPersonal(acc: PersonalAcc, line: readonly GameLinescore[]) {
+  for (const g of line) {
+    acc.advGames += 1;
+    acc.advFrames += 10;
+    acc.advStrikes += g.strikes;
+    acc.advSpares += g.spares;
+    acc.advOpens += g.opens;
+    acc.advOpenPinsLeft += g.openPinsLeft;
+    acc.advFirst5 += g.segments.first5;
+    acc.advLast5 += g.segments.last5;
+    acc.advBigOpening += g.segments.bigOpening;
+    acc.advBigFinish += g.segments.bigFinish;
+    acc.advClutchMarks += g.segments.clutchMarks;
+    acc.advClutchOpp += 2;
+    // "clean" frame = strike or spare (mark). "clean game" = zero opens.
+    if (g.opens === 0) acc.advCleanGames += 1;
+  }
+  // clean frames = strikes + spares total (marks).
+  acc.advCleanFrames += line.reduce((s, g) => s + g.strikes + g.spares, 0);
+}
+
+function finalizeAdvanced(a: PersonalAcc): HistoricalAdvancedTotals | null {
+  if (a.advGames === 0) return null;
+  const marks = a.advStrikes + a.advSpares;
+  const spareOpp = a.advSpares + a.advOpens;
+  const gs = a.advGames;
+  const frames = a.advFrames;
+  return {
+    games: gs, framesRolled: frames,
+    strikes: a.advStrikes, spares: a.advSpares, opens: a.advOpens,
+    marks, cleanFrames: a.advCleanFrames, cleanGames: a.advCleanGames,
+    openPinsLeft: a.advOpenPinsLeft,
+    markPct: frames > 0 ? (marks / frames) * 100 : 0,
+    strikePct: frames > 0 ? (a.advStrikes / frames) * 100 : 0,
+    sparePct: frames > 0 ? (a.advSpares / frames) * 100 : 0,
+    openPct: frames > 0 ? (a.advOpens / frames) * 100 : 0,
+    spareConversionPct: spareOpp > 0 ? (a.advSpares / spareOpp) * 100 : 0,
+    pinsLostPerGame: gs > 0 ? a.advOpenPinsLeft / gs : 0,
+    consistency: 0, // filled below from gameScores subset
+    first5Total: a.advFirst5, first5PerGame: gs > 0 ? a.advFirst5 / gs : 0,
+    last5Total: a.advLast5, last5PerGame: gs > 0 ? a.advLast5 / gs : 0,
+    bigOpeningTotal: a.advBigOpening, bigOpeningPerGame: gs > 0 ? a.advBigOpening / gs : 0,
+    bigFinishTotal: a.advBigFinish, bigFinishPerGame: gs > 0 ? a.advBigFinish / gs : 0,
+    clutchMarks: a.advClutchMarks, clutchOpportunities: a.advClutchOpp,
+    clutchPct: a.advClutchOpp > 0 ? (a.advClutchMarks / a.advClutchOpp) * 100 : 0,
+  };
+}
+
+function creditPersonalScratch(
+  acc: PersonalAcc, scratchGames: [number, number, number],
+  scratchTotal: number, entryAverage: number,
+) {
+  acc.matches += 1;
+  for (const s of scratchGames) {
+    acc.games += 1;
+    acc.pinfall += s;
+    acc.gameScores.push(s);
+    if (acc.highGame === null || s > acc.highGame) acc.highGame = s;
+    const poa = s - entryAverage;
+    acc.poaSum += poa;
+    acc.poaGames += 1;
+    if (acc.poaBestGame === null || poa > acc.poaBestGame) acc.poaBestGame = poa;
+  }
+  if (acc.highSet === null || scratchTotal > acc.highSet) acc.highSet = scratchTotal;
+  const setPOA = scratchTotal - 3 * entryAverage;
+  if (acc.poaBestSet === null || setPOA > acc.poaBestSet) acc.poaBestSet = setPOA;
+}
+
+/** Personal stats projection for every participant that PHYSICALLY rolled
+ *  (rostered on their own card OR substitute for someone else). Rostered
+ *  bowlers with no personal scratch are still included (they may exist in
+ *  the participant list). Absent scores never contribute here. */
+export function buildHistoricalParticipantStats(input: {
+  participants: HistoricalParticipantMeta[];
+  weeks: HistoricalWeekSummary[];
+}): HistoricalParticipantStats[] {
+  const acc = new Map<string, PersonalAcc>();
+  const partByRef = new Map(input.participants.map((p) => [p.ref, p] as const));
+  function ensure(ref: string, role: "rostered" | "substitute"): PersonalAcc {
+    let a = acc.get(ref);
+    if (!a) { a = newPersonal(ref, role); acc.set(ref, a); }
+    return a;
+  }
+
+  for (const w of input.weeks) {
+    for (const m of w.matches) {
+      if (!m.absentA && m.scratchGamesA) {
+        const p = partByRef.get(m.actualA);
+        const role = p?.role ?? (m.isSubA ? "substitute" : "rostered");
+        const target = ensure(m.actualA, role);
+        creditPersonalScratch(target, m.scratchGamesA, m.scratchTotalA, m.entryAverageA);
+        if (m.linescoreA) addLinescoreToPersonal(target, m.linescoreA);
+      }
+      if (!m.absentB && m.scratchGamesB) {
+        const p = partByRef.get(m.actualB);
+        const role = p?.role ?? (m.isSubB ? "substitute" : "rostered");
+        const target = ensure(m.actualB, role);
+        creditPersonalScratch(target, m.scratchGamesB, m.scratchTotalB, m.entryAverageB);
+        if (m.linescoreB) addLinescoreToPersonal(target, m.linescoreB);
+      }
+    }
+  }
+
+  // Ensure listed participants appear even if they never bowled.
+  for (const p of input.participants) {
+    if (!acc.has(p.ref)) acc.set(p.ref, newPersonal(p.ref, p.role));
+  }
+
+  const rows: HistoricalParticipantStats[] = [];
+  for (const a of acc.values()) {
+    const p = partByRef.get(a.ref);
+    const adv = finalizeAdvanced(a);
+    if (adv && a.gameScores.length >= 2) adv.consistency = stdev(a.gameScores);
+    rows.push({
+      participantRef: a.ref,
+      personId: p?.personId ?? null,
+      role: p?.role ?? a.role,
+      displayName: p?.displayName ?? a.ref,
+      bowlerNumber: p?.bowlerNumber ?? null,
+      matches: a.matches,
+      games: a.games > 0 ? a.games : null,
+      scratchPinfall: a.games > 0 ? a.pinfall : null,
+      scratchAverage: a.games > 0 ? a.pinfall / a.games : null,
+      highGame: a.highGame,
+      highSet: a.highSet,
+      seasonPOA: a.poaGames > 0 ? a.poaSum / a.poaGames : null,
+      bestGamePOA: a.poaBestGame,
+      bestSetPOA: a.poaBestSet,
+      advanced: adv,
+    });
+  }
+  return rows;
+}
+
+/** Build standings by aggregating computed weekly matches. Roster-only.
+ *  Personal scratch stats attribute to the ACTUAL bowler (self on scheduled
+ *  side); substitutes contribute their scratch to their own personal
+ *  projection via buildHistoricalParticipantStats — NOT here. Points and
+ *  handicap-pinfall always credit the SCHEDULED (rostered) bowler.
+ *  Falls back to summary-only records for participants who have no weekly
+ *  data. */
 export function buildHistoricalStandings(input: {
   participants: HistoricalParticipantMeta[];
   weeks: HistoricalWeekSummary[];
   summaryRecords: HistoricalSnapshot["summaryRecords"];
 }): HistoricalStandingRow[] {
-  // key = participantRef (scheduled). Absent scores credit the scheduled
-  // side. Substitute performance stays with the substitute for personal
-  // stats but points/handicap pinfall go to the scheduled bowler.
   type Acc = {
     ref: string;
     matches: number;
@@ -166,28 +399,28 @@ export function buildHistoricalStandings(input: {
     pointsLost: number;
     handicapPinfall: number;
     hasHandicapData: boolean;
-    games: number;
-    pinfall: number;
-    highGame: number | null;
-    highSet: number | null;
+    // personal scratch (self on own scheduled card only; sub goes to the
+    // sub's personal projection, not standings)
+    personalGames: number;
+    personalPinfall: number;
+    personalHighGame: number | null;
+    personalHighSet: number | null;
+    // advanced (full linescore, self on own card only)
+    adv: PersonalAcc | null;
+    gameScores: number[];
     hasWeekly: boolean;
-    /** True when this participant only ever appeared as a substitute in
-     *  another slot (personal stats collector). */
-    personalStatsOnly?: boolean;
-    // Advanced (full-linescore only) — attributed to the ACTUAL bowler.
-    advGames: number;
-    advStrikes: number;
-    advSpares: number;
-    advOpens: number;
-    advMarks: number;
   };
   const acc = new Map<string, Acc>();
   function ensure(ref: string): Acc {
     let a = acc.get(ref);
     if (!a) {
-      a = { ref, matches: 0, points: 0, pointsLost: 0, handicapPinfall: 0, hasHandicapData: false,
-        games: 0, pinfall: 0, highGame: null, highSet: null, hasWeekly: false,
-        advGames: 0, advStrikes: 0, advSpares: 0, advOpens: 0, advMarks: 0 };
+      a = {
+        ref, matches: 0, points: 0, pointsLost: 0,
+        handicapPinfall: 0, hasHandicapData: false,
+        personalGames: 0, personalPinfall: 0,
+        personalHighGame: null, personalHighSet: null,
+        adv: null, gameScores: [], hasWeekly: false,
+      };
       acc.set(ref, a);
     }
     return a;
@@ -195,7 +428,7 @@ export function buildHistoricalStandings(input: {
 
   for (const w of input.weeks) {
     for (const m of w.matches) {
-      // POINTS + HANDICAP-PINFALL credit scheduled bowler
+      // POINTS + HANDICAP-PINFALL credit scheduled bowler.
       const sa = ensure(m.scheduledA);
       const sb = ensure(m.scheduledB);
       sa.hasWeekly = true; sb.hasWeekly = true;
@@ -207,44 +440,31 @@ export function buildHistoricalStandings(input: {
       if (m.hasGameDataA) { sa.handicapPinfall += m.handicapTotalA; sa.hasHandicapData = true; }
       if (m.hasGameDataB) { sb.handicapPinfall += m.handicapTotalB; sb.hasHandicapData = true; }
 
-      // PERSONAL scratch stats (games/pinfall/highs) + ADVANCED linescore
-      // stats credit the ACTUAL bowler ONLY when they physically rolled.
-      // Absent-without-scores and absent-with-scores never add personal
-      // scratch to anyone (absent scores are handicap-only credit above).
-      if (!m.absentA && m.scratchGamesA) {
-        const target = m.isSubA ? ensure(m.actualA) : sa;
-        target.games += 3;
-        target.pinfall += m.scratchTotalA;
+      // Personal scratch on standings ONLY when scheduled bowler is also
+      // the actual bowler (self on own card). Substitute performance and
+      // absent scores never become standings-side personal stats.
+      if (!m.absentA && !m.isSubA && m.scratchGamesA) {
+        sa.personalGames += 3;
+        sa.personalPinfall += m.scratchTotalA;
         const hg = Math.max(...m.scratchGamesA);
-        target.highGame = target.highGame === null ? hg : Math.max(target.highGame, hg);
-        target.highSet = target.highSet === null ? m.scratchTotalA : Math.max(target.highSet, m.scratchTotalA);
-        if (m.isSubA) target.personalStatsOnly = target.hasWeekly ? target.personalStatsOnly : true;
+        sa.personalHighGame = sa.personalHighGame === null ? hg : Math.max(sa.personalHighGame, hg);
+        sa.personalHighSet = sa.personalHighSet === null ? m.scratchTotalA : Math.max(sa.personalHighSet, m.scratchTotalA);
+        sa.gameScores.push(...m.scratchGamesA);
         if (m.linescoreA) {
-          for (const g of m.linescoreA) {
-            target.advGames += 1;
-            target.advStrikes += g.strikes;
-            target.advSpares += g.spares;
-            target.advOpens += g.opens;
-            target.advMarks += g.marks;
-          }
+          if (!sa.adv) sa.adv = newPersonal(sa.ref, "rostered");
+          addLinescoreToPersonal(sa.adv, m.linescoreA);
         }
       }
-      if (!m.absentB && m.scratchGamesB) {
-        const target = m.isSubB ? ensure(m.actualB) : sb;
-        target.games += 3;
-        target.pinfall += m.scratchTotalB;
+      if (!m.absentB && !m.isSubB && m.scratchGamesB) {
+        sb.personalGames += 3;
+        sb.personalPinfall += m.scratchTotalB;
         const hg = Math.max(...m.scratchGamesB);
-        target.highGame = target.highGame === null ? hg : Math.max(target.highGame, hg);
-        target.highSet = target.highSet === null ? m.scratchTotalB : Math.max(target.highSet, m.scratchTotalB);
-        if (m.isSubB) target.personalStatsOnly = target.hasWeekly ? target.personalStatsOnly : true;
+        sb.personalHighGame = sb.personalHighGame === null ? hg : Math.max(sb.personalHighGame, hg);
+        sb.personalHighSet = sb.personalHighSet === null ? m.scratchTotalB : Math.max(sb.personalHighSet, m.scratchTotalB);
+        sb.gameScores.push(...m.scratchGamesB);
         if (m.linescoreB) {
-          for (const g of m.linescoreB) {
-            target.advGames += 1;
-            target.advStrikes += g.strikes;
-            target.advSpares += g.spares;
-            target.advOpens += g.opens;
-            target.advMarks += g.marks;
-          }
+          if (!sb.adv) sb.adv = newPersonal(sb.ref, "rostered");
+          addLinescoreToPersonal(sb.adv, m.linescoreB);
         }
       }
     }
@@ -260,8 +480,9 @@ export function buildHistoricalStandings(input: {
         ref: r.participantRef,
         matches: 0, points: 0, pointsLost: 0,
         handicapPinfall: 0, hasHandicapData: false,
-        games: 0, pinfall: 0, highGame: null, highSet: null, hasWeekly: false,
-        advGames: 0, advStrikes: 0, advSpares: 0, advOpens: 0, advMarks: 0,
+        personalGames: 0, personalPinfall: 0,
+        personalHighGame: null, personalHighSet: null,
+        adv: null, gameScores: [], hasWeekly: false,
       });
     }
   }
@@ -270,23 +491,24 @@ export function buildHistoricalStandings(input: {
   for (const a of acc.values()) {
     const p = partByRef.get(a.ref);
     const s = summaryByRef.get(a.ref);
-    // Rostered bowlers only appear in standings. Personal-stats-only rows
-    // (a substitute who bowled for someone) are not on the standings board.
+    // Roster-only board.
     if (p && p.role !== "rostered") continue;
     if (!p && s && s.role !== "rostered") continue;
     if (!p && !s) continue;
     const usingSummaryOnly = !a.hasWeekly && !!s;
-    const games = usingSummaryOnly ? s?.games ?? null : (a.games > 0 ? a.games : null);
-    const pinfall = usingSummaryOnly ? s?.scratchPinfall ?? null : (a.games > 0 ? a.pinfall : null);
+    const games = usingSummaryOnly ? s?.games ?? null : (a.personalGames > 0 ? a.personalGames : null);
+    const pinfall = usingSummaryOnly ? s?.scratchPinfall ?? null : (a.personalGames > 0 ? a.personalPinfall : null);
     const avg = games !== null && pinfall !== null && games > 0 ? pinfall / games : (usingSummaryOnly ? s?.average ?? null : null);
-    const highGame = usingSummaryOnly ? s?.highGame ?? null : a.highGame;
-    const highSet = usingSummaryOnly ? s?.highSet ?? null : a.highSet;
+    const highGame = usingSummaryOnly ? s?.highGame ?? null : a.personalHighGame;
+    const highSet = usingSummaryOnly ? s?.highSet ?? null : a.personalHighSet;
     const points = usingSummaryOnly ? s?.points ?? null : (a.hasWeekly ? a.points : null);
     const pointsLost = usingSummaryOnly ? s?.pointsLost ?? null : (a.hasWeekly ? a.pointsLost : null);
     const handicapPinfall = usingSummaryOnly ? null : (a.hasHandicapData ? a.handicapPinfall : null);
-    const advanced: HistoricalAdvancedTotals | null = a.advGames > 0 ? {
-      games: a.advGames, strikes: a.advStrikes, spares: a.advSpares, opens: a.advOpens, marks: a.advMarks,
-    } : null;
+    let advanced: HistoricalAdvancedTotals | null = null;
+    if (a.adv) {
+      advanced = finalizeAdvanced(a.adv);
+      if (advanced && a.gameScores.length >= 2) advanced.consistency = stdev(a.gameScores);
+    }
     rows.push({
       participantRef: a.ref,
       displayName: p?.displayName ?? s?.displayName ?? a.ref,
@@ -309,9 +531,9 @@ export function buildHistoricalStandings(input: {
 }
 
 /** Public-facing snapshot filter: strip unpublished weeks and rebuild
- *  standings from the visible subset. Admin snapshot writer always stores
- *  the FULL snapshot; this function is what public readers must apply
- *  before rendering anything a spectator sees. */
+ *  standings + participantStats from the visible subset. Admin snapshot
+ *  writer always stores the FULL snapshot; this function is what public
+ *  readers must apply before rendering anything a spectator sees. */
 export function filterPublicHistoricalSnapshot(snap: HistoricalSnapshot): HistoricalSnapshot {
   const publishedWeeks = snap.weeks.filter((w) => w.published);
   const standings = buildHistoricalStandings({
@@ -319,10 +541,15 @@ export function filterPublicHistoricalSnapshot(snap: HistoricalSnapshot): Histor
     weeks: publishedWeeks,
     summaryRecords: snap.summaryRecords,
   });
+  const participantStats = buildHistoricalParticipantStats({
+    participants: snap.participants,
+    weeks: publishedWeeks,
+  });
   return {
     ...snap,
     weeks: publishedWeeks,
     standings,
+    participantStats,
     summaryOnly: publishedWeeks.every((w) => w.matches.length === 0) && snap.summaryRecords.length > 0,
   };
 }
@@ -369,7 +596,6 @@ export function dedupeHistoricalContributions(
 
 // ---------------- Deterministic self-tests -------------------------------
 (function selfTest() {
-  // Dedupe: prefer historical_snapshot over historical_summary.
   const deduped = dedupeHistoricalContributions([
     { seasonId: "s1", seasonLabel: "S1", role: "rostered", displayName: "n",
       bowlerNumber: null, startingAverage: null, handicap: null,
