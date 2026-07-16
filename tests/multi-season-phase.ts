@@ -20,7 +20,7 @@
  *   no destructive 2026-data statements.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   aggregateCareerTotals,
