@@ -1,140 +1,121 @@
+# Phase D — Reusable Historical Season Data System
 
-# Pro Summer Singles — Supabase Migration Plan
+This plan covers a single reusable system for every non-current season (2025, 2024, future archives). Nothing here touches 2026 code paths.
 
-This is a large, cross-cutting change (7,100+ LOC touched or reshaped). Approve before I execute — implementation will take multiple passes.
+## Scope check
 
-## Goals
+This is a large body of work — new schema, ~10 admin surfaces, 6 public routes, career aggregation, and tests. I'll do it in one commit but in clearly separated internal phases so it stays reviewable. If any phase turns out larger than expected I'll flag it rather than silently shrinking scope.
 
-Move league persistence from `pss.leagueStore.v5` (localStorage) to Supabase as the production source of truth, with Supabase Auth admin login, RLS, a single cached public snapshot, and a one-time authenticated import tool. Keep every rule, display, and stat unchanged.
+## Safety invariants (enforced in every phase)
 
-## Database schema (single migration)
+- All new code paths guard `season.is_current = false` server-side. Attempting a historical write against the current season → 403.
+- 2026 uses existing tables (`weeks`, `match_results`, `live_match_results`, `public_snapshots`) untouched.
+- Historical writes go to NEW season-scoped tables (see schema). No historical row ever lands in the current-season tables.
+- Additive migration only. No column drops, no data rewrites, no changes to existing RLS on 2026 tables.
+- Existing snapshot builder unchanged. New `historical_season_snapshots` is a separate cache.
 
-Relational tables for identity + queryable fields; JSONB only for the two blobs that are already opaque today (frame linescores, precomputed snapshot).
+## Phase D.1 — Schema (single additive migration)
 
 ```text
-public.seasons          (id, label, current bool, created_at)
-public.app_role         enum ('admin')
-public.user_roles       (user_id fk auth.users, role app_role, unique)
-public.profiles         (user_id pk fk auth.users, display_name, created_at)
-public.rostered_bowlers (id, season_id, name, bowler_number, entry_average,
-                         handicap, archived, created_at, updated_at,
-                         unique(season_id, bowler_number) where not archived)
-public.substitutes      (id, season_id, name, bowler_number, starting_average,
-                         handicap, archived, ...)
-public.weeks            (id, season_id, week_number, date, published bool,
-                         unique(season_id, week_number))
-public.schedule_slots   (id, week_id, lane_pair, slot,
-                         bowler_a_id, bowler_b_id,
-                         bowler_number_a, bowler_number_b,   -- frozen at save
-                         name_a, name_b,                     -- frozen at save
-                         published bool,
-                         unique(week_id, lane_pair, slot))
-public.match_results    (id, schedule_slot_id unique, week_id, season_id,
-                         side_a jsonb, side_b jsonb,        -- participation, sub id, frozen name/avg/hcp
-                         linescore_a jsonb, linescore_b jsonb,  -- three GameLinescore objects
-                         derived jsonb,                     -- computed W-L, marks, opens, segments
-                         override jsonb,                    -- {pointsA, pointsB, reason} | null
-                         entered_by uuid, created_at, updated_at)
-public.public_snapshots (season_id pk, snapshot jsonb, updated_at)
+historical_weeks(id, season_id, week_number, date, published, completed, ...)
+  UNIQUE (season_id, week_number)
+
+historical_schedule_slots(id, season_id, week_id, lane_pair, slot,
+  bowler_a_participant_id, bowler_b_participant_id, ...)
+  UNIQUE (season_id, week_id, lane_pair, slot)
+  CHECK bowler_a != bowler_b
+
+historical_match_results(id, season_id, week_id, slot_id,
+  detail_mode: 'full_linescore' | 'game_scores' | 'summary_only',
+  side_a JSONB, side_b JSONB,          -- frozen participation, names, avgs, hdcps
+  linescore_a JSONB, linescore_b JSONB, -- null unless full_linescore
+  game_scores_a INT[3], game_scores_b INT[3], -- null unless game_scores/full
+  points_a NUMERIC, points_b NUMERIC,
+  point_override JSONB,                -- {points_a, points_b, reason}
+  ...)
+
+historical_season_summary_records(id, season_id, participant_ref,
+  role: 'rostered'|'substitute',
+  games, scratch_pinfall, average, high_game, high_set,
+  points, points_lost, final_finish, is_champion, ...)
+  -- every stat column NULLABLE; NULL = unavailable (never 0)
+
+historical_season_snapshots(season_id PK, snapshot JSONB, built_at)
 ```
 
-All tables enable RLS. Every `CREATE TABLE` includes explicit `GRANT`s per the platform rule.
+- `seasons.point_system` already exists; reuse it (4 or 7).
+- Full RLS: public SELECT only when `season.public_visible AND status='archived'`; writes gated by `has_role(auth.uid(),'admin')` AND `season.is_current = false`.
+- GRANTs for anon (SELECT) + authenticated + service_role per project rules.
 
-## RLS policies
+## Phase D.2 — Server functions (`src/lib/historical-*.functions.ts`)
 
-- `rostered_bowlers`, `substitutes`, `schedule_slots`, `match_results`, `weeks`:
-  - `SELECT TO anon, authenticated USING (published = true)` (for `weeks`/`schedule_slots`; slots inherit via week join through a security-definer helper), plus `SELECT USING (has_role(auth.uid(),'admin'))` for full read.
-  - Roster/subs/results: anon SELECT allowed (they only surface via snapshot anyway, but Standings/Bowlers list needs names) — scoped to `season.current = true` and rows whose owning week is published; drafts stay hidden.
-  - INSERT/UPDATE/DELETE: `has_role(auth.uid(),'admin')` only.
-- `public_snapshots`: anon SELECT; admin write.
-- `user_roles`, `profiles`: authenticated read own; admin manages.
-- `has_role(uuid, app_role)` is a SECURITY DEFINER function on `public.user_roles` (per user-roles rule).
+- `listHistoricalWeeks`, `generateHistoricalWeeks(seasonId, totalWeeks)`, `updateHistoricalWeek`.
+- `listHistoricalSchedule(weekId)`, `upsertHistoricalScheduleSlot`, `deleteHistoricalScheduleSlot` — validates capacity, lane order, no duplicate bowler in a week.
+- `saveHistoricalMatchResult` — routes by `detail_mode`; reuses existing 7-point / adds 4-point calculator; freezes identity; honors override.
+- `upsertHistoricalSummaryRecord`, `listHistoricalSummaryRecords`.
+- `rebuildHistoricalSeasonSnapshot(seasonId)` — season-scoped snapshot builder producing standings, weekly results, stats/leaderboards. Skips frame-derived stats for game-score/summary-only rows; marks unavailable fields as `null`.
+- `getPublicHistoricalSeason(seasonId)` — enforces `archived + public_visible`; 404-shaped response otherwise.
 
-## Auth
+## Phase D.3 — Points calculators
 
-- Replace `/admin-login` with real Supabase email/password form using `@/integrations/supabase/client`.
-- Add `_authenticated/route.tsx` (integration-managed layout) if not present; move `/admin/*` routes under it.
-- Add `beforeLoad` role check helper that calls a `getIsAdmin` server function (uses `requireSupabaseAuth` + `has_role`); non-admins redirect to `/`.
-- Sign-out hygiene per rules.
+- `src/lib/points-7.ts` (extract from current logic, unchanged behavior).
+- `src/lib/points-4.ts` — 1/game, 1 set, ties 0.5-0.5.
+- Shared substitute/absent semantics identical to 2026.
 
-## Data layer
+## Phase D.4 — Admin UI
 
-Replace `src/lib/league-store.ts` with:
+Extend `src/routes/admin.seasons.$seasonId.tsx` with a "Historical Data" section (only rendered when `!season.is_current`):
 
-- `src/lib/league-repo.ts` — thin async repo backed by Supabase, same shape functions used today (`selectActiveRoster`, `applyResult`, `saveScheduleDraft`, `publishWeek`, `addRosteredBowler`, etc.) but returning promises and running against Supabase.
-- `src/lib/snapshot.functions.ts` — `createServerFn` `.middleware([requireSupabaseAuth])` that rebuilds the aggregate snapshot (reusing pure logic from current `mock-data.ts`) and writes to `public_snapshots`. Called after every admin mutation server fn.
-- `src/lib/snapshot-read.functions.ts` — public GET server fn reads `public_snapshots` via server publishable client (or direct browser client, since anon SELECT is allowed).
-- Pure scoring/aggregation logic (currently inside `mock-data.ts` `buildSnapshot`) extracted to `src/lib/aggregation.ts` — stays pure, testable, framework-free. Server fn imports it.
+- Progress card: roster / weeks / schedules / results / summary counts.
+- Sub-panels (tabs or collapsibles):
+  1. Weeks (bulk generate + list editor)
+  2. Weekly Schedule (week selector → lane-pair grid, uses `compareLanePairSlotSnake`)
+  3. Match Results (per slot → modal picking mode: full linescore reuses `MatchLinescoreEditor`; game-scores = simple 3-score form; summary-only disabled at match level)
+  4. Season Summary Records (per participant form, all fields optional)
+- Delete + bulk actions gated behind confirm dialogs.
 
-All mutating server fns live in `src/lib/*.functions.ts`, admin-gated (`requireSupabaseAuth` + `has_role` check inside handler), and finish by calling snapshot rebuild + insert.
+## Phase D.5 — Public archived routes
 
-## Public routes
+New routes reading `historical_season_snapshots` and related tables:
 
-Convert from synchronous `getSnapshot()` reads to `useSuspenseQuery(snapshotQueryOptions)` with a root loader `ensureQueryData`. Realtime: root subscribes to `public_snapshots` changes and calls `queryClient.invalidateQueries(['snapshot'])`. Empty-DB state renders a friendly "Season data is being prepared" component in each route rather than crashing.
+- `/seasons/$seasonId` — already exists; extend Overview when historical data present.
+- `/seasons/$seasonId/standings`
+- `/seasons/$seasonId/schedule`
+- `/seasons/$seasonId/weekly-results`
+- `/seasons/$seasonId/statistics`
+- `/seasons/$seasonId/bowlers/$participantId`
 
-Bowler profile page: derives from snapshot (already does).
+All server-side hide draft/private (already covered by `getPublicSeasonDetail` pattern). Unavailable fields render as "—", never 0. Game-score rows show a "full linescore unavailable" note; summary-only seasons hide weekly UI entirely.
 
-## Admin routes
+## Phase D.6 — Career profile
 
-- `/admin/bowlers`, `/admin/schedule`, `/admin/results`: same UI, swap store calls for async repo calls; wrap in `useMutation` with optimistic invalidation.
-- `/admin/settings` (new):
-  - Import from browser v5: reads `pss.leagueStore.v5`, shows preview counts (bowlers, subs, weeks, matches, results), refuses if any Supabase league table has rows unless admin picks "Destructive reset & import". Idempotent by natural key where possible.
-  - Import runs through a `createServerFn` that accepts the parsed v5 JSON payload; server validates with Zod, does all writes as service role or as admin user, then rebuilds snapshot.
-  - Reset: nukes all league tables inside a transaction, requires typing `RESET`.
+Update `/people/$personId` to merge historical seasons:
+- Prefer computed values (full/game-score) from `historical_season_snapshots`.
+- Fall back to `historical_season_summary_records`.
+- Deduplicate by `(person_id, season_id, role)`.
+- Show role per season; unavailable → dashes.
+- Do not include draft/private seasons.
 
-## Frozen values
+## Phase D.7 — Deterministic tests (`tests/historical-*.ts`)
 
-- Schedule save/publish freezes `name`, `bowler_number` into `schedule_slots` (both A & B). Later roster edits do not touch these columns — enforced by only writing them in `saveScheduleDraft`/`publishWeek`.
-- `match_results.side_a/b` snapshot `entry_average`, `handicap`, `name` at result-save time. Immutable on subsequent roster edits.
-
-## Removing localStorage
-
-Delete `league-store.ts` writes/reads. Keep `localStorage` only for: last-selected week in admin UIs, in-progress result-entry form draft (per slot key, cleared on save).
-
-## Tests
-
-- `tests/deterministic.ts`: keep — repoint at pure `aggregation.ts` with in-memory fixtures. No Supabase.
-- New `tests/rls.ts` (bun script): with anon key, assert SELECT on published data works and INSERT is rejected on every table; with a seeded admin JWT (via service-role admin-create + password login), assert admin CRUD works.
-- New `tests/import-v5.ts`: feed the sample v5 JSON through the import server fn contract (pure validator + writer against a scratch schema? or skip if only feasible against a real DB — will use RLS test harness).
-- `tests/admin-result-flow.py` (Playwright): update to log in with a test admin, exercise result entry, verify snapshot refresh on the public standings page.
-- Add: replacement-edit test (edit same result twice, verify no double counting); partial-week snapshot test.
+1. `historical-isolation.ts` — creating/editing historical data for two archived seasons never touches 2026 `weeks`/`match_results`/snapshot.
+2. `historical-lane-order.ts` — schedules + weekly results order 11-12 after 9-10 (reuses shared comparator).
+3. `historical-privacy.ts` — draft or private seasons return `forbidden` server-side even with correct UUID.
+4. `points-7-and-4.ts` — cover 2/1 game wins, ties, set-tie halves, override.
+5. `historical-detail-modes.ts` — full vs game-score vs summary-only: unavailable fields stay `null`, aggregates never treat null as 0.
+6. `career-aggregation.ts` — two archived + one current season → no duplicates, correct role labels, dashes for unavailable.
+7. `historical-substitute-absent.ts` — points credit scheduled bowler; sub personal stats separate; absent excluded from personal scratch stats.
 
 ## Verification
 
-```text
-bunx tsgo --noEmit
-bun run test:deterministic
-bun run test:rls           # new
-python3 tests/admin-result-flow.py
-bun run build
-```
+Typecheck, `bun run test:deterministic`, production build (`bun run build`). Reported at end.
 
-## Manual owner steps (reported at the end)
+## Explicit non-goals / limitations
 
-1. In Supabase Auth → Users, create the first admin user with email/password.
-2. In SQL editor, run:
-   ```sql
-   insert into public.user_roles (user_id, role)
-   values ('<uuid>', 'admin');
-   ```
-3. Sign in at `/admin-login`, open `/admin/settings`, click "Import from browser v5" (if migrating existing local data) OR begin entering rosters directly.
+- Migration will be recorded in `supabase/migrations/` but I will NOT run it (per project rule for pending migrations you've reviewed). You approve/run it separately; UI degrades gracefully until then.
+- Historical live-scoring (final-week live entry for archived seasons) is out of scope — archived seasons only get static entry modes.
+- No deployment through Lovable; you push `main` to trigger Cloudflare.
 
-## Explicitly out of scope
+## Assumption to confirm or correct
 
-- Publishing / deploy / domain.
-- Multi-season UI beyond the single `current = true` season.
-- A `substitutes` public profile page.
-- Enabling Lovable Cloud (user said connected Supabase project directly).
-
-## Execution order (single pass)
-
-1. `supabase--migration` with the full schema + RLS + grants + `has_role`.
-2. Extract `aggregation.ts` from `mock-data.ts`.
-3. Write `league-repo.ts` + server fns.
-4. Rewrite public routes to use snapshot query.
-5. Rewrite admin routes to async repo + auth gate.
-6. Build `/admin/settings` import tool.
-7. Update auth-attacher wiring in `src/start.ts`.
-8. Rewrite/extend tests, run all four verification commands, report outputs.
-
-Approve to proceed, or tell me which pieces to trim/reshape.
+I'm assuming you want the migration authored via the `supabase--migration` tool (which stages it for your approval), NOT executed by me. If you'd instead like the SQL written directly under `db/pending-migrations/` like `20260716_120000_seasons_people_phase.sql`, say so and I'll switch.

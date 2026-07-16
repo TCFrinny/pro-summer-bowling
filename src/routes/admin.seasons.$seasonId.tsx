@@ -14,6 +14,7 @@ import {
   listPeople,
 } from "@/lib/history-repo.functions";
 import { summarizeLanePairs } from "@/lib/season-history";
+import { HistoricalDataSection } from "@/components/admin/HistoricalDataSection";
 import { Loader2, Save, Star, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/seasons/$seasonId")({
@@ -82,6 +83,14 @@ function SeasonEditor() {
         onPeopleChanged={async () => {
           await people.refetch();
         }}
+      />
+
+      <HistoricalDataSection
+        seasonId={seasonId}
+        seasonLabel={season.label}
+        isCurrent={season.status === "current"}
+        totalWeeksHint={season.totalWeeks ?? null}
+        lanePairLabels={detail.data.lanePairs.map((p) => p.label)}
       />
     </>
   );
