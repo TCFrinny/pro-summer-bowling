@@ -19,7 +19,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
 import { rebuildAndSaveSnapshot } from "@/lib/snapshot-builder.server";
 import { resolveEffectiveScoring } from "@/lib/substitute-handicap";
-import { buildLiveSideJson, pairCompletedMask, type LiveMatchRow, type LiveSideJson } from "@/lib/live-scoring";
+import { buildLiveSideJson, isLiveIdentityChanged, pairCompletedMask, type LiveMatchRow, type LiveSideJson } from "@/lib/live-scoring";
 
 type Sb = SupabaseClient<Database>;
 type Ctx = { supabase: Sb; userId: string };
