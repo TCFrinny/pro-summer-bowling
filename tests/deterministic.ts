@@ -26,6 +26,7 @@ import "./live-scoring-backward-safety";
 import "./live-scoring-substitute";
 import "./season-history";
 import "./multi-season-phase";
+import "./lane-pair-order";
 
 
 
