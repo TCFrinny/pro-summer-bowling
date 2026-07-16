@@ -28,6 +28,7 @@ import {
 } from "@/lib/mock-data";
 import { rosteredRowToBowler, type RosteredRow, type SubRow } from "@/lib/roster-adapter";
 import { computeLiveMatchResult, type LiveMatchRow } from "@/lib/live-scoring";
+import { compareLanePairSlotSnake } from "@/lib/lane-pair-order";
 
 type Sb = SupabaseClient<Database>;
 
