@@ -24,6 +24,9 @@ import "./live-scoring";
 import "./live-scoring-elim-capacity";
 import "./live-scoring-backward-safety";
 import "./live-scoring-substitute";
+import "./season-history";
+
+
 
 // @ts-expect-error - JS module without types
 import "./patch-cloudflare-config.test.mjs";
