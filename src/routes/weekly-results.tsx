@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronUp, Crown } from "lucide-react";
 import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
+import { compareLanePairSlotCamel } from "@/lib/lane-pair-order";
 
 export const Route = createFileRoute("/weekly-results")({
   head: () => ({
@@ -46,7 +47,12 @@ function WeeklyResultsPage() {
   const [week, setWeek] = useState<number>(
     withResults[withResults.length - 1]?.week ?? 1,
   );
-  const matches = getMatchesForWeek(week).filter((m) => m.result);
+  // Defensive: sort by natural lane-pair order even if a legacy snapshot
+  // stored matches in insertion order — "11-12" must render after "9-10".
+  const matches = getMatchesForWeek(week)
+    .filter((m) => m.result)
+    .slice()
+    .sort(compareLanePairSlotCamel);
 
   return (
     <AppShell>
