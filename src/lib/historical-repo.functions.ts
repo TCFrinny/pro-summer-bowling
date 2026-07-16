@@ -32,6 +32,7 @@ import {
   type HistoricalSideInput,
 } from "@/lib/historical-scoring";
 import {
+  buildHistoricalParticipantStats,
   buildHistoricalStandings,
   dedupeHistoricalContributions,
   filterPublicHistoricalSnapshot,
@@ -42,6 +43,76 @@ import {
   type HistoricalWeekSummary,
 } from "@/lib/historical-snapshot";
 import { compareLanePairSlotCamel, compareLanePairSlotSnake } from "@/lib/lane-pair-order";
+import { summarizeGame, validateGame, type FrameLinescore, type GameLinescore } from "@/lib/duckpin";
+
+// ---------------------------------------------------------------
+// Canonical linescore parser — NEVER trust browser-supplied derived
+// counts (strikes, spares, opens, marks, scratchTotal, segments). The
+// only ground truth is the array of frames {frameNumber, mark,
+// cumulativeScore}. We re-run summarizeGame + validateGame here, and
+// cross-check that the submitted game score matches the recomputed
+// scratchTotal. Any mismatch or malformed shape is rejected.
+// ---------------------------------------------------------------
+
+function coerceFrameArray(raw: unknown, ctx: string): FrameLinescore[] {
+  const framesRaw = Array.isArray(raw) ? raw
+    : (raw && typeof raw === "object" && Array.isArray((raw as { frames?: unknown }).frames))
+      ? (raw as { frames: unknown[] }).frames
+      : null;
+  if (!framesRaw) throw new Error(`${ctx}: linescore game must supply a 10-frame array.`);
+  if (framesRaw.length !== 10) {
+    throw new Error(`${ctx}: linescore game must have exactly 10 frames (got ${framesRaw.length}).`);
+  }
+  const frames: FrameLinescore[] = [];
+  for (let i = 0; i < 10; i++) {
+    const f = framesRaw[i] as { frameNumber?: unknown; mark?: unknown; cumulativeScore?: unknown };
+    if (!f || typeof f !== "object") throw new Error(`${ctx}: frame ${i + 1} malformed.`);
+    const fn = Number(f.frameNumber);
+    if (!Number.isInteger(fn) || fn !== i + 1) {
+      throw new Error(`${ctx}: frame ${i + 1} numbered ${String(f.frameNumber)}.`);
+    }
+    if (typeof f.mark !== "string") throw new Error(`${ctx}: frame ${i + 1} mark missing.`);
+    const cs = Number(f.cumulativeScore);
+    if (!Number.isInteger(cs) || cs < 0) throw new Error(`${ctx}: frame ${i + 1} cumulative invalid.`);
+    frames.push({ frameNumber: fn, mark: f.mark, cumulativeScore: cs });
+  }
+  return frames;
+}
+
+/** Parse and canonicalize one side's three-game linescore. Recomputes
+ *  strikes/spares/opens/marks/segments/scratchTotal from frames only,
+ *  validates with the shared duckpin validator, and rejects if the
+ *  submitted per-game total does not equal the recomputed scratchTotal. */
+export function canonicalizeSideLinescore(
+  rawSide: unknown,
+  submittedGameScores: readonly [number, number, number] | null,
+  ctx: string,
+): [GameLinescore, GameLinescore, GameLinescore] {
+  const gamesRaw = Array.isArray(rawSide) ? rawSide
+    : (rawSide && typeof rawSide === "object" && Array.isArray((rawSide as { games?: unknown }).games))
+      ? (rawSide as { games: unknown[] }).games
+      : null;
+  if (!gamesRaw || gamesRaw.length !== 3) {
+    throw new Error(`${ctx}: linescore must contain exactly 3 games.`);
+  }
+  const out: GameLinescore[] = [];
+  for (let gi = 0; gi < 3; gi++) {
+    const gameCtx = `${ctx} game ${gi + 1}`;
+    const frames = coerceFrameArray(gamesRaw[gi], gameCtx);
+    const canonical = summarizeGame(frames);
+    validateGame(canonical, gameCtx);
+    if (submittedGameScores) {
+      const submitted = submittedGameScores[gi];
+      if (canonical.scratchTotal !== submitted) {
+        throw new Error(
+          `${gameCtx}: submitted game score ${submitted} disagrees with recomputed frame total ${canonical.scratchTotal}.`,
+        );
+      }
+    }
+    out.push(canonical);
+  }
+  return [out[0], out[1], out[2]];
+}
 
 type Sb = SupabaseClient<Database>;
 type AuthedCtx = { supabase: Sb; userId: string };
