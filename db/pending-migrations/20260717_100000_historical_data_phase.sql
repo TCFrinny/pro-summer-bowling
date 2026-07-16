@@ -240,13 +240,19 @@ grant select                             on public.historical_match_results to a
 grant select, insert, update, delete     on public.historical_match_results to authenticated;
 grant all                                on public.historical_match_results to service_role;
 alter table public.historical_match_results enable row level security;
+drop policy if exists "public reads historical results" on public.historical_match_results;
+create policy "public reads historical results" on public.historical_match_results
+  for select to anon, authenticated
+  using (
+    public.season_is_public_archive(season_id)
+    and exists (
+      select 1 from public.historical_weeks w
+      where w.id = historical_match_results.week_id
+        and w.season_id = historical_match_results.season_id
+        and w.published = true
+    )
+  );
 do $$ begin
-  if not exists (select 1 from pg_policies where tablename='historical_match_results'
-                  and policyname='public reads historical results') then
-    create policy "public reads historical results" on public.historical_match_results
-      for select to anon, authenticated
-      using (public.season_is_public_archive(season_id));
-  end if;
   if not exists (select 1 from pg_policies where tablename='historical_match_results'
                   and policyname='admin reads all historical results') then
     create policy "admin reads all historical results" on public.historical_match_results
