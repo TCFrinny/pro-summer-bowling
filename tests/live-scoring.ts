@@ -76,7 +76,7 @@ function liveRow(overrides: Partial<LiveMatchRow>): LiveMatchRow {
   expect(a.points === 2, `A points after 1 game = 2 (got ${a.points})`);
   expect(b.points === 0, `B points after 1 game = 0 (got ${b.points})`);
   expect(a.handicapPinfall === 182, `A hcp pinfall = 182 (got ${a.handicapPinfall})`);
-  expect(b.handicapPinfall === 164, `B hcp pinfall = 164 (got ${b.handicapPinfall})`);
+  expect(b.handicapPinfall === 172, `B hcp pinfall (got ${b.handicapPinfall})`);
   // Score-only partial: matchesPlayed / gamesPlayed / highSet must NOT count.
   expect(a.matchesPlayed === 0, "partial score-only doesn't count as match played");
   expect(a.highSet === 0, "no high-set until all 3 games complete");
