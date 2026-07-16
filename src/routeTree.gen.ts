@@ -32,6 +32,7 @@ import { Route as AdminResultsRouteImport } from './routes/admin.results'
 import { Route as AdminPeopleRouteImport } from './routes/admin.people'
 import { Route as AdminLiveScoringRouteImport } from './routes/admin.live-scoring'
 import { Route as AdminBowlersRouteImport } from './routes/admin.bowlers'
+import { Route as AdminSeasonsIndexRouteImport } from './routes/admin.seasons.index'
 import { Route as BowlersSubSubstituteIdRouteImport } from './routes/bowlers.sub.$substituteId'
 import { Route as AdminSeasonsSeasonIdRouteImport } from './routes/admin.seasons.$seasonId'
 
@@ -150,6 +151,11 @@ const AdminBowlersRoute = AdminBowlersRouteImport.update({
   path: '/bowlers',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminSeasonsIndexRoute = AdminSeasonsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminSeasonsRoute,
+} as any)
 const BowlersSubSubstituteIdRoute = BowlersSubSubstituteIdRouteImport.update({
   id: '/sub/$substituteId',
   path: '/sub/$substituteId',
@@ -187,6 +193,7 @@ export interface FileRoutesByFullPath {
   '/leaderboards/': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons/': typeof AdminSeasonsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -205,7 +212,6 @@ export interface FileRoutesByTo {
   '/admin/people': typeof AdminPeopleRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/schedule': typeof AdminScheduleRoute
-  '/admin/seasons': typeof AdminSeasonsRouteWithChildren
   '/bowlers/$bowlerId': typeof BowlersBowlerIdRoute
   '/leaderboards/advanced': typeof LeaderboardsAdvancedRoute
   '/people/$personId': typeof PeoplePersonIdRoute
@@ -213,6 +219,7 @@ export interface FileRoutesByTo {
   '/leaderboards': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons': typeof AdminSeasonsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -241,6 +248,7 @@ export interface FileRoutesById {
   '/leaderboards/': typeof LeaderboardsIndexRoute
   '/admin/seasons/$seasonId': typeof AdminSeasonsSeasonIdRoute
   '/bowlers/sub/$substituteId': typeof BowlersSubSubstituteIdRoute
+  '/admin/seasons/': typeof AdminSeasonsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -270,6 +278,7 @@ export interface FileRouteTypes {
     | '/leaderboards/'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -288,7 +297,6 @@ export interface FileRouteTypes {
     | '/admin/people'
     | '/admin/results'
     | '/admin/schedule'
-    | '/admin/seasons'
     | '/bowlers/$bowlerId'
     | '/leaderboards/advanced'
     | '/people/$personId'
@@ -296,6 +304,7 @@ export interface FileRouteTypes {
     | '/leaderboards'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons'
   id:
     | '__root__'
     | '/'
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/leaderboards/'
     | '/admin/seasons/$seasonId'
     | '/bowlers/sub/$substituteId'
+    | '/admin/seasons/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -504,6 +514,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminBowlersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/seasons/': {
+      id: '/admin/seasons/'
+      path: '/'
+      fullPath: '/admin/seasons/'
+      preLoaderRoute: typeof AdminSeasonsIndexRouteImport
+      parentRoute: typeof AdminSeasonsRoute
+    }
     '/bowlers/sub/$substituteId': {
       id: '/bowlers/sub/$substituteId'
       path: '/sub/$substituteId'
@@ -523,10 +540,12 @@ declare module '@tanstack/react-router' {
 
 interface AdminSeasonsRouteChildren {
   AdminSeasonsSeasonIdRoute: typeof AdminSeasonsSeasonIdRoute
+  AdminSeasonsIndexRoute: typeof AdminSeasonsIndexRoute
 }
 
 const AdminSeasonsRouteChildren: AdminSeasonsRouteChildren = {
   AdminSeasonsSeasonIdRoute: AdminSeasonsSeasonIdRoute,
+  AdminSeasonsIndexRoute: AdminSeasonsIndexRoute,
 }
 
 const AdminSeasonsRouteWithChildren = AdminSeasonsRoute._addFileChildren(
