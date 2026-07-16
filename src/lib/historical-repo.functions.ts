@@ -1031,10 +1031,20 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     loadParticipants(sb, seasonId),
   ]);
 
-  const weeksRaw = (weeksQ.error ? [] : weeksQ.data) as Array<Record<string, unknown>>;
-  const slotsRaw = (slotsQ.error ? [] : slotsQ.data) as Array<Record<string, unknown>>;
-  const resultsRaw = (resultsQ.error ? [] : resultsQ.data) as Array<Record<string, unknown>>;
-  const summaryRaw = (summaryQ.error ? [] : summaryQ.data) as Array<Record<string, unknown>>;
+  // FAIL CLOSED: refuse to build a snapshot from partial data. Missing-
+  // table produces the targeted migration message; any other DB error is
+  // rethrown so we never overwrite a good snapshot with empty results.
+  function unwrap<T>(q: { data: T; error: { code?: string; message: string } | null }, label: string): T {
+    if (q.error) {
+      if (isMissingTable(q.error.code)) throw new Error("Historical data requires the multi-season migration.");
+      throw new Error(`${label} load failed: ${q.error.message}`);
+    }
+    return q.data;
+  }
+  const weeksRaw = (unwrap(weeksQ, "historical_weeks") ?? []) as Array<Record<string, unknown>>;
+  const slotsRaw = (unwrap(slotsQ, "historical_schedule_slots") ?? []) as Array<Record<string, unknown>>;
+  const resultsRaw = (unwrap(resultsQ, "historical_match_results") ?? []) as Array<Record<string, unknown>>;
+  const summaryRaw = (unwrap(summaryQ, "historical_season_summary_records") ?? []) as Array<Record<string, unknown>>;
 
   const slotsByWeek = new Map<string, Array<Record<string, unknown>>>();
   for (const s of slotsRaw) {
