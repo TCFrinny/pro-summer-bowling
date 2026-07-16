@@ -271,7 +271,7 @@ export const saveLiveGameBatch = createServerFn({ method: "POST" })
     // Do the upsert.
     const up = await (context.supabase as unknown as AnySb)
       .from("live_match_results")
-      .upsert(upserts, { onConflict: "schedule_slot_id" });
+      .upsert(upserts as unknown as never[], { onConflict: "schedule_slot_id" });
     if (up.error) throw new Error(`live save failed: ${up.error.message}`);
 
     // One snapshot rebuild for the whole batch.
