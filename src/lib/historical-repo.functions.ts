@@ -748,12 +748,30 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
       override: outcome.override,
     };
 
+    // Canonicalize FULL_LINESCORE payloads — recompute frames-only
+    // metrics via summarizeGame; reject any tampered derived count or
+    // any submitted game score that disagrees with the recomputed total.
+    let canonicalLineA: [GameLinescore, GameLinescore, GameLinescore] | null = null;
+    let canonicalLineB: [GameLinescore, GameLinescore, GameLinescore] | null = null;
+    if (data.detailMode === "full_linescore") {
+      if (bowledA) {
+        canonicalLineA = canonicalizeSideLinescore(
+          data.linescoreA, data.gameScoresA, `Side A (${frozenA.name || "A"})`,
+        );
+      }
+      if (bowledB) {
+        canonicalLineB = canonicalizeSideLinescore(
+          data.linescoreB, data.gameScoresB, `Side B (${frozenB.name || "B"})`,
+        );
+      }
+    }
+
     const payload = {
       season_id: data.seasonId, week_id: data.weekId, slot_id: data.slotId,
       detail_mode: data.detailMode,
       side_a: frozenSideA, side_b: frozenSideB,
-      linescore_a: data.detailMode === "full_linescore" ? data.linescoreA ?? null : null,
-      linescore_b: data.detailMode === "full_linescore" ? data.linescoreB ?? null : null,
+      linescore_a: canonicalLineA,
+      linescore_b: canonicalLineB,
       game_scores_a: data.gameScoresA,
       game_scores_b: data.gameScoresB,
       points_a: outcome.finalPointsA,
