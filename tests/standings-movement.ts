@@ -18,6 +18,8 @@ import {
   type SideParticipation,
   type WeekSummary,
 } from "../src/lib/mock-data";
+import { computeLiveMatchResult, type LiveMatchRow } from "../src/lib/live-scoring";
+
 
 function mkBowler(id: string, name: string, entryAverage = 130): Bowler {
   return {
