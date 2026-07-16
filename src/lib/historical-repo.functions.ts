@@ -1151,6 +1151,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
 
   const summaryRecords = summaryRaw.map(mapSummaryRow);
   const standings = buildHistoricalStandings({ participants, weeks, summaryRecords });
+  const participantStats = buildHistoricalParticipantStats({ participants, weeks });
   const snapshot: HistoricalSnapshot = {
     version: 1,
     builtAt: Date.now(),
@@ -1161,6 +1162,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     participants,
     weeks,
     standings,
+    participantStats,
     summaryOnly: weeks.every((w) => w.matches.length === 0) && summaryRecords.length > 0,
     summaryRecords,
   };
