@@ -25,6 +25,7 @@ import "./live-scoring-elim-capacity";
 import "./live-scoring-backward-safety";
 import "./live-scoring-substitute";
 import "./season-history";
+import "./multi-season-phase";
 
 
 
