@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { PageHeader, EmptyState } from "@/components/layout/AppShell";
@@ -11,10 +11,52 @@ export const Route = createFileRoute("/admin/seasons")({
 });
 
 function AdminSeasonsPage() {
+  // ADMIN-ONLY listing. The public seasons endpoint is intentionally NOT
+  // used here — admins must see draft/private seasons too.
   const q = useQuery({ queryKey: ["admin", "seasons"], queryFn: () => adminListSeasons() });
-  const [newLabel, setNewLabel] = useState("");
+  const navigate = useNavigate();
+
+  const [label, setLabel] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [totalWeeks, setTotalWeeks] = useState("11");
+  const [pointSystem, setPointSystem] = useState("7");
+  const [handicapPercent, setHandicapPercent] = useState("80");
+  const [handicapBase, setHandicapBase] = useState("160");
+  const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  async function createSeason(e: React.FormEvent) {
+    e.preventDefault();
+    if (!label.trim() || creating) return;
+    setCreating(true);
+    setMsg(null);
+    try {
+      // New seasons ALWAYS begin as draft + private. We deliberately do NOT
+      // pass `status` or `publicVisible` here so the server default wins.
+      const res = await adminUpsertSeason({
+        data: {
+          label: label.trim(),
+          startDate: startDate || null,
+          endDate: endDate || null,
+          totalWeeks: totalWeeks ? Number(totalWeeks) : null,
+          pointSystem: pointSystem === "4" ? 4 : 7,
+          handicapPercent: handicapPercent ? Number(handicapPercent) : null,
+          handicapBase: handicapBase ? Number(handicapBase) : null,
+          description: description.trim() || null,
+        },
+      });
+      // Reset + navigate to the season editor as required.
+      setLabel(""); setStartDate(""); setEndDate(""); setDescription("");
+      await q.refetch();
+      navigate({ to: "/admin/seasons/$seasonId", params: { seasonId: res.id } });
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Create failed");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   return (
     <>
@@ -33,41 +75,39 @@ function AdminSeasonsPage() {
       )}
       {q.data && q.data.available && (
         <>
-          <form
-            className="mb-4 flex flex-wrap items-center gap-2"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const label = newLabel.trim();
-              if (!label || creating) return;
-              setCreating(true);
-              setMsg(null);
-              try {
-                await adminUpsertSeason({ data: { label } });
-                setNewLabel("");
-                setMsg("Draft season created.");
-                await q.refetch();
-              } catch (err) {
-                setMsg(err instanceof Error ? err.message : "Create failed");
-              } finally {
-                setCreating(false);
-              }
-            }}
-          >
-            <input
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="New season label (e.g. 2027 Winter)"
-              className="w-72 rounded-md border border-border bg-background px-3 py-1.5 text-sm"
-            />
-            <button
-              type="submit"
-              disabled={creating || !newLabel.trim()}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
-            >
-              <Plus className="h-4 w-4" /> {creating ? "Creating…" : "New draft season"}
-            </button>
-            {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
-          </form>
+          <section className="mb-6 rounded-lg border border-border bg-card p-4">
+            <h2 className="mb-2 text-sm font-semibold">Create a new season</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              New seasons are created as <strong>Draft</strong> and <strong>Private</strong> by default. Use the editor to configure lane pairs and participants, and the Make Current control to promote.
+            </p>
+            <form onSubmit={createSeason} className="grid gap-3 md:grid-cols-3">
+              <Field label="Label"><input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="2027 Summer" className={inputCls} required /></Field>
+              <Field label="Point system">
+                <select value={pointSystem} onChange={(e) => setPointSystem(e.target.value)} className={inputCls}>
+                  <option value="7">7-point</option>
+                  <option value="4">4-point</option>
+                </select>
+              </Field>
+              <Field label="Total weeks"><input type="number" min={1} max={60} value={totalWeeks} onChange={(e) => setTotalWeeks(e.target.value)} className={inputCls} /></Field>
+              <Field label="Start date"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} /></Field>
+              <Field label="End date"><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} /></Field>
+              <Field label="Handicap %"><input type="number" min={0} max={100} value={handicapPercent} onChange={(e) => setHandicapPercent(e.target.value)} className={inputCls} /></Field>
+              <Field label="Handicap base"><input type="number" min={0} max={300} value={handicapBase} onChange={(e) => setHandicapBase(e.target.value)} className={inputCls} /></Field>
+              <Field label="Description / notes" span={3}>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional notes about this season." className={`${inputCls} min-h-16`} />
+              </Field>
+              <div className="md:col-span-3 flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={creating || !label.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" /> {creating ? "Creating…" : "Create draft season"}
+                </button>
+                {msg && <span className="text-xs text-destructive">{msg}</span>}
+              </div>
+            </form>
+          </section>
 
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <table className="min-w-full text-sm">
@@ -87,7 +127,9 @@ function AdminSeasonsPage() {
                   <tr key={s.id}>
                     <td className="px-3 py-2 font-medium">{s.label}</td>
                     <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
-                    <td className="px-3 py-2 text-xs">{s.publicVisible ? "Public" : "Private"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <VisibilityBadge publicVisible={s.publicVisible} />
+                    </td>
                     <td className="px-3 py-2 text-right">{s.pointSystem ?? "—"}</td>
                     <td className="px-3 py-2 text-right">{s.totalWeeks ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">
@@ -120,5 +162,27 @@ function StatusBadge({ status }: { status: "current" | "draft" | "archived" }) {
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${cls}`}>
       {status}
     </span>
+  );
+}
+
+function VisibilityBadge({ publicVisible }: { publicVisible: boolean }) {
+  const cls = publicVisible
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+    : "bg-muted text-muted-foreground";
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${cls}`}>
+      {publicVisible ? "Public" : "Private"}
+    </span>
+  );
+}
+
+const inputCls = "w-full rounded-md border border-border bg-background px-2 py-1 text-sm";
+
+function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: number }) {
+  return (
+    <label className={`flex flex-col gap-1 ${span === 3 ? "md:col-span-3" : span === 2 ? "md:col-span-2" : ""}`}>
+      <span className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</span>
+      {children}
+    </label>
   );
 }

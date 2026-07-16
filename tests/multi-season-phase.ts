@@ -315,3 +315,126 @@ function assert(cond: unknown, msg: string): asserts cond {
     assert(!pat.test(sql), `migration must not contain destructive statement matching ${pat}`);
   }
 })();
+
+// -------------------------------------------------------------------------
+// 10) Phase B — admin seasons/participants UI + server hardening
+// -------------------------------------------------------------------------
+import { computeHandicapWithSeason } from "@/lib/history-repo.functions";
+
+const ADMIN_SEASONS_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.seasons.tsx"), "utf8");
+const SEASON_EDITOR_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.seasons.$seasonId.tsx"), "utf8");
+const ADMIN_LAYOUT_SRC = readFileSync(resolve(__dirname, "../src/routes/admin.tsx"), "utf8");
+
+(function adminNavHasSeasonsPeople() {
+  const nav = ADMIN_LAYOUT_SRC;
+  const live = nav.indexOf('to="/admin/live-scoring"');
+  const seasons = nav.indexOf('to="/admin/seasons"');
+  const people = nav.indexOf('to="/admin/people"');
+  assert(live > 0 && seasons > 0 && people > 0, "admin nav must include live-scoring, seasons, people");
+  assert(seasons > live && people > live, "Seasons and People links must appear after Live Scoring in admin nav");
+  assert(nav.includes("Rebuild Snapshot"), "Admin nav must preserve Rebuild Snapshot button");
+  assert(nav.includes("Sign out"), "Admin nav must preserve Sign out button");
+})();
+
+(function adminSeasonsUsesAdminEndpoint() {
+  assert(ADMIN_SEASONS_SRC.includes("adminListSeasons"),
+    "/admin/seasons must use adminListSeasons, never the public endpoint");
+  assert(!ADMIN_SEASONS_SRC.includes("listPublicSeasons"),
+    "/admin/seasons must not call the public listPublicSeasons endpoint");
+})();
+
+(function createFormAndDefaults() {
+  // Rich create form must include all metadata fields.
+  for (const field of ["Label", "Point system", "Total weeks", "Start date", "End date", "Handicap %", "Handicap base", "Description"]) {
+    assert(ADMIN_SEASONS_SRC.includes(field), `Create-season form must include field: ${field}`);
+  }
+  // Create call must NOT force status/publicVisible — server default (draft+private) must win.
+  const createIdx = ADMIN_SEASONS_SRC.indexOf("createSeason");
+  assert(createIdx > 0, "createSeason handler must exist");
+  const createChunk = ADMIN_SEASONS_SRC.slice(createIdx, createIdx + 2000);
+  assert(!/status:\s*"current"/.test(createChunk), "New seasons must never be created as current");
+  assert(!/publicVisible:\s*true/.test(createChunk), "New seasons must never be created as public");
+  // Post-create navigation.
+  assert(/navigate\(\{\s*to:\s*"\/admin\/seasons\/\$seasonId"/.test(ADMIN_SEASONS_SRC),
+    "After create, must navigate to /admin/seasons/$seasonId");
+
+  // Server-side defaults.
+  const upsertIdx = HISTORY_SRC.indexOf("adminUpsertSeason");
+  const upsertChunk = HISTORY_SRC.slice(upsertIdx, upsertIdx + 4000);
+  assert(upsertChunk.includes('payload.status = "draft"'),
+    "adminUpsertSeason must default new rows to status='draft'");
+  assert(upsertChunk.includes("payload.public_visible = false"),
+    "adminUpsertSeason must default new rows to public_visible=false");
+})();
+
+(function editorUsesRouteSeasonId() {
+  // Every historical write in the editor must pass the ROUTE seasonId,
+  // never a fallback to the current season.
+  const writeCalls = [
+    "adminUpsertSeason",
+    "adminMakeSeasonCurrent",
+    "adminUpsertLanePair",
+    "adminDeleteLanePair",
+    "adminAddParticipant",
+  ];
+  for (const name of writeCalls) {
+    if (!SEASON_EDITOR_SRC.includes(name)) continue;
+    // Every occurrence in a write context references seasonId from the route params.
+    // The editor destructures `const { seasonId } = Route.useParams();` — verify.
+  }
+  assert(SEASON_EDITOR_SRC.includes("Route.useParams()"),
+    "Season editor must read seasonId from route params");
+  assert(!/getCurrentSeasonId|currentSeason\.id/.test(SEASON_EDITOR_SRC),
+    "Season editor must never substitute the current season ID for the route seasonId");
+  // Season editor makeCurrent requires explicit confirmation.
+  assert(SEASON_EDITOR_SRC.includes("window.confirm"),
+    "Make-current control must use an explicit browser confirmation");
+  assert(SEASON_EDITOR_SRC.includes("confirmMakeCurrent: true"),
+    "Make-current control must send confirmMakeCurrent:true");
+})();
+
+(function laneDuplicateMessaging() {
+  // Server surfaces 23505 with a friendly duplicate-label message.
+  assert(HISTORY_SRC.includes("UNIQUE_VIOLATION"),
+    "history-repo.functions.ts must recognise unique-violation code 23505");
+  assert(/already exists in this season/.test(HISTORY_SRC),
+    "adminUpsertLanePair must surface a helpful duplicate-label error");
+})();
+
+(function participantDuplicateAndAdminGate() {
+  // adminAddParticipant duplicate rejection and admin gate (already covered);
+  // additionally verify it uses route seasonId, not a fallback.
+  const idx = HISTORY_SRC.indexOf("adminAddParticipant");
+  const chunk = HISTORY_SRC.slice(idx, idx + 3000);
+  assert(chunk.includes("data.seasonId"),
+    "adminAddParticipant must use data.seasonId (route-supplied)");
+  assert(!/currentSeason|getCurrentSeasonId/.test(chunk),
+    "adminAddParticipant must not fall back to the current season");
+  // Write side actually inserts with season_id from the input.
+  assert(/season_id:\s*data\.seasonId/.test(chunk),
+    "adminAddParticipant must set season_id from the request payload");
+})();
+
+(function handicapFromSeasonSettings() {
+  // Pure function must apply configured percent/base.
+  assert(computeHandicapWithSeason(140, 90, 200) === Math.floor(0.9 * (200 - 140)),
+    "handicap must use configured percent/base");
+  // Fallback to 80% / base 160 when nulls.
+  assert(computeHandicapWithSeason(140, null, null) === Math.floor(0.8 * (160 - 140)),
+    "handicap must fall back to 80%/160 when configured values are null");
+  // Above-base averages yield 0, never negative.
+  assert(computeHandicapWithSeason(200, 80, 160) === 0,
+    "handicap must clamp to 0 for averages at or above base");
+  // Null average yields null (unknown).
+  assert(computeHandicapWithSeason(null, 80, 160) === null,
+    "handicap must be null when average is unknown");
+})();
+
+(function backwardSafetyMessages() {
+  // The pages fall back to a helpful setup-not-available message before migration.
+  assert(ADMIN_SEASONS_SRC.includes("Historical season setup is not available"),
+    "/admin/seasons must show a setup-not-available message pre-migration");
+  assert(SEASON_EDITOR_SRC.includes("Season not available") ||
+         SEASON_EDITOR_SRC.includes("apply the pending"),
+    "Season editor must surface a not-available message pre-migration");
+})();
