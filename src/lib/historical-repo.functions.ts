@@ -134,7 +134,13 @@ interface LanePairCfg { label: string; matchupCapacity: number; active: boolean 
 async function loadLanePairConfig(sb: Sb, seasonId: string): Promise<LanePairCfg[]> {
   const q = await (sb.from as unknown as LooseFrom)("season_lane_pairs")
     .select("label,matchup_capacity,active").eq("season_id", seasonId);
-  if (q.error) return [];
+  // FAIL CLOSED: any DB error blocks writes. Only a missing-table code —
+  // which means the multi-season migration hasn't run — falls back to
+  // "unconfigured" (assertLanePairAndSlot returns immediately).
+  if (q.error) {
+    if (isMissingTable(q.error.code)) return [];
+    throw new Error(`lane pair config unavailable: ${q.error.message}`);
+  }
   return ((q.data as Array<Record<string, unknown>>) ?? []).map((r) => ({
     label: String(r.label),
     matchupCapacity: Number(r.matchup_capacity ?? 0),
@@ -153,16 +159,53 @@ function assertLanePairAndSlot(pairs: LanePairCfg[], lanePair: string, slot: num
   }
 }
 
-/** Look up rostered_bowlers ids for this season; used to gate scheduled
- *  A/B pickers to roster-only participants (substitutes may only appear
- *  as ACTUAL participants inside a result). Returns an empty set if the
- *  table is unreachable — callers should treat that as "unknown" and
- *  fall back on the DB constraint. */
+/** Roster ids for the season. FAIL CLOSED: query errors throw. Callers
+ *  refuse an empty roster when they attempt to schedule new slots. */
 async function loadRosterIds(sb: Sb, seasonId: string): Promise<Set<string>> {
   const q = await (sb.from as unknown as LooseFrom)("rostered_bowlers")
     .select("id").eq("season_id", seasonId);
-  if (q.error) return new Set();
+  if (q.error) throw new Error(`roster unavailable: ${q.error.message}`);
   return new Set(((q.data as Array<{ id: string }>) ?? []).map((r) => String(r.id)));
+}
+
+/** Substitute ids for the season, fail-closed. */
+async function loadSubstituteIds(sb: Sb, seasonId: string): Promise<Set<string>> {
+  const q = await (sb.from as unknown as LooseFrom)("substitutes")
+    .select("id").eq("season_id", seasonId);
+  if (q.error) throw new Error(`substitutes unavailable: ${q.error.message}`);
+  return new Set(((q.data as Array<{ id: string }>) ?? []).map((r) => String(r.id)));
+}
+
+/** Load authoritative identity + handicap/entry-average for a rostered
+ *  bowler or substitute id in this season. Server-side freeze — never
+ *  trust names/averages/handicaps supplied by the browser. */
+async function loadFrozenIdentity(sb: Sb, seasonId: string, id: string, role: "rostered" | "substitute"): Promise<{
+  ref: string; name: string; bowlerNumber: string | null; entryAverage: number; handicap: number;
+} | null> {
+  if (role === "rostered") {
+    const q = await (sb.from as unknown as LooseFrom)("rostered_bowlers")
+      .select("id,name,bowler_number,entry_average,handicap")
+      .eq("id", id).eq("season_id", seasonId).maybeSingle();
+    if (q.error) throw new Error(q.error.message);
+    if (!q.data) return null;
+    return {
+      ref: String(q.data.id), name: String(q.data.name ?? ""),
+      bowlerNumber: (q.data.bowler_number as string | null) ?? null,
+      entryAverage: q.data.entry_average != null ? Number(q.data.entry_average) : 0,
+      handicap: q.data.handicap != null ? Number(q.data.handicap) : 0,
+    };
+  }
+  const q = await (sb.from as unknown as LooseFrom)("substitutes")
+    .select("id,name,bowler_number,starting_average,handicap")
+    .eq("id", id).eq("season_id", seasonId).maybeSingle();
+  if (q.error) throw new Error(q.error.message);
+  if (!q.data) return null;
+  return {
+    ref: String(q.data.id), name: String(q.data.name ?? ""),
+    bowlerNumber: (q.data.bowler_number as string | null) ?? null,
+    entryAverage: q.data.starting_average != null ? Number(q.data.starting_average) : 0,
+    handicap: q.data.handicap != null ? Number(q.data.handicap) : 0,
+  };
 }
 
 // -------------------- Server publishable client (public reads) --------------
