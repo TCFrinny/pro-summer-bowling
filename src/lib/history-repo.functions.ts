@@ -1143,12 +1143,12 @@ export const getCareerProfile = createServerFn({ method: "GET" })
       .select("id,display_name,notes").eq("id", data.personId).maybeSingle();
     if (person.error) {
       if (isMissingTable(person.error.code)) {
-        return { available: false, person: null, rows: [] } as CareerProfileResult;
+        return { available: false, person: null, rows: [], advancedContributions: [] } as CareerProfileResult;
       }
       throw new Error(person.error.message);
     }
     if (!person.data) {
-      return { available: true, person: null, rows: [] } as CareerProfileResult;
+      return { available: true, person: null, rows: [], advancedContributions: [] } as CareerProfileResult;
     }
 
     // Linked roster + substitute rows.
@@ -1160,6 +1160,7 @@ export const getCareerProfile = createServerFn({ method: "GET" })
         available: false,
         person: { id: String(person.data.id), displayName: String(person.data.display_name), notes: (person.data as { notes: string | null }).notes ?? null },
         rows: [],
+        advancedContributions: [],
       };
     }
     const sub = await (sb.from as unknown as LooseFrom)("substitutes")
@@ -1198,12 +1199,14 @@ export const getCareerProfile = createServerFn({ method: "GET" })
     }
 
     const rows: CareerSeasonRow[] = [];
+    const advancedContributions: CareerAdvancedContribution[] = [];
     for (const r of ((rb.data as Array<Record<string, unknown>>) ?? [])) {
       const seasonId = String(r.season_id);
       const meta = seasonMeta.get(seasonId);
       // PRIVACY: skip career rows tied to draft / archived-private seasons.
       if (!meta || !(meta.status === "current" || (meta.status === "archived" && meta.publicVisible))) continue;
-      const extracted = extractRosteredSeasonRow(snapshotsBySeason.get(seasonId), String(r.id));
+      const snap = snapshotsBySeason.get(seasonId);
+      const extracted = extractRosteredSeasonRow(snap, String(r.id));
       rows.push({
         seasonId,
         seasonLabel: meta.label,
@@ -1222,12 +1225,14 @@ export const getCareerProfile = createServerFn({ method: "GET" })
         finalFinish: extracted.finalFinish,
         isChampion: meta.championPersonId === data.personId,
       });
+      advancedContributions.push(extractCurrentRosterAdvancedContribution(snap, String(r.id), seasonId));
     }
     for (const r of ((sub.data as Array<Record<string, unknown>>) ?? [])) {
       const seasonId = String(r.season_id);
       const meta = seasonMeta.get(seasonId);
       if (!meta || !(meta.status === "current" || (meta.status === "archived" && meta.publicVisible))) continue;
-      const extracted = extractSubstituteSeasonRow(snapshotsBySeason.get(seasonId), String(r.id));
+      const snap = snapshotsBySeason.get(seasonId);
+      const extracted = extractSubstituteSeasonRow(snap, String(r.id));
       rows.push({
         seasonId,
         seasonLabel: meta.label,
@@ -1243,6 +1248,7 @@ export const getCareerProfile = createServerFn({ method: "GET" })
         highGame: extracted.highGame,
         highSet: extracted.highSet,
       });
+      advancedContributions.push(extractCurrentSubstituteAdvancedContribution(snap, String(r.id), seasonId));
     }
     // Sort: most recent season first (label desc as a stable heuristic).
     rows.sort((a, b) => (b.seasonLabel ?? "").localeCompare(a.seasonLabel ?? ""));
@@ -1250,5 +1256,7 @@ export const getCareerProfile = createServerFn({ method: "GET" })
       available: true,
       person: { id: String(person.data.id), displayName: String(person.data.display_name), notes: (person.data as { notes: string | null }).notes ?? null },
       rows,
+      advancedContributions,
     };
   });
+
