@@ -44,6 +44,11 @@ import {
 } from "@/lib/historical-snapshot";
 import { compareLanePairSlotCamel, compareLanePairSlotSnake } from "@/lib/lane-pair-order";
 import { summarizeGame, validateGame, type FrameLinescore, type GameLinescore } from "@/lib/duckpin";
+import {
+  extractHistoricalAdvancedContribution,
+  type CareerAdvancedContribution,
+} from "@/lib/career-advanced";
+
 
 // ---------------------------------------------------------------
 // Canonical linescore parser — NEVER trust browser-supplied derived
