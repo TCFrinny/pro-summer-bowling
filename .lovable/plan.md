@@ -1,121 +1,52 @@
-# Phase D — Reusable Historical Season Data System
 
-This plan covers a single reusable system for every non-current season (2025, 2024, future archives). Nothing here touches 2026 code paths.
+## Root cause
 
-## Scope check
+`extractRosteredSeasonRow` in `src/lib/season-history.ts` (lines 265–276) reads the wrong denominator from the per-season snapshot's `bowlersById[rosterId]` row:
 
-This is a large body of work — new schema, ~10 admin surfaces, 6 public routes, career aggregation, and tests. I'll do it in one commit but in clearly separated internal phases so it stays reviewable. If any phase turns out larger than expected I'll flag it rather than silently shrinking scope.
-
-## Safety invariants (enforced in every phase)
-
-- All new code paths guard `season.is_current = false` server-side. Attempting a historical write against the current season → 403.
-- 2026 uses existing tables (`weeks`, `match_results`, `live_match_results`, `public_snapshots`) untouched.
-- Historical writes go to NEW season-scoped tables (see schema). No historical row ever lands in the current-season tables.
-- Additive migration only. No column drops, no data rewrites, no changes to existing RLS on 2026 tables.
-- Existing snapshot builder unchanged. New `historical_season_snapshots` is a separate cache.
-
-## Phase D.1 — Schema (single additive migration)
-
-```text
-historical_weeks(id, season_id, week_number, date, published, completed, ...)
-  UNIQUE (season_id, week_number)
-
-historical_schedule_slots(id, season_id, week_id, lane_pair, slot,
-  bowler_a_participant_id, bowler_b_participant_id, ...)
-  UNIQUE (season_id, week_id, lane_pair, slot)
-  CHECK bowler_a != bowler_b
-
-historical_match_results(id, season_id, week_id, slot_id,
-  detail_mode: 'full_linescore' | 'game_scores' | 'summary_only',
-  side_a JSONB, side_b JSONB,          -- frozen participation, names, avgs, hdcps
-  linescore_a JSONB, linescore_b JSONB, -- null unless full_linescore
-  game_scores_a INT[3], game_scores_b INT[3], -- null unless game_scores/full
-  points_a NUMERIC, points_b NUMERIC,
-  point_override JSONB,                -- {points_a, points_b, reason}
-  ...)
-
-historical_season_summary_records(id, season_id, participant_ref,
-  role: 'rostered'|'substitute',
-  games, scratch_pinfall, average, high_game, high_set,
-  points, points_lost, final_finish, is_champion, ...)
-  -- every stat column NULLABLE; NULL = unavailable (never 0)
-
-historical_season_snapshots(season_id PK, snapshot JSONB, built_at)
+```ts
+const games   = numOrNull(b["gamesPlayed"]);     // ← credited/scheduled
+const pinfall = numOrNull(b["scratchPinfall"]);  // ← actual rostered pinfall only
+const avg     = numOrNull(b["scratchAverage"]);
+...
+average: avg && games && games > 0 ? avg : avg ?? (pinfall && games && games > 0 ? pinfall / games : null),
 ```
 
-- `seasons.point_system` already exists; reuse it (4 or 7).
-- Full RLS: public SELECT only when `season.public_visible AND status='archived'`; writes gated by `has_role(auth.uid(),'admin')` AND `season.is_current = false`.
-- GRANTs for anon (SELECT) + authenticated + service_role per project rules.
+The bowler object serialized into `bowlersById` is the full `Bowler` built in `src/lib/mock-data.ts` (~L888, L920–984). That builder maintains **two distinct counters**:
 
-## Phase D.2 — Server functions (`src/lib/historical-*.functions.ts`)
+| Field                  | Meaning                                                                 | Rob's value |
+| ---------------------- | ----------------------------------------------------------------------- | ----------- |
+| `gamesPlayed`          | Credited/scheduled games — incremented for every completed match the rostered slot participated in, **including weeks a substitute rolled on his behalf** (L927, L936). | 21 |
+| `actualGamesRolled`    | Games actually rolled by the rostered bowler — only incremented when the linescore is `!isSub` (or in the score-only rostered branch), L946, L955, L964, L972. | 15 |
+| `scratchPinfall`       | Pinfall from **rostered games only** — sub weeks do NOT add to it (only the actual/rostered branches at L948, L957, L966, L974 touch it). | 2,110 |
+| `actualScratchPinfall` | Same base as `scratchPinfall` in current builder, kept as a parallel personal-stat counter. | 2,110 |
+| `scratchAverage`       | Computed at L981–983 as `actualScratchPinfall / actualGamesRolled`, rounded to 3 dp. | 140.667 |
 
-- `listHistoricalWeeks`, `generateHistoricalWeeks(seasonId, totalWeeks)`, `updateHistoricalWeek`.
-- `listHistoricalSchedule(weekId)`, `upsertHistoricalScheduleSlot`, `deleteHistoricalScheduleSlot` — validates capacity, lane order, no duplicate bowler in a week.
-- `saveHistoricalMatchResult` — routes by `detail_mode`; reuses existing 7-point / adds 4-point calculator; freezes identity; honors override.
-- `upsertHistoricalSummaryRecord`, `listHistoricalSummaryRecords`.
-- `rebuildHistoricalSeasonSnapshot(seasonId)` — season-scoped snapshot builder producing standings, weekly results, stats/leaderboards. Skips frame-derived stats for game-score/summary-only rows; marks unavailable fields as `null`.
-- `getPublicHistoricalSeason(seasonId)` — enforces `archived + public_visible`; 404-shaped response otherwise.
+So `extractRosteredSeasonRow` combines a personal-only numerator (`scratchPinfall` = 2,110) with a credited denominator (`gamesPlayed` = 21) → **2,110 / 21 ≈ 100.48 ≈ 100.5**, which is exactly what the career page is showing. It also ignores the correctly precomputed `scratchAverage` of 140.667 in its fallback because `avg` truthiness check passes and it returns 110-ish `scratchAverage`… actually the current code does return `scratchAverage` when present, but the surrounding `CareerBody` UI in `src/routes/people.$personId.tsx` renders `r.average` where it exists (140.667 would be correct there) **but** the "Games (avail.)" and "Avg (avail.)" totals in `aggregateCareerTotals` (L124–155) recompute the average as `totalScratchPinfall / totalGames`, and `totalGames` sums `r.games` which is `gamesPlayed`. So the totals row is doing the same 2,110 / 21 math regardless of what per-row `average` says — and if the current-season row is the only one merged in, both the per-row and totals average land near 100.5.
 
-## Phase D.3 — Points calculators
+**Root cause in one line:** the personal career stats are computed against `gamesPlayed` (credited, includes sub weeks) instead of `actualGamesRolled` (rostered-only, matches the numerator `scratchPinfall`/`actualScratchPinfall`).
 
-- `src/lib/points-7.ts` (extract from current logic, unchanged behavior).
-- `src/lib/points-4.ts` — 1/game, 1 set, ties 0.5-0.5.
-- Shared substitute/absent semantics identical to 2026.
+## Correct snapshot fields for career personal stats
 
-## Phase D.4 — Admin UI
+Career profiles are meant to reflect what the person actually rolled, distinct from standings. The paired, semantically consistent fields already exist in every snapshot bowler:
 
-Extend `src/routes/admin.seasons.$seasonId.tsx` with a "Historical Data" section (only rendered when `!season.is_current`):
+- Games: **`actualGamesRolled`** (fall back to `gamesPlayed` only if `actualGamesRolled` is missing on a legacy snapshot, so pre-final-week snapshots still render).
+- Pinfall: **`actualScratchPinfall`** (fall back to `scratchPinfall`; both are equal in the current builder, but the `actual*` name is the authoritative personal-stat counter).
+- Average: use the precomputed **`scratchAverage`** when present; otherwise derive `actualScratchPinfall / actualGamesRolled`. Do not fall back to the current formula that mixes numerators/denominators.
 
-- Progress card: roster / weeks / schedules / results / summary counts.
-- Sub-panels (tabs or collapsibles):
-  1. Weeks (bulk generate + list editor)
-  2. Weekly Schedule (week selector → lane-pair grid, uses `compareLanePairSlotSnake`)
-  3. Match Results (per slot → modal picking mode: full linescore reuses `MatchLinescoreEditor`; game-scores = simple 3-score form; summary-only disabled at match level)
-  4. Season Summary Records (per participant form, all fields optional)
-- Delete + bulk actions gated behind confirm dialogs.
+`highGame` and `highSet` in `bowlersById` are already rostered-only (only the `!isSub` / score-only rostered branches update them), so those career fields are correct and need no change.
 
-## Phase D.5 — Public archived routes
+## Other affected career fields / call sites / tests (read-only findings)
 
-New routes reading `historical_season_snapshots` and related tables:
+- `src/lib/season-history.ts` L124–155 `aggregateCareerTotals` — recomputes career average from summed `games` + `scratchPinfall`. Once `extractRosteredSeasonRow` returns `actualGamesRolled`/`actualScratchPinfall` under the `games`/`scratchPinfall` keys of the `CareerSeasonRow`, this aggregator is automatically correct. No behavioural change needed here beyond the fix upstream, but the field docstring should reflect "actual games rolled".
+- `src/routes/people.$personId.tsx` — renders `r.games`, `r.average`, and the totals; no change needed once the extractor is fixed. Column header "Games" is fine; the semantic shift (from credited to rostered-only) matches the "personal stats" intent of a career profile.
+- `src/lib/historical-snapshot.ts` / `getHistoricalCareerContributions` — historical rows already carry a single `games` field derived from published historical data; they don't have a credited-vs-rostered distinction, so they are not affected by this bug and should not be changed.
+- Substitute path (`extractSubstituteSeasonRow`, L307+) — reads `gamesRolled`/`scratchPinfall` from `substituteProfiles`, which are already rostered-truth for subs. Not affected.
+- Tests:
+  - `tests/season-history.ts` L461–472 — uses a synthetic snapshot with only `gamesPlayed`/`scratchPinfall` and asserts `games === 30`. After the fix this test must be updated to include `actualGamesRolled` / `actualScratchPinfall` on the synthetic bowler and assert against those, plus one new assertion covering the legacy-fallback case (snapshot missing `actual*` fields still returns `gamesPlayed`).
+  - `tests/career-merge.ts` — uses precomputed `CareerSeasonRow` inputs, not raw snapshots, so it is not affected.
+  - No other test asserts on the mixed numerator/denominator, so the regression surface is small.
+- No database / no snapshot rebuild required — every field already exists in every 2026 snapshot row; only the reader picks the wrong keys.
 
-- `/seasons/$seasonId` — already exists; extend Overview when historical data present.
-- `/seasons/$seasonId/standings`
-- `/seasons/$seasonId/schedule`
-- `/seasons/$seasonId/weekly-results`
-- `/seasons/$seasonId/statistics`
-- `/seasons/$seasonId/bowlers/$participantId`
+## Deliverable of this audit
 
-All server-side hide draft/private (already covered by `getPublicSeasonDetail` pattern). Unavailable fields render as "—", never 0. Game-score rows show a "full linescore unavailable" note; summary-only seasons hide weekly UI entirely.
-
-## Phase D.6 — Career profile
-
-Update `/people/$personId` to merge historical seasons:
-- Prefer computed values (full/game-score) from `historical_season_snapshots`.
-- Fall back to `historical_season_summary_records`.
-- Deduplicate by `(person_id, season_id, role)`.
-- Show role per season; unavailable → dashes.
-- Do not include draft/private seasons.
-
-## Phase D.7 — Deterministic tests (`tests/historical-*.ts`)
-
-1. `historical-isolation.ts` — creating/editing historical data for two archived seasons never touches 2026 `weeks`/`match_results`/snapshot.
-2. `historical-lane-order.ts` — schedules + weekly results order 11-12 after 9-10 (reuses shared comparator).
-3. `historical-privacy.ts` — draft or private seasons return `forbidden` server-side even with correct UUID.
-4. `points-7-and-4.ts` — cover 2/1 game wins, ties, set-tie halves, override.
-5. `historical-detail-modes.ts` — full vs game-score vs summary-only: unavailable fields stay `null`, aggregates never treat null as 0.
-6. `career-aggregation.ts` — two archived + one current season → no duplicates, correct role labels, dashes for unavailable.
-7. `historical-substitute-absent.ts` — points credit scheduled bowler; sub personal stats separate; absent excluded from personal scratch stats.
-
-## Verification
-
-Typecheck, `bun run test:deterministic`, production build (`bun run build`). Reported at end.
-
-## Explicit non-goals / limitations
-
-- Migration will be recorded in `supabase/migrations/` but I will NOT run it (per project rule for pending migrations you've reviewed). You approve/run it separately; UI degrades gracefully until then.
-- Historical live-scoring (final-week live entry for archived seasons) is out of scope — archived seasons only get static entry modes.
-- No deployment through Lovable; you push `main` to trigger Cloudflare.
-
-## Assumption to confirm or correct
-
-I'm assuming you want the migration authored via the `supabase--migration` tool (which stages it for your approval), NOT executed by me. If you'd instead like the SQL written directly under `db/pending-migrations/` like `20260716_120000_seasons_people_phase.sql`, say so and I'll switch.
+No files changed, no database touched. When you're ready to fix, the change is scoped to `extractRosteredSeasonRow` (switch to `actualGamesRolled` + `actualScratchPinfall` with legacy fallback, prefer stored `scratchAverage`), plus the corresponding update to `tests/season-history.ts`.
