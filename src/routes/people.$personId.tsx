@@ -101,7 +101,7 @@ function CareerBody({
         <Stat label="Seasons" value={totals.seasonsCount} />
         <Stat label="Championships" value={totals.championships} />
         <Stat label="Games" value={totals.totalGames || "—"} />
-        <Stat label="Scratch Avg" value={totals.average != null ? totals.average.toFixed(1) : "—"} />
+        <Stat label="Scratch Avg" value={totals.average != null ? totals.average.toFixed(3) : "—"} />
         <Stat label="Seasons w/ Game Data" value={totals.seasonsWithGameData} />
       </section>
 
@@ -111,9 +111,10 @@ function CareerBody({
         Basic stats include game-score-only historical rows. Frame-derived stats
         (marks, pins lost, first 5 / last 5, clutch, consistency) come only from
         full-linescore data and show <span aria-label="unavailable">—</span> when
-        unavailable. Points, points-lost, handicap pinfall and W-L are roster
-        credit only.
+        unavailable. Record (points won – points lost), handicap pinfall are
+        roster credit only; substitute weeks contribute personal stats only.
       </p>
+
 
       <section className="rounded-lg border border-border bg-card">
         <div className="border-b border-border p-3 text-sm font-semibold">Season history</div>
