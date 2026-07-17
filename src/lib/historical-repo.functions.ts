@@ -1301,6 +1301,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
     }
 
     const rows: HistoricalCareerContribution[] = [];
+    const advancedContributions: CareerAdvancedContribution[] = [];
     if (!snaps.error && snaps.data) {
       for (const row of (snaps.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>)) {
         const meta = seasonMeta.get(row.season_id);
@@ -1336,9 +1337,19 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             hasGameData: (personal?.games ?? standings?.games ?? null) != null,
             source: "historical_snapshot",
           });
+          advancedContributions.push(
+            extractHistoricalAdvancedContribution({
+              seasonId: row.season_id,
+              role: p.role,
+              participantRef: p.ref,
+              weeks: snap.weeks,
+              standings: snap.standings,
+            }),
+          );
         }
       }
     }
+
 
     // Summary-only fallback: rows tagged with this person that snapshot
     // doesn't cover.
