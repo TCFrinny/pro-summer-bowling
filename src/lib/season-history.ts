@@ -262,23 +262,33 @@ export function extractRosteredSeasonRow(
   const row = (byId as Record<string, unknown>)[rosterId];
   if (!row || typeof row !== "object") return { ...empty };
   const b = row as Record<string, unknown>;
-  const games = numOrNull(b["gamesPlayed"]);
-  const pinfall = numOrNull(b["scratchPinfall"]);
-  const avg = numOrNull(b["scratchAverage"]);
+  // Career personal stats: use rostered-only counters (`actualGamesRolled` /
+  // `actualScratchPinfall`) so weeks a substitute rolled on this bowler's
+  // behalf don't inflate the denominator. Fall back to the credited counters
+  // only for legacy snapshots that pre-date those fields.
+  const actualGames = numOrNull(b["actualGamesRolled"]);
+  const actualPinfall = numOrNull(b["actualScratchPinfall"]);
+  const creditedGames = numOrNull(b["gamesPlayed"]);
+  const creditedPinfall = numOrNull(b["scratchPinfall"]);
+  const games = actualGames ?? creditedGames;
+  const pinfall = actualPinfall ?? creditedPinfall;
+  const storedAvg = numOrNull(b["scratchAverage"]);
   const points = numOrNull(b["points"]);
   const highGame = numOrNull(b["highGame"]);
   const highSet = numOrNull(b["highSet"]);
   const finalFinish = extractFinalFinish(snap, rosterId);
+  const derivedAvg = pinfall != null && games != null && games > 0 ? pinfall / games : null;
   return {
     hasGameData: true,
     games,
     scratchPinfall: pinfall,
-    average: avg && games && games > 0 ? avg : avg ?? (pinfall && games && games > 0 ? pinfall / games : null),
+    average: storedAvg ?? derivedAvg,
     highGame,
     highSet,
     points,
     finalFinish,
   };
+
 }
 
 function extractFinalFinish(snap: Record<string, unknown>, bowlerId: string): number | null {
@@ -461,19 +471,54 @@ export function publicVisibleSeasons(seasons: readonly SeasonRecord[]): SeasonRe
   const roster = extractRosteredSeasonRow(
     {
       bowlersById: {
-        b01: { id: "b01", gamesPlayed: 30, scratchPinfall: 3300, scratchAverage: 110, highGame: 180, highSet: 480, points: 42 },
+        b01: {
+          id: "b01",
+          gamesPlayed: 21,
+          actualGamesRolled: 15,
+          scratchPinfall: 2110,
+          actualScratchPinfall: 2110,
+          scratchAverage: 140.667,
+          highGame: 180,
+          highSet: 480,
+          points: 42,
+        },
       },
       standings: [{ bowler: { id: "b01" }, rank: 3 }, { bowler: { id: "b02" }, rank: 4 }],
     },
     "b01",
   );
-  if (!roster.hasGameData || roster.games !== 30 || roster.scratchPinfall !== 3300 || roster.finalFinish !== 3) {
+  if (
+    !roster.hasGameData ||
+    roster.games !== 15 ||
+    roster.scratchPinfall !== 2110 ||
+    roster.average !== 140.667 ||
+    roster.finalFinish !== 3
+  ) {
     throw new Error(`extractRosteredSeasonRow wrong: ${JSON.stringify(roster)}`);
+  }
+  // Legacy snapshot (pre-final-week live scoring) — no actual* fields; must
+  // gracefully fall back to gamesPlayed / scratchPinfall.
+  const legacyRosterRow = extractRosteredSeasonRow(
+    {
+      bowlersById: {
+        b01: { id: "b01", gamesPlayed: 30, scratchPinfall: 3300, scratchAverage: 110 },
+      },
+    },
+    "b01",
+  );
+  if (
+    !legacyRosterRow.hasGameData ||
+    legacyRosterRow.games !== 30 ||
+    legacyRosterRow.scratchPinfall !== 3300 ||
+    legacyRosterRow.average !== 110
+  ) {
+    throw new Error(`extractRosteredSeasonRow legacy fallback wrong: ${JSON.stringify(legacyRosterRow)}`);
   }
   const missingRoster = extractRosteredSeasonRow({ bowlersById: {} }, "b01");
   if (missingRoster.hasGameData) throw new Error("missing bowler must not report data");
   const legacySnap = extractRosteredSeasonRow({ builtAt: 1 }, "b01");
   if (legacySnap.hasGameData) throw new Error("legacy snapshot without bowlersById must be no-data");
+
 
   const sub = extractSubstituteSeasonRow(
     { substituteProfiles: { s01: { gamesRolled: 6, scratchPinfall: 660, scratchAverage: 110, highGame: 130, highSet: 350 } } },
