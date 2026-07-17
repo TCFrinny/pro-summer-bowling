@@ -277,17 +277,24 @@ export function extractRosteredSeasonRow(
   const highGame = numOrNull(b["highGame"]);
   const highSet = numOrNull(b["highSet"]);
   const finalFinish = extractFinalFinish(snap, rosterId);
-  const derivedAvg = pinfall != null && games != null && games > 0 ? pinfall / games : null;
+  const hasActualGames = games != null && games > 0;
+  const derivedAvg = hasActualGames && pinfall != null ? pinfall / games : null;
+  const average = hasActualGames ? (storedAvg ?? derivedAvg) : null;
   return {
-    hasGameData: true,
-    games,
-    scratchPinfall: pinfall,
-    average: storedAvg ?? derivedAvg,
+    // Only report rostered game data when the person actually rolled at least
+    // one game themselves. A rostered slot filled entirely by substitutes
+    // still returns points/finish credit but must not add zero-game rows to
+    // career game-data totals.
+    hasGameData: hasActualGames,
+    games: hasActualGames ? games : null,
+    scratchPinfall: hasActualGames ? pinfall : null,
+    average,
     highGame,
     highSet,
     points,
     finalFinish,
   };
+
 
 }
 
