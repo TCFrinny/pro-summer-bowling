@@ -4,6 +4,7 @@ import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 import { getCareerProfile } from "@/lib/history-repo.functions";
 import { getHistoricalCareerContributions } from "@/lib/historical-repo.functions";
+import { formatRecord } from "@/lib/mock-data";
 import {
   aggregateCareerTotals,
   mergeHistoricalIntoCareer,
@@ -15,6 +16,7 @@ import {
   type CareerAdvancedContribution,
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
+
 
 export const Route = createFileRoute("/people/$personId")({
   head: () => ({
