@@ -9,6 +9,12 @@ import {
   mergeHistoricalIntoCareer,
   type CareerSeasonRow,
 } from "@/lib/season-history";
+import {
+  aggregateCareerAdvanced,
+  mergeCareerAdvancedContributions,
+  type CareerAdvancedContribution,
+  type CareerAdvancedTotals,
+} from "@/lib/career-advanced";
 
 export const Route = createFileRoute("/people/$personId")({
   head: () => ({
@@ -60,6 +66,10 @@ function PersonPage() {
           </PageHeader>
           <CareerBody
             rows={mergeHistoricalIntoCareer(q.data.rows, hist.data?.rows ?? [])}
+            advancedContribs={mergeCareerAdvancedContributions(
+              q.data.advancedContributions ?? [],
+              hist.data?.advancedContributions ?? [],
+            )}
           />
           {q.data.person.notes && (
             <p className="mt-4 text-sm text-muted-foreground">{q.data.person.notes}</p>
@@ -70,9 +80,16 @@ function PersonPage() {
   );
 }
 
-function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
+function CareerBody({
+  rows,
+  advancedContribs,
+}: {
+  rows: CareerSeasonRow[];
+  advancedContribs: CareerAdvancedContribution[];
+}) {
   const sorted = [...rows].sort((a, b) => a.seasonLabel.localeCompare(b.seasonLabel));
   const totals = aggregateCareerTotals(sorted);
+  const adv = aggregateCareerAdvanced(advancedContribs);
   if (sorted.length === 0) {
     return <EmptyState title="No public seasons yet" description="This person has no public rostered or substitute record." />;
   }
@@ -81,10 +98,21 @@ function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
       <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Seasons" value={totals.seasonsCount} />
         <Stat label="Championships" value={totals.championships} />
-        <Stat label="Games (avail.)" value={totals.totalGames || "—"} />
-        <Stat label="Avg (avail.)" value={totals.average != null ? totals.average.toFixed(1) : "—"} />
-        <Stat label="Seasons w/ game data" value={totals.seasonsWithGameData} />
+        <Stat label="Games" value={totals.totalGames || "—"} />
+        <Stat label="Scratch Avg" value={totals.average != null ? totals.average.toFixed(1) : "—"} />
+        <Stat label="Seasons w/ Game Data" value={totals.seasonsWithGameData} />
       </section>
+
+      <CareerAdvancedCards totals={adv} totalsBasic={totals} />
+
+      <p className="text-xs text-muted-foreground">
+        Basic stats include game-score-only historical rows. Frame-derived stats
+        (marks, pins lost, first 5 / last 5, clutch, consistency) come only from
+        full-linescore data and show <span aria-label="unavailable">—</span> when
+        unavailable. Points, points-lost, handicap pinfall and W-L are roster
+        credit only.
+      </p>
+
       <section className="rounded-lg border border-border bg-card">
         <div className="border-b border-border p-3 text-sm font-semibold">Season history</div>
         <div className="overflow-x-auto">
@@ -134,6 +162,50 @@ function CareerBody({ rows }: { rows: CareerSeasonRow[] }) {
         </p>
       </section>
     </div>
+  );
+}
+
+function CareerAdvancedCards({
+  totals,
+  totalsBasic,
+}: {
+  totals: CareerAdvancedTotals;
+  totalsBasic: ReturnType<typeof aggregateCareerTotals>;
+}) {
+  const dash = (v: number | null | undefined) => (v == null ? "—" : v);
+  const fixed = (v: number | null, digits = 1) => (v == null ? "—" : v.toFixed(digits));
+  const record =
+    totals.wins != null || totals.losses != null || totals.ties != null
+      ? `${totals.wins ?? 0}-${totals.losses ?? 0}${totals.ties ? `-${totals.ties}` : ""}`
+      : "—";
+  return (
+    <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
+      <Stat label="Record (W-L)" value={record} />
+      <Stat label="Scratch Pinfall" value={totalsBasic.totalScratchPinfall || "—"} />
+      <Stat label="Handicap Pinfall" value={dash(totals.handicapPinfall)} />
+      <Stat label="High Game" value={dash(totalsBasic.highGame)} />
+      <Stat label="High Set" value={dash(totalsBasic.highSet)} />
+      <Stat label="Strikes" value={dash(totals.strikes)} />
+      <Stat label="Spares" value={dash(totals.spares)} />
+      <Stat label="Opens" value={dash(totals.opens)} />
+      <Stat label="Total Marks" value={dash(totals.marks)} />
+      <Stat label="Frames Rolled" value={dash(totals.framesRolled)} />
+      <Stat label="Mark %" value={fixed(totals.markPct)} />
+      <Stat label="Strike %" value={fixed(totals.strikePct)} />
+      <Stat label="Spare Conv. %" value={fixed(totals.spareConversionPct)} />
+      <Stat label="Open %" value={fixed(totals.openPct)} />
+      <Stat label="Pins Lost/Game" value={fixed(totals.pinsLostPerGame, 2)} />
+      <Stat
+        label="Consistency"
+        value={totals.consistencyAvailable ? fixed(totals.consistency, 2) : "—"}
+      />
+      <Stat label="Career POA" value={fixed(totals.careerPOA, 1)} />
+      <Stat label="First 5/Game" value={fixed(totals.first5PerGame)} />
+      <Stat label="Last 5/Game" value={fixed(totals.last5PerGame)} />
+      <Stat label="Big Opening/Game" value={fixed(totals.bigOpeningPerGame)} />
+      <Stat label="Big Finish/Game" value={fixed(totals.bigFinishPerGame)} />
+      <Stat label="Clutch %" value={fixed(totals.clutchPct)} />
+    </section>
   );
 }
 
