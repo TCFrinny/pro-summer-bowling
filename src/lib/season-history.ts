@@ -503,6 +503,69 @@ export function publicVisibleSeasons(seasons: readonly SeasonRecord[]): SeasonRe
   ) {
     throw new Error(`extractRosteredSeasonRow wrong: ${JSON.stringify(roster)}`);
   }
+  // Rob-style aggregate check: this single-season contribution must roll up
+  // to 15 games / 2,110 pinfall / ~140.667 average, not 21 games / 100.5.
+  const robTotals = aggregateCareerTotals([
+    {
+      seasonId: "s26", seasonLabel: "2026", role: "rostered",
+      seasonalName: "Rob", hasGameData: roster.hasGameData,
+      games: roster.games, scratchPinfall: roster.scratchPinfall,
+      average: roster.average, highGame: roster.highGame,
+      highSet: roster.highSet, points: roster.points,
+      finalFinish: roster.finalFinish, isChampion: false,
+    },
+  ]);
+  if (
+    robTotals.totalGames !== 15 ||
+    robTotals.totalScratchPinfall !== 2110 ||
+    robTotals.average == null ||
+    Math.abs(robTotals.average - 2110 / 15) > 1e-9
+  ) {
+    throw new Error(`career aggregate should be 15g / 140.666… — got ${JSON.stringify(robTotals)}`);
+  }
+
+  // Zero actual games (every completed match filled by a substitute) — still
+  // returns points/finish, but MUST NOT contribute career game data.
+  const subsOnly = extractRosteredSeasonRow(
+    {
+      bowlersById: {
+        b01: {
+          id: "b01",
+          gamesPlayed: 18,
+          actualGamesRolled: 0,
+          scratchPinfall: 0,
+          actualScratchPinfall: 0,
+          scratchAverage: 0,
+          points: 12,
+        },
+      },
+      standings: [{ bowler: { id: "b01" }, rank: 7 }],
+    },
+    "b01",
+  );
+  if (
+    subsOnly.hasGameData ||
+    subsOnly.games !== null ||
+    subsOnly.scratchPinfall !== null ||
+    subsOnly.average !== null ||
+    subsOnly.points !== 12 ||
+    subsOnly.finalFinish !== 7
+  ) {
+    throw new Error(`subs-only rostered row should be no-game-data with credit intact: ${JSON.stringify(subsOnly)}`);
+  }
+  const subsOnlyTotals = aggregateCareerTotals([
+    {
+      seasonId: "s", seasonLabel: "S", role: "rostered", seasonalName: "n",
+      hasGameData: subsOnly.hasGameData, games: subsOnly.games,
+      scratchPinfall: subsOnly.scratchPinfall, average: subsOnly.average,
+      highGame: null, highSet: null, points: subsOnly.points,
+      finalFinish: subsOnly.finalFinish, isChampion: false,
+    },
+  ]);
+  if (subsOnlyTotals.totalGames !== 0 || subsOnlyTotals.average !== null || subsOnlyTotals.seasonsWithGameData !== 0) {
+    throw new Error(`subs-only season must not contribute career games: ${JSON.stringify(subsOnlyTotals)}`);
+  }
+
   // Legacy snapshot (pre-final-week live scoring) — no actual* fields; must
   // gracefully fall back to gamesPlayed / scratchPinfall.
   const legacyRosterRow = extractRosteredSeasonRow(
@@ -523,6 +586,7 @@ export function publicVisibleSeasons(seasons: readonly SeasonRecord[]): SeasonRe
   }
   const missingRoster = extractRosteredSeasonRow({ bowlersById: {} }, "b01");
   if (missingRoster.hasGameData) throw new Error("missing bowler must not report data");
+
   const legacySnap = extractRosteredSeasonRow({ builtAt: 1 }, "b01");
   if (legacySnap.hasGameData) throw new Error("legacy snapshot without bowlersById must be no-data");
 
