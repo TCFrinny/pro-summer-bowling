@@ -39,6 +39,12 @@ import {
   type PersonLink,
   type SeasonRecord,
 } from "@/lib/season-history";
+import {
+  extractCurrentRosterAdvancedContribution,
+  extractCurrentSubstituteAdvancedContribution,
+  type CareerAdvancedContribution,
+} from "@/lib/career-advanced";
+
 
 type Sb = SupabaseClient<Database>;
 type AuthedCtx = { supabase: Sb; userId: string };
