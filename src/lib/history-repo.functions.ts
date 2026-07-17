@@ -1130,11 +1130,13 @@ export interface CareerProfileResult {
   available: boolean;
   person: { id: string; displayName: string; notes: string | null } | null;
   rows: CareerSeasonRow[];
+  advancedContributions: CareerAdvancedContribution[];
 }
 
 export const getCareerProfile = createServerFn({ method: "GET" })
   .inputValidator((v) => z.object({ personId: z.string().uuid() }).parse(v))
   .handler(async ({ data }) => {
+
     const sb = makePublicClient();
     // Person lookup — nonexistent tables (42P01) degrade to "unavailable".
     const person = await (sb.from as unknown as LooseFrom)("people")
