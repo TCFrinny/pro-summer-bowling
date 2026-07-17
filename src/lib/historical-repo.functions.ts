@@ -1392,5 +1392,5 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
       }
     }
 
-    return { rows: dedupeHistoricalContributions(rows) };
+    return { rows: dedupeHistoricalContributions(rows), advancedContributions };
   });
