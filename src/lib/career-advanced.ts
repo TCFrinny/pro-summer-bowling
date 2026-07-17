@@ -5,22 +5,25 @@
  * season this person appeared in (rostered + substitute) into a single
  * career totals object.
  *
- * Contributions are extracted from saved snapshots (current-season
- * public_snapshot or historical_season_snapshots) by the pure extractors
- * below. Each contribution carries only aggregate counters plus optional
- * score-moments (n, Σx, Σx²) so we can combine consistency (population
- * stdev) EXACTLY across seasons without averaging per-season stdevs.
- *
  * Rules:
  *  - Personal totals cross both roles (rostered + substitute).
- *  - Points / points-lost / handicap-pinfall are roster-credit ONLY.
+ *  - Points / points-lost / handicap-pinfall are roster-credit ONLY. A
+ *    scheduled rostered bowler still receives roster credit for weeks a
+ *    substitute rolled for them — that credit comes from `bowlersById` /
+ *    historical standings.
  *  - Frame-derived counters come only from full-linescore games; when a
  *    season has none they stay null and we never fabricate zero.
  *  - Rates and per-game stats compute from aggregated totals — never as
  *    averages of per-season percentages.
- *  - Career POA is game-weighted: totalPOA / totalGamesWithEntryAvg.
- *  - Consistency is available only when EVERY season with advanced games
- *    also supplied score moments; otherwise the aggregate returns null.
+ *  - Career POA is game-weighted: sum(gameScore − entryAvg) / gamesWithEntryAvg.
+ *    POA counts ALL actual personal games where an entry/starting average
+ *    is available — full linescore, current-season score-only rows, and
+ *    historical GAME_SCORES via a participantStats projection. Frame-
+ *    derived denominators remain FULL_LINESCORE-only.
+ *  - Consistency is available only when EVERY season with FULL_LINESCORE
+ *    advanced games also supplied score moments; otherwise null.
+ *  - Record (W - L) on the career card = pointsCredited − pointsLost;
+ *    this file no longer tracks match wins / losses / ties.
  */
 
 import { parseSnapshotBackwardCompat, type SeasonRole } from "./season-history";
@@ -32,9 +35,6 @@ export interface CareerAdvancedContribution {
   points?: number | null;
   pointsLost?: number | null;
   handicapPinfall?: number | null;
-  wins?: number | null;
-  losses?: number | null;
-  ties?: number | null;
   // Frame-derived aggregates (from FULL_LINESCORE games only).
   advGames?: number | null;
   framesRolled?: number | null;
@@ -48,11 +48,12 @@ export interface CareerAdvancedContribution {
   bigFinishTotal?: number | null;
   clutchMarks?: number | null;
   clutchOpportunities?: number | null;
-  // Career POA — game-weighted totals.
+  // Career POA — game-weighted totals across ALL sourced games with an
+  // entry/starting average. Not restricted to full-linescore.
   poaGames?: number | null;
   poaSum?: number | null;
-  // Score moments over scratch game totals (any full-linescore game the
-  // person personally rolled that season). Enables exact cross-season stdev.
+  // Score moments over scratch full-linescore game totals. Enables exact
+  // cross-season stdev. Only populated from FULL_LINESCORE games.
   scoreMomentsN?: number | null;
   scoreMomentsSum?: number | null;
   scoreMomentsSumSq?: number | null;
@@ -86,9 +87,6 @@ export interface CareerAdvancedTotals {
   pointsCredited: number | null;
   pointsLost: number | null;
   handicapPinfall: number | null;
-  wins: number | null;
-  losses: number | null;
-  ties: number | null;
 }
 
 function numOrNull(v: unknown): number | null {
@@ -121,9 +119,6 @@ export function aggregateCareerAdvanced(
   let pointsC: number | null = null;
   let pointsL: number | null = null;
   let hcpPin: number | null = null;
-  let w: number | null = null;
-  let l: number | null = null;
-  let t: number | null = null;
 
   let mn = 0;
   let msum = 0;
@@ -151,13 +146,8 @@ export function aggregateCareerAdvanced(
       pointsC = addNullable(pointsC, c.points);
       pointsL = addNullable(pointsL, c.pointsLost);
       hcpPin = addNullable(hcpPin, c.handicapPinfall);
-      w = addNullable(w, c.wins);
-      l = addNullable(l, c.losses);
-      t = addNullable(t, c.ties);
     }
 
-    // Consistency: every season that reports advGames > 0 must also carry
-    // moments; otherwise cross-season stdev is not exact and we render "—".
     if (typeof c.advGames === "number" && c.advGames > 0) {
       anyAdvGames = true;
       const n = numOrNull(c.scoreMomentsN);
@@ -210,9 +200,6 @@ export function aggregateCareerAdvanced(
     pointsCredited: pointsC,
     pointsLost: pointsL,
     handicapPinfall: hcpPin,
-    wins: w,
-    losses: l,
-    ties: t,
   };
 }
 
@@ -236,15 +223,27 @@ interface LinescoreGameLike {
   };
 }
 
+interface AdvancedAcc {
+  advGames: number; frames: number; strikes: number; spares: number; opens: number;
+  openPinsLeft: number; first5: number; last5: number; bigO: number; bigF: number;
+  clutchMarks: number; clutchOpp: number;
+  n: number; sum: number; sumSq: number;
+  poaGames: number; poaSum: number;
+}
+
+function newAdvancedAcc(): AdvancedAcc {
+  return {
+    advGames: 0, frames: 0, strikes: 0, spares: 0, opens: 0,
+    openPinsLeft: 0, first5: 0, last5: 0, bigO: 0, bigF: 0,
+    clutchMarks: 0, clutchOpp: 0,
+    n: 0, sum: 0, sumSq: 0,
+    poaGames: 0, poaSum: 0,
+  };
+}
+
 function pushLinescoreGames(
   games: readonly LinescoreGameLike[] | undefined,
-  acc: {
-    advGames: number; frames: number; strikes: number; spares: number; opens: number;
-    openPinsLeft: number; first5: number; last5: number; bigO: number; bigF: number;
-    clutchMarks: number; clutchOpp: number;
-    n: number; sum: number; sumSq: number;
-    poaGames: number; poaSum: number;
-  },
+  acc: AdvancedAcc,
   entryAvg: number | null,
 ): void {
   if (!Array.isArray(games)) return;
@@ -275,22 +274,36 @@ function pushLinescoreGames(
   }
 }
 
-function newAdvancedAcc() {
-  return {
-    advGames: 0, frames: 0, strikes: 0, spares: 0, opens: 0,
-    openPinsLeft: 0, first5: 0, last5: 0, bigO: 0, bigF: 0,
-    clutchMarks: 0, clutchOpp: 0,
-    n: 0, sum: 0, sumSq: 0,
-    poaGames: 0, poaSum: 0,
-  };
+/** POA-only path for score-only games (no frame data). Does NOT touch
+ *  advGames / frames / moments — only widens the POA denominator. */
+function pushScoreOnlyPOA(
+  scores: readonly unknown[] | undefined,
+  pairMask: readonly unknown[] | undefined,
+  completedCount: number | null,
+  acc: AdvancedAcc,
+  entryAvg: number | null,
+): void {
+  if (entryAvg == null || !Array.isArray(scores)) return;
+  for (let i = 0; i < scores.length; i++) {
+    // Only count games the person actually rolled: prefer pair mask,
+    // fall back to completedCount prefix.
+    if (Array.isArray(pairMask)) {
+      if (pairMask[i] !== true) continue;
+    } else if (completedCount != null) {
+      if (i >= completedCount) continue;
+    }
+    const s = numOrNull(scores[i]);
+    if (s == null || s <= 0) continue;
+    acc.poaGames += 1;
+    acc.poaSum += s - entryAvg;
+  }
 }
 
 function accToContribution(
   base: { seasonId: string; role: SeasonRole },
-  acc: ReturnType<typeof newAdvancedAcc>,
+  acc: AdvancedAcc,
   credit?: {
     points?: number | null; pointsLost?: number | null; handicapPinfall?: number | null;
-    wins?: number | null; losses?: number | null; ties?: number | null;
   },
 ): CareerAdvancedContribution {
   const out: CareerAdvancedContribution = { ...base };
@@ -321,18 +334,16 @@ function accToContribution(
     if (credit.points != null) out.points = credit.points;
     if (credit.pointsLost != null) out.pointsLost = credit.pointsLost;
     if (credit.handicapPinfall != null) out.handicapPinfall = credit.handicapPinfall;
-    if (credit.wins != null) out.wins = credit.wins;
-    if (credit.losses != null) out.losses = credit.losses;
-    if (credit.ties != null) out.ties = credit.ties;
   }
   return out;
 }
 
 /** Extract an advanced contribution for a rostered bowler from a current-
- *  season public_snapshot payload. Reads snap.history[rosterId] for
- *  linescores (skipping absent / score-only / substitute rows), snap.
- *  bowlersById[rosterId] for roster credit fields, and derives W-L-T
- *  from per-week `result`. Safe on missing/legacy snapshots. */
+ *  season public_snapshot payload. Roster credit is read from
+ *  `bowlersById[rosterId]` (points, pointsLost, handicapPinfall) — this
+ *  correctly includes weeks that a substitute rolled for the scheduled
+ *  bowler. Advanced/moments come only from full-linescore rows the
+ *  bowler personally rolled. Score-only rows still contribute POA. */
 export function extractCurrentRosterAdvancedContribution(
   snapshot: unknown,
   rosterId: string,
@@ -345,7 +356,6 @@ export function extractCurrentRosterAdvancedContribution(
   let entryAvg: number | null = null;
   let credit: {
     points: number | null; pointsLost: number | null; handicapPinfall: number | null;
-    wins: number | null; losses: number | null; ties: number | null;
   } | undefined;
   const byId = snap["bowlersById"];
   if (byId && typeof byId === "object") {
@@ -357,7 +367,6 @@ export function extractCurrentRosterAdvancedContribution(
         points: numOrNull(bb["points"]),
         pointsLost: numOrNull(bb["pointsLost"]),
         handicapPinfall: numOrNull(bb["handicapPinfall"]),
-        wins: null, losses: null, ties: null,
       };
     }
   }
@@ -367,35 +376,33 @@ export function extractCurrentRosterAdvancedContribution(
   if (history && typeof history === "object") {
     const rows = (history as Record<string, unknown>)[rosterId];
     if (Array.isArray(rows)) {
-      let w = 0, l = 0, t = 0, sawResult = false;
       for (const rowU of rows) {
         if (!rowU || typeof rowU !== "object") continue;
         const row = rowU as Record<string, unknown>;
         if (row.absent) continue;
-        const isSub = row.isSub === true;
-        if (!isSub) {
-          const res = row["result"];
-          if (res === "W") { w += 1; sawResult = true; }
-          else if (res === "L") { l += 1; sawResult = true; }
-          else if (res === "T") { t += 1; sawResult = true; }
+        if (row.isSub === true) continue;
+        if (row.scoreOnly === true) {
+          const scores = row["scores"] as readonly unknown[] | undefined;
+          const mask = row["pairCompleted"] as readonly unknown[] | undefined;
+          const completed = numOrNull(row["completedGameCount"]);
+          pushScoreOnlyPOA(scores, mask, completed, acc, entryAvg);
+          continue;
         }
-        if (row.scoreOnly) continue;
-        if (isSub) continue;
         const ls = row["linescore"];
         if (ls && typeof ls === "object") {
           const games = (ls as { games?: unknown }).games as LinescoreGameLike[] | undefined;
           pushLinescoreGames(games, acc, entryAvg);
         }
       }
-      if (credit && sawResult) { credit.wins = w; credit.losses = l; credit.ties = t; }
     }
   }
   return accToContribution(base, acc, credit);
 }
 
 /** Extract an advanced contribution for a substitute from a current-season
- *  snapshot's `substituteProfiles` map. Reads `weeks[].linescore` for full-
- *  linescore-derived counters and moments. No roster credit. */
+ *  snapshot's `substituteProfiles` map. Reads full-linescore weeks for
+ *  frame-derived counters and moments; score-only weeks contribute POA
+ *  only. No roster credit. */
 export function extractCurrentSubstituteAdvancedContribution(
   snapshot: unknown,
   subId: string,
@@ -416,6 +423,13 @@ export function extractCurrentSubstituteAdvancedContribution(
       if (!wRaw || typeof wRaw !== "object") continue;
       const wk = wRaw as Record<string, unknown>;
       const entryAvg = numOrNull(wk["startingAverageAtMatch"]);
+      if (wk["scoreOnly"] === true) {
+        const scores = wk["scores"] as readonly unknown[] | undefined;
+        const mask = wk["pairCompleted"] as readonly unknown[] | undefined;
+        const completed = numOrNull(wk["completedGameCount"]);
+        pushScoreOnlyPOA(scores, mask, completed, acc, entryAvg);
+        continue;
+      }
       const ls = wk["linescore"];
       if (ls && typeof ls === "object") {
         const games = (ls as { games?: unknown }).games as LinescoreGameLike[] | undefined;
@@ -435,7 +449,6 @@ interface HistoricalMatchLike {
   actualB: string;
   absentA?: boolean;
   absentB?: boolean;
-  winner?: "A" | "B" | "T";
   entryAverageA?: number;
   entryAverageB?: number;
   linescoreA?: LinescoreGameLike[] | null;
@@ -453,20 +466,28 @@ interface HistoricalStandingLike {
   handicapPinfall?: number | null;
 }
 
+interface HistoricalParticipantStatsLike {
+  participantRef: string;
+  games?: number | null;
+  seasonPOA?: number | null;
+}
+
 /** Extract an advanced contribution for a historical snapshot participant.
- *  Roster credit (points, pointsLost, handicapPinfall) comes from standings
- *  when role='rostered'; substitutes carry personal stats only.
- *  W-L-T is derived from weekly matches for the participant ref. */
+ *  Frame-derived counters and score moments come from FULL_LINESCORE games
+ *  the participant personally rolled. POA covers ALL personal games — full
+ *  linescore, GAME_SCORES, etc. — using the participantStats projection
+ *  (seasonPOA * games) when available. Roster credit comes from standings
+ *  only when role='rostered'. */
 export function extractHistoricalAdvancedContribution(input: {
   seasonId: string;
   role: SeasonRole;
   participantRef: string;
   weeks: readonly HistoricalWeekLike[] | undefined;
   standings?: readonly HistoricalStandingLike[] | undefined;
+  participantStats?: readonly HistoricalParticipantStatsLike[] | undefined;
 }): CareerAdvancedContribution {
   const base = { seasonId: input.seasonId, role: input.role };
   const acc = newAdvancedAcc();
-  let w = 0, l = 0, t = 0, sawResult = false;
   const ref = input.participantRef;
   for (const wk of input.weeks ?? []) {
     for (const m of wk.matches ?? []) {
@@ -476,17 +497,24 @@ export function extractHistoricalAdvancedContribution(input: {
       const side = isA ? "A" : "B";
       const absent = side === "A" ? m.absentA === true : m.absentB === true;
       if (absent) continue;
-      if (input.role === "rostered") {
-        const winner = m.winner;
-        if (winner === "T") { t += 1; sawResult = true; }
-        else if (winner === side) { w += 1; sawResult = true; }
-        else if (winner === "A" || winner === "B") { l += 1; sawResult = true; }
-      }
       const games = side === "A" ? m.linescoreA : m.linescoreB;
-      const entryAvg = numOrNull(side === "A" ? m.entryAverageA : m.entryAverageB);
-      if (games) pushLinescoreGames(games, acc, entryAvg);
+      // Note: entryAvg is passed only to accumulate frame-derived moments;
+      // POA comes from the participantStats projection below and MUST NOT
+      // double-count linescore games, so we pass null for entryAvg here.
+      if (games) pushLinescoreGames(games, acc, null);
     }
   }
+
+  // Career POA source of truth: participantStats.seasonPOA * games. This
+  // covers full-linescore AND GAME_SCORES seasons — matching the archived
+  // /bowlers/... page which derives seasonPOA from every per-game score.
+  const stat = (input.participantStats ?? []).find((s) => s.participantRef === ref);
+  if (stat && typeof stat.games === "number" && stat.games > 0
+      && typeof stat.seasonPOA === "number" && Number.isFinite(stat.seasonPOA)) {
+    acc.poaGames = stat.games;
+    acc.poaSum = stat.seasonPOA * stat.games;
+  }
+
   let credit: Parameters<typeof accToContribution>[2];
   if (input.role === "rostered") {
     const st = (input.standings ?? []).find((s) => s.participantRef === ref);
@@ -494,9 +522,6 @@ export function extractHistoricalAdvancedContribution(input: {
       points: numOrNull(st?.points),
       pointsLost: numOrNull(st?.pointsLost),
       handicapPinfall: numOrNull(st?.handicapPinfall),
-      wins: sawResult ? w : null,
-      losses: sawResult ? l : null,
-      ties: sawResult ? t : null,
     };
   }
   return accToContribution(base, acc, credit);
@@ -504,8 +529,7 @@ export function extractHistoricalAdvancedContribution(input: {
 
 /** Merge/dedupe career contributions across primary (current-season) and
  *  historical sources. Key = seasonId::role. Winner = the entry with more
- *  concrete data: prefer any entry with advGames>0, else any entry with
- *  score moments, else the primary source, else the historical source. */
+ *  concrete data. */
 export function mergeCareerAdvancedContributions(
   primary: readonly CareerAdvancedContribution[],
   historical: readonly CareerAdvancedContribution[],
@@ -514,6 +538,7 @@ export function mergeCareerAdvancedContributions(
     let s = 0;
     if (typeof c.advGames === "number" && c.advGames > 0) s += 4;
     if (typeof c.scoreMomentsN === "number" && c.scoreMomentsN > 0) s += 2;
+    if (typeof c.points === "number") s += 1;
     if (kind === "primary") s += 1;
     return s;
   };

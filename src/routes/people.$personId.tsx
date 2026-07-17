@@ -4,6 +4,7 @@ import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 import { getCareerProfile } from "@/lib/history-repo.functions";
 import { getHistoricalCareerContributions } from "@/lib/historical-repo.functions";
+import { formatRecord } from "@/lib/mock-data";
 import {
   aggregateCareerTotals,
   mergeHistoricalIntoCareer,
@@ -15,6 +16,7 @@ import {
   type CareerAdvancedContribution,
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
+
 
 export const Route = createFileRoute("/people/$personId")({
   head: () => ({
@@ -99,7 +101,7 @@ function CareerBody({
         <Stat label="Seasons" value={totals.seasonsCount} />
         <Stat label="Championships" value={totals.championships} />
         <Stat label="Games" value={totals.totalGames || "—"} />
-        <Stat label="Scratch Avg" value={totals.average != null ? totals.average.toFixed(1) : "—"} />
+        <Stat label="Scratch Avg" value={totals.average != null ? totals.average.toFixed(3) : "—"} />
         <Stat label="Seasons w/ Game Data" value={totals.seasonsWithGameData} />
       </section>
 
@@ -109,9 +111,10 @@ function CareerBody({
         Basic stats include game-score-only historical rows. Frame-derived stats
         (marks, pins lost, first 5 / last 5, clutch, consistency) come only from
         full-linescore data and show <span aria-label="unavailable">—</span> when
-        unavailable. Points, points-lost, handicap pinfall and W-L are roster
-        credit only.
+        unavailable. Record (points won – points lost), handicap pinfall are
+        roster credit only; substitute weeks contribute personal stats only.
       </p>
+
 
       <section className="rounded-lg border border-border bg-card">
         <div className="border-b border-border p-3 text-sm font-semibold">Season history</div>
@@ -174,40 +177,52 @@ function CareerAdvancedCards({
 }) {
   const dash = (v: number | null | undefined) => (v == null ? "—" : v);
   const fixed = (v: number | null, digits = 1) => (v == null ? "—" : v.toFixed(digits));
+  const pct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
+  const loc = (v: number | null | undefined) =>
+    v == null ? "—" : v.toLocaleString();
   const record =
-    totals.wins != null || totals.losses != null || totals.ties != null
-      ? `${totals.wins ?? 0}-${totals.losses ?? 0}${totals.ties ? `-${totals.ties}` : ""}`
+    totals.pointsCredited != null || totals.pointsLost != null
+      ? formatRecord(totals.pointsCredited ?? 0, totals.pointsLost ?? 0)
       : "—";
+  const poa = (() => {
+    const v = totals.careerPOA;
+    if (v == null) return "—";
+    const rounded = Number(v.toFixed(2));
+    if (rounded === 0) return "0.00";
+    const sign = rounded > 0 ? "+" : "-";
+    return `${sign}${Math.abs(rounded).toFixed(2)}`;
+  })();
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
-      <Stat label="Record (W-L)" value={record} />
-      <Stat label="Scratch Pinfall" value={totalsBasic.totalScratchPinfall || "—"} />
-      <Stat label="Handicap Pinfall" value={dash(totals.handicapPinfall)} />
+      <Stat label="Record (W - L)" value={record} />
+      <Stat label="Scratch Pinfall" value={loc(totalsBasic.totalScratchPinfall || null)} />
+      <Stat label="Handicap Pinfall" value={loc(totals.handicapPinfall)} />
       <Stat label="High Game" value={dash(totalsBasic.highGame)} />
       <Stat label="High Set" value={dash(totalsBasic.highSet)} />
-      <Stat label="Strikes" value={dash(totals.strikes)} />
-      <Stat label="Spares" value={dash(totals.spares)} />
-      <Stat label="Opens" value={dash(totals.opens)} />
-      <Stat label="Total Marks" value={dash(totals.marks)} />
-      <Stat label="Frames Rolled" value={dash(totals.framesRolled)} />
-      <Stat label="Mark %" value={fixed(totals.markPct)} />
-      <Stat label="Strike %" value={fixed(totals.strikePct)} />
-      <Stat label="Spare Conv. %" value={fixed(totals.spareConversionPct)} />
-      <Stat label="Open %" value={fixed(totals.openPct)} />
-      <Stat label="Pins Lost/Game" value={fixed(totals.pinsLostPerGame, 2)} />
+      <Stat label="Strikes" value={loc(totals.strikes)} />
+      <Stat label="Spares" value={loc(totals.spares)} />
+      <Stat label="Opens" value={loc(totals.opens)} />
+      <Stat label="Total Marks" value={loc(totals.marks)} />
+      <Stat label="Frames Rolled" value={loc(totals.framesRolled)} />
+      <Stat label="Mark %" value={pct(totals.markPct)} />
+      <Stat label="Strike %" value={pct(totals.strikePct)} />
+      <Stat label="Spare Conv. %" value={pct(totals.spareConversionPct)} />
+      <Stat label="Open %" value={pct(totals.openPct)} />
+      <Stat label="Pins Lost / Game" value={fixed(totals.pinsLostPerGame, 2)} />
       <Stat
-        label="Consistency"
+        label="Consistency (σ)"
         value={totals.consistencyAvailable ? fixed(totals.consistency, 2) : "—"}
       />
-      <Stat label="Career POA" value={fixed(totals.careerPOA, 1)} />
-      <Stat label="First 5/Game" value={fixed(totals.first5PerGame)} />
-      <Stat label="Last 5/Game" value={fixed(totals.last5PerGame)} />
-      <Stat label="Big Opening/Game" value={fixed(totals.bigOpeningPerGame)} />
-      <Stat label="Big Finish/Game" value={fixed(totals.bigFinishPerGame)} />
-      <Stat label="Clutch %" value={fixed(totals.clutchPct)} />
+      <Stat label="Career POA" value={poa} />
+      <Stat label="First 5 / Game" value={fixed(totals.first5PerGame)} />
+      <Stat label="Last 5 / Game" value={fixed(totals.last5PerGame)} />
+      <Stat label="Big Opening / Game" value={fixed(totals.bigOpeningPerGame)} />
+      <Stat label="Big Finish / Game" value={fixed(totals.bigFinishPerGame)} />
+      <Stat label="Clutch % (Fr 9–10)" value={pct(totals.clutchPct)} />
     </section>
   );
 }
+
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (

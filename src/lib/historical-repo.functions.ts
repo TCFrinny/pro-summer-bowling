@@ -1344,6 +1344,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
               participantRef: p.ref,
               weeks: snap.weeks,
               standings: snap.standings,
+              participantStats: snap.participantStats,
             }),
           );
         }
@@ -1354,7 +1355,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
     // Summary-only fallback: rows tagged with this person that snapshot
     // doesn't cover.
     const summ = await (sb.from as unknown as LooseFrom)("historical_season_summary_records")
-      .select("season_id,participant_ref,person_id,role,display_name,bowler_number,games,scratch_pinfall,average,high_game,high_set,points,final_finish,is_champion")
+      .select("season_id,participant_ref,person_id,role,display_name,bowler_number,games,scratch_pinfall,average,high_game,high_set,points,points_lost,final_finish,is_champion")
       .eq("person_id", data.personId);
     if (!summ.error && summ.data) {
       const summaryIds = Array.from(new Set((summ.data as Array<{ season_id: string }>).map((r) => r.season_id)));
@@ -1370,10 +1371,13 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
         const sid = String(r.season_id);
         const meta = seasonMeta.get(sid);
         if (!meta) continue;
+        const role = r.role as "rostered" | "substitute";
+        const points = r.points != null ? Number(r.points) : null;
+        const pointsLost = r.points_lost != null ? Number(r.points_lost) : null;
         rows.push({
           seasonId: sid,
           seasonLabel: meta.label,
-          role: r.role as "rostered" | "substitute",
+          role,
           displayName: String(r.display_name),
           bowlerNumber: (r.bowler_number as string | null) ?? null,
           startingAverage: null,
@@ -1383,14 +1387,26 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
           average: r.average != null ? Number(r.average) : null,
           highGame: (r.high_game as number | null) ?? null,
           highSet: (r.high_set as number | null) ?? null,
-          points: r.points != null ? Number(r.points) : null,
+          points,
           finalFinish: (r.final_finish as number | null) ?? null,
           isChampion: r.is_champion === true,
           hasGameData: r.games != null,
           source: "historical_summary",
         });
+        // Summary-only roster-credit advanced contribution. Substitutes
+        // never carry points credit. Handicap pinfall stays unavailable
+        // (no real field on the summary record).
+        if (role === "rostered" && (points != null || pointsLost != null)) {
+          advancedContributions.push({
+            seasonId: sid,
+            role: "rostered",
+            points,
+            pointsLost,
+          });
+        }
       }
     }
 
     return { rows: dedupeHistoricalContributions(rows), advancedContributions };
   });
+
