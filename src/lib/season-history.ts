@@ -262,23 +262,33 @@ export function extractRosteredSeasonRow(
   const row = (byId as Record<string, unknown>)[rosterId];
   if (!row || typeof row !== "object") return { ...empty };
   const b = row as Record<string, unknown>;
-  const games = numOrNull(b["gamesPlayed"]);
-  const pinfall = numOrNull(b["scratchPinfall"]);
-  const avg = numOrNull(b["scratchAverage"]);
+  // Career personal stats: use rostered-only counters (`actualGamesRolled` /
+  // `actualScratchPinfall`) so weeks a substitute rolled on this bowler's
+  // behalf don't inflate the denominator. Fall back to the credited counters
+  // only for legacy snapshots that pre-date those fields.
+  const actualGames = numOrNull(b["actualGamesRolled"]);
+  const actualPinfall = numOrNull(b["actualScratchPinfall"]);
+  const creditedGames = numOrNull(b["gamesPlayed"]);
+  const creditedPinfall = numOrNull(b["scratchPinfall"]);
+  const games = actualGames ?? creditedGames;
+  const pinfall = actualPinfall ?? creditedPinfall;
+  const storedAvg = numOrNull(b["scratchAverage"]);
   const points = numOrNull(b["points"]);
   const highGame = numOrNull(b["highGame"]);
   const highSet = numOrNull(b["highSet"]);
   const finalFinish = extractFinalFinish(snap, rosterId);
+  const derivedAvg = pinfall != null && games != null && games > 0 ? pinfall / games : null;
   return {
     hasGameData: true,
     games,
     scratchPinfall: pinfall,
-    average: avg && games && games > 0 ? avg : avg ?? (pinfall && games && games > 0 ? pinfall / games : null),
+    average: storedAvg ?? derivedAvg,
     highGame,
     highSet,
     points,
     finalFinish,
   };
+
 }
 
 function extractFinalFinish(snap: Record<string, unknown>, bowlerId: string): number | null {
