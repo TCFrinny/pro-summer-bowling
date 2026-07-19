@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { AlertTriangle, CheckCircle2, Save, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sortPersonOptions } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/admin/schedule")({
   head: () => ({
@@ -70,8 +71,11 @@ function AdminSchedulePage() {
 
   const roster = query.data?.roster ?? [];
   const activeRoster = useMemo(
-    () => roster.filter((r) => r.active && !r.archived)
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    () => sortPersonOptions(
+      roster.filter((r) => r.active && !r.archived).map((r) => ({
+        id: r.id, name: r.name, bowlerNumber: r.bowler_number,
+      })),
+    ).map((s) => roster.find((r) => r.id === s.id)!),
     [roster],
   );
 
