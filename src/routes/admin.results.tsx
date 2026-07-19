@@ -37,9 +37,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { sortPersonOptions } from "@/lib/person-sort";
-// eslint-disable-next-line
-const __sortPersonOptions_admin_results = sortPersonOptions;
-} from "@/components/ui/select";
 import { AlertTriangle, CheckCircle2, PenSquare, RotateCcw, Save, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { compareLanePairSlotCamel } from "@/lib/lane-pair-order";
@@ -211,8 +208,9 @@ function AdminResultsPage() {
   }, [matchId]);
 
   const activeSubs = useMemo(
-    () => (query.data?.subs ?? []).filter((s) => s.active && !s.archived)
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    () => sortPersonOptions(
+      (query.data?.subs ?? []).filter((s) => s.active && !s.archived),
+    ),
     [query.data],
   );
 
