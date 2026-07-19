@@ -17,6 +17,7 @@ import {
   type PersonSeasonalRecord,
 } from "@/lib/history-repo.functions";
 import { ChevronDown, ChevronRight, Loader2, UserPlus, X } from "lucide-react";
+import { sortPersonOptions } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/admin/people")({
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
@@ -282,7 +283,7 @@ function MergePanel({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const options = useMemo(() => [...people].sort((a, b) => a.displayName.localeCompare(b.displayName)), [people]);
+  const options = useMemo(() => sortPersonOptions(people), [people]);
 
   async function runPreview() {
     setMsg(null); setPreview(null); setTyped("");
@@ -486,7 +487,7 @@ function UnlinkedRow({
           {mode === "existing" ? (
             <select value={pid} onChange={(e) => setPid(e.target.value)} className="rounded border border-border bg-background px-1 text-xs">
               <option value="">— person —</option>
-              {people.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+              {sortPersonOptions(people).map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
             </select>
           ) : (
             <input

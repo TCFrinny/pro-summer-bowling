@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { AlertTriangle, Loader2, Save, Trash2 } from "lucide-react";
 import { compareLanePairSlotSnake } from "@/lib/lane-pair-order";
+import { sortPersonOptions } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/admin/live-scoring")({
   head: () => ({
@@ -605,7 +606,7 @@ function SideRow({
           >
             <SelectTrigger className="h-7 w-40"><SelectValue placeholder="Select sub" /></SelectTrigger>
             <SelectContent>
-              {subs.filter((s) => s.active && !s.archived).map((s) => (
+              {sortPersonOptions(subs.filter((s) => s.active && !s.archived)).map((s) => (
                 <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
               ))}
             </SelectContent>
