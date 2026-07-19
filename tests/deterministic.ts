@@ -6,6 +6,8 @@
  */
 import "../src/lib/frame-input";
 import "../src/lib/league-store";
+import "../src/lib/person-sort";
+import "./person-sort";
 import "../src/lib/roster-adapter";
 import "../src/lib/elimination-order";
 import "../src/lib/substitute-handicap";
