@@ -16,6 +16,7 @@ import {
 import { summarizeLanePairs } from "@/lib/season-history";
 import { HistoricalDataSection } from "@/components/admin/HistoricalDataSection";
 import { Loader2, Save, Star, Trash2 } from "lucide-react";
+import { sortPersonOptions } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/admin/seasons/$seasonId")({
   head: () => ({ meta: [{ name: "robots", content: "noindex" }] }),
