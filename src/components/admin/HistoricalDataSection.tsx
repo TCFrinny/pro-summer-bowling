@@ -819,7 +819,7 @@ function SummaryRecordsBlock({ seasonId }: { seasonId: string }) {
     queryFn: () => adminListParticipants({ data: { seasonId } }),
   });
   const rosterOptions = useMemo(() =>
-    [...(parts.data?.roster ?? []), ...(parts.data?.substitutes ?? [])],
+    sortPersonOptions([...(parts.data?.roster ?? []), ...(parts.data?.substitutes ?? [])]),
   [parts.data]);
 
   const [participantRef, setParticipantRef] = useState("");
