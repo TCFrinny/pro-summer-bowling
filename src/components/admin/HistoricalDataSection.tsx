@@ -43,6 +43,7 @@ import {
 } from "@/lib/historical-repo.functions";
 import { adminListParticipants, type ParticipantRow } from "@/lib/history-repo.functions";
 import { compareLanePairLabel } from "@/lib/lane-pair-order";
+import { sortPersonOptions } from "@/lib/person-sort";
 import {
   computeSideDerived,
   emptySideEditorState,
@@ -286,10 +287,17 @@ function WeekScheduleEditor({
     queryFn: () => adminListHistoricalSchedule({ data: { weekId: week.id } }),
   });
   // Rostered ONLY for scheduled A/B. Substitutes are actual-participant-only.
-  const rosterOptions = useMemo(() => parts.data?.roster ?? [], [parts.data]);
-  const allOptions = useMemo(() =>
-    [...(parts.data?.roster ?? []), ...(parts.data?.substitutes ?? [])],
-  [parts.data]);
+  const rosterOptions = useMemo(
+    () => sortPersonOptions(parts.data?.roster ?? []),
+    [parts.data],
+  );
+  const allOptions = useMemo(
+    () => sortPersonOptions([
+      ...(parts.data?.roster ?? []),
+      ...(parts.data?.substitutes ?? []),
+    ]),
+    [parts.data],
+  );
   const sortedLanes = useMemo(() => [...lanePairLabels].sort(compareLanePairLabel), [lanePairLabels]);
 
   const [lane, setLane] = useState(sortedLanes[0] ?? "");
@@ -509,7 +517,7 @@ function ResultEntryForm({
 
   const A0 = allOptions.find((p) => p.id === slot.bowlerARef);
   const B0 = allOptions.find((p) => p.id === slot.bowlerBRef);
-  const substitutes = allOptions.filter((p) => p.role === "substitute");
+  const substitutes = sortPersonOptions(allOptions.filter((p) => p.role === "substitute"));
 
   const [mode, setMode] = useState<DetailMode>("game_scores");
   const [statusA, setStatusA] = useState<Status>("rostered");
