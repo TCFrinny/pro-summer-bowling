@@ -424,10 +424,7 @@ function ParticipantsBlock({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const sortedPeople = useMemo(
-    () => [...people].sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [people],
-  );
+  const sortedPeople = useMemo(() => sortPersonOptions(people), [people]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
