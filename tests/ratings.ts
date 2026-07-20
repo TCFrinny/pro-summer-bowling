@@ -240,5 +240,74 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
   assert(approx(popStdev([0, 10]), 5), "population stdev for [0,10]");
 })();
 
+// ---------- 14) extractor: score-only substitute attribution + published gate ----------
+(async function extractor() {
+  const { ratingGamesFromCurrentSeason } = await import("../src/lib/ratings-extract");
+  // Minimal MatchResult-like shape. Score-only match, substitute "subZ" rolled
+  // for scheduled "sched1" (linescoreA is null in score-only mode).
+  const mkMatch = (week: number, status: "completed" | "scheduled", opts: {
+    subA?: boolean; absentA?: boolean;
+  } = {}) => ({
+    id: `m-${week}`, week, lanePair: "1-2" as const, slot: 1, status,
+    bowlerA: "sched1", bowlerB: "sched2",
+    result: status === "completed" ? {
+      scheduledA: "sched1", scheduledB: "sched2",
+      scheduledNameA: "S1", scheduledNameB: "S2",
+      actualA: opts.subA ? "subZ" : "sched1",
+      actualB: "sched2",
+      actualNameA: opts.subA ? "Sub Z" : "S1", actualNameB: "S2",
+      isSubA: !!opts.subA, isSubB: false,
+      participationA: {
+        scheduledId: "sched1",
+        status: opts.absentA ? "absent" : (opts.subA ? "substitute" : "rostered"),
+        actualId: opts.absentA ? null : (opts.subA ? "subZ" : "sched1"),
+        actualName: opts.subA ? "Sub Z" : "S1",
+      },
+      participationB: {
+        scheduledId: "sched2", status: "rostered",
+        actualId: "sched2", actualName: "S2",
+      },
+      entryAverageA: 120, entryAverageB: 120, handicapA: 0, handicapB: 0,
+      linescoreA: null, linescoreB: null,
+      gamesA: [180, 180, 180] as [number, number, number],
+      gamesB: [100, 100, 100] as [number, number, number],
+      handicapGamesA: [180,180,180], handicapGamesB: [100,100,100],
+      scratchTotalA: 540, scratchTotalB: 300,
+      handicapTotalA: 540, handicapTotalB: 300,
+      gameAwardsA: [2,2,2] as [0|1|2,0|1|2,0|1|2],
+      gameAwardsB: [0,0,0] as [0|1|2,0|1|2,0|1|2],
+      gamePointsA: 6, gamePointsB: 0,
+      setPointA: 1 as 0|0.5|1, setPointB: 0 as 0|0.5|1,
+      totalPointsA: 7, totalPointsB: 0,
+      pointsOverride: null, winner: "A" as const,
+      scoreOnly: true, completedGameCount: 3 as 0|1|2|3,
+      pairCompleted: [true, true, true] as [boolean, boolean, boolean],
+    } : undefined,
+  });
+
+  // Substitute in a score-only completed match should attribute personal
+  // rows to subZ, never to sched1.
+  const wk1 = [mkMatch(1, "completed", { subA: true })];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rowsA = ratingGamesFromCurrentSeason("S", { 1: wk1 as any });
+  assert(rowsA.some((r) => r.personRef === "subZ"), "sub personal row emitted");
+  assert(!rowsA.some((r) => r.personRef === "sched1"),
+    "score-only sub row must NOT be attributed to scheduled rostered bowler");
+
+  // Published-week filter: an unpublished week 2 must be skipped.
+  const wk2 = [mkMatch(2, "completed")];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rowsB = ratingGamesFromCurrentSeason("S", { 1: wk1 as any, 2: wk2 as any },
+    new Set<number>([1]));
+  assert(rowsB.every((r) => r.weekNumber === 1), "unpublished week filtered out");
+
+  // Absent side: no rows for the absent participant.
+  const wk3 = [mkMatch(3, "completed", { absentA: true })];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rowsC = ratingGamesFromCurrentSeason("S", { 3: wk3 as any });
+  assert(!rowsC.some((r) => r.personRef === "sched1"),
+    "absent side must not emit personal rows");
+})();
+
 // eslint-disable-next-line no-console
 console.log("ratings tests passed");

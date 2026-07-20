@@ -49,10 +49,13 @@ function projectSide(
   scratchGames: [number, number, number],
   entryAverage: number,
   absent: boolean,
+  actualPersonId: string | null | undefined,
 ): SideProjection {
   if (absent) return { personRef: scheduledId, entryAverage, scores: [], frames: [], present: false };
-  // ACTUAL bowler attribution: substitute personal stats belong to sub, not scheduled.
-  const person = ls?.actualId ?? scheduledId;
+  // ACTUAL bowler attribution. Score-only rows have no linescore; read the
+  // frozen actual person from participation. Substitute personal stats
+  // belong to the sub in BOTH full-linescore and score-only paths.
+  const person = ls?.actualId ?? actualPersonId ?? scheduledId;
   const entry = ls?.entryAverage ?? entryAverage;
   const scores: number[] = [];
   const frames: (RatingFrameStats | null)[] = [];
@@ -63,27 +66,29 @@ function projectSide(
       frames.push(frameStatsFromLinescore(g));
     }
   } else {
-    // score-only: three raw scores, no frames. Only include COMPLETED pairs.
     const mask = pairCompleted ?? [true, true, true];
     for (let i = 0; i < 3; i++) {
       if (mask[i]) { scores.push(scratchGames[i]); frames.push(null); }
     }
   }
-  // Ignore scheduledName since we don't need it for the rating math.
   void scheduledName;
   return { personRef: person, entryAverage: entry ?? null, scores, frames, present: true };
 }
 
 /** Build RatingGame rows from the CURRENT-season matches by week. Only
  *  completed weeks that are public should be passed in. Absent-side
- *  synthetic scores are excluded because we gate on `participation.status`. */
+ *  synthetic scores are excluded because we gate on `participation.status`.
+ *  When `publishedWeeks` is provided, weeks not in the set are skipped so
+ *  public callers cannot leak unpublished data. */
 export function ratingGamesFromCurrentSeason(
   seasonId: string,
   matchesByWeek: Record<number, Match[]>,
+  publishedWeeks?: ReadonlySet<number>,
 ): RatingGame[] {
   const rows: RatingGame[] = [];
   for (const [wkStr, matches] of Object.entries(matchesByWeek)) {
     const week = Number(wkStr);
+    if (publishedWeeks && !publishedWeeks.has(week)) continue;
     for (const m of matches) {
       if (m.status !== "completed" || !m.result) continue;
       const r: MatchResult = m.result;
@@ -92,10 +97,12 @@ export function ratingGamesFromCurrentSeason(
       const A = projectSide(
         r.participationA.scheduledId, r.actualNameA, r.linescoreA,
         r.scoreOnly, r.pairCompleted, r.gamesA, r.entryAverageA, absentA,
+        r.participationA.actualId,
       );
       const B = projectSide(
         r.participationB.scheduledId, r.actualNameB, r.linescoreB,
         r.scoreOnly, r.pairCompleted, r.gamesB, r.entryAverageB, absentB,
+        r.participationB.actualId,
       );
       const lanePair = String(m.lanePair);
       // emit rows only for scores actually recorded on both sides so games

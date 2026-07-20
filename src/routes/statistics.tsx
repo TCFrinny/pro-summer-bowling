@@ -7,7 +7,7 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -115,7 +115,7 @@ const METRICS: MetricDef[] = [
 ];
 
 function StatisticsPage() {
-  useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
+  const snap = useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
   // Derive once from linescores — no per-render recomputation across the season.
   const rows: StatRow[] = useMemo(
     () =>
@@ -139,17 +139,22 @@ function StatisticsPage() {
   );
 
   const ratings = useMemo(() => {
-    const games = ratingGamesFromCurrentSeason("current", getLeagueState().db.matchesByWeek);
+    const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
+    const games = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
+    const nameOf = (id: string) =>
+      snap.bowlersById[id]?.name
+      ?? snap.substitutes?.find((s) => s.id === id)?.name
+      ?? id;
     const base = computeSeasonRatings(games).map((r) => ({
       ...r,
-      displayName: BOWLERS.find((b) => b.id === r.personRef)?.name ?? r.personRef,
+      displayName: nameOf(r.personRef),
     }));
     return {
       offense: leaderboardOffense(base).slice(0, 10),
       defense: leaderboardDefense(base).slice(0, 10),
       twoWay: leaderboardTwoWay(base).slice(0, 10),
     };
-  }, []);
+  }, [snap]);
 
   return (
     <AppShell>
