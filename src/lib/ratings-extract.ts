@@ -49,10 +49,13 @@ function projectSide(
   scratchGames: [number, number, number],
   entryAverage: number,
   absent: boolean,
+  actualPersonId: string | null | undefined,
 ): SideProjection {
   if (absent) return { personRef: scheduledId, entryAverage, scores: [], frames: [], present: false };
-  // ACTUAL bowler attribution: substitute personal stats belong to sub, not scheduled.
-  const person = ls?.actualId ?? scheduledId;
+  // ACTUAL bowler attribution. Score-only rows have no linescore; read the
+  // frozen actual person from participation. Substitute personal stats
+  // belong to the sub in BOTH full-linescore and score-only paths.
+  const person = ls?.actualId ?? actualPersonId ?? scheduledId;
   const entry = ls?.entryAverage ?? entryAverage;
   const scores: number[] = [];
   const frames: (RatingFrameStats | null)[] = [];
@@ -63,13 +66,11 @@ function projectSide(
       frames.push(frameStatsFromLinescore(g));
     }
   } else {
-    // score-only: three raw scores, no frames. Only include COMPLETED pairs.
     const mask = pairCompleted ?? [true, true, true];
     for (let i = 0; i < 3; i++) {
       if (mask[i]) { scores.push(scratchGames[i]); frames.push(null); }
     }
   }
-  // Ignore scheduledName since we don't need it for the rating math.
   void scheduledName;
   return { personRef: person, entryAverage: entry ?? null, scores, frames, present: true };
 }
