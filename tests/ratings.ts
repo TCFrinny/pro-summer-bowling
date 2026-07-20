@@ -375,12 +375,12 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
 // pass a linescore game with a deliberately misleading marks string and
 // verify frameStatsFromLinescore reads segments.clutchMarks.
 (function canonicalClutch() {
-  const frames = Array.from({ length: 10 }, () => ({
-    rolls: [0, 0], marks: "--", frameScore: 0, cumulative: 0,
+  const frames = Array.from({ length: 10 }, (_, i) => ({
+    frameNumber: i + 1, rolls: [0, 0], marks: "--", frameScore: 0, cumulative: 0,
   }));
   const g = {
-    frames,
-    total: 0,
+    frames, total: 0, strikes: 0, spares: 0, opens: 0,
+
     segments: {
       firstFive: 0, lastFive: 0,
       strikes: 0, spares: 0, opens: 0,
