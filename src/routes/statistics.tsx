@@ -256,13 +256,14 @@ function StatisticsPage() {
           </h2>
         </header>
         <div className="grid gap-3 md:grid-cols-3">
-          <RatingBoard title="Offense" rows={ratings.offense.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.offensiveRating!, sample: r.details.actualGames }))} />
-          <RatingBoard title="Matchup Defense" rows={ratings.defense.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
-          <RatingBoard title="Two-Way" rows={ratings.twoWay.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
+          <RatingBoard title="Offense" rows={ratings.offense.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.offensiveRating!, sample: r.details.actualGames }))} />
+          <RatingBoard title="Matchup Defense" rows={ratings.defense.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
+          <RatingBoard title="Two-Way" rows={ratings.twoWay.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
         </div>
+
         <p className="mt-2 text-[11px] text-muted-foreground">
           Ratings are centered at 100 (season average); ± scale ≈ 15 = 1 standard
           deviation. Requires ≥6 games for offense, ≥6 opponent games for defense.
