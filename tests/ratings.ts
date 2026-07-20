@@ -355,22 +355,21 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
 
 // careerRatingQuality: sample thresholds and evidence gates.
 (function careerQuality() {
-  // Not enough games -> Limited sample
-  const limited = { totals: { actualGames: 5, opponentGames: 5,
-    fullLinescoreGames: 0, seasonsOffense: 1, seasonsDefense: 1 } } as never;
-  assert(careerRatingQuality(limited) === "Limited sample",
+  const mk = (actual: number, opp: number, full: number, off: number | null) => ({
+    personRef: "p", offensiveRating: off, matchupDefense: off, twoWayRating: off,
+    contributions: off == null ? [] : [{ seasonId: "s", offense: off, defense: off,
+      actualGames: actual, opponentGames: opp, fullLinescoreGames: full }],
+    totals: { actualGames: actual, opponentGames: opp, fullLinescoreGames: full,
+      seasonsOffense: off == null ? 0 : 1, seasonsDefense: off == null ? 0 : 1 },
+  } as unknown as Parameters<typeof careerRatingQuality>[0]);
+  assert(careerRatingQuality(mk(5, 5, 0, 100)) === "Limited sample",
     "small career sample => Limited sample");
-  // Eligible but no frame linescore -> Score-based
-  const scoreOnly = { totals: { actualGames: 40, opponentGames: 40,
-    fullLinescoreGames: 0, seasonsOffense: 2, seasonsDefense: 2 } } as never;
-  assert(careerRatingQuality(scoreOnly) === "Score-based",
+  assert(careerRatingQuality(mk(40, 40, 0, 100)) === "Score-based",
     "eligible career, no frames => Score-based");
-  // Eligible + rich frame linescore -> Full
-  const full = { totals: { actualGames: 60, opponentGames: 60,
-    fullLinescoreGames: 30, seasonsOffense: 2, seasonsDefense: 2 } } as never;
-  assert(careerRatingQuality(full) === "Full",
+  assert(careerRatingQuality(mk(60, 60, 30, 100)) === "Full",
     "eligible frame-rich career => Full");
 })();
+
 
 // Canonical clutch marks override any conflicting naive interpretation:
 // pass a linescore game with a deliberately misleading marks string and
