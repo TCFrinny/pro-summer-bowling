@@ -8,7 +8,7 @@ import {
   getBowlerSeasonExtras,
   type BowlerHistoryRow,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import { useMemo, useState } from "react";

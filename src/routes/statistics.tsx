@@ -7,7 +7,7 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
