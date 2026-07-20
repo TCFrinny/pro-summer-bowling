@@ -9,28 +9,24 @@ import type { GameLinescore } from "./duckpin";
 import type { RatingGame, RatingFrameStats } from "./ratings";
 
 /** Convert a saved GameLinescore into the frame stats the rating module
- *  expects. Clutch = marks in regulation frames 9 and 10 only. */
+ *  expects. Uses the canonical `g.segments.clutchMarks` value derived at
+ *  save time — never re-infers clutch from mark-string characters. */
 export function frameStatsFromLinescore(g: GameLinescore): RatingFrameStats {
   const frames = g.frames.length;
-  // frames 9 & 10 exist for full 10-frame games
-  let clutchMarks = 0;
   let clutchOpportunities = 0;
   for (const f of g.frames) {
-    if (f.frameNumber === 9 || f.frameNumber === 10) {
-      clutchOpportunities += 1;
-      const first = f.mark.charAt(0);
-      if (first === "X" || first === "/") clutchMarks += 1;
-    }
+    if (f.frameNumber === 9 || f.frameNumber === 10) clutchOpportunities += 1;
   }
   return {
     framesRolled: frames,
     strikes: g.strikes,
     spares: g.spares,
     opens: g.opens,
-    clutchMarks,
+    clutchMarks: g.segments.clutchMarks,
     clutchOpportunities,
   };
 }
+
 
 interface SideProjection {
   personRef: string;
