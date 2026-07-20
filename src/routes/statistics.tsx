@@ -292,7 +292,7 @@ function formatSigned(n: number): string {
 }
 
 function RatingBoard({ title, rows }: {
-  title: string; rows: Array<{ id: string; name: string; value: number; sample: number }>;
+  title: string; rows: Array<{ id: string; name: string; role: "rostered" | "sub" | "unknown"; value: number; sample: number }>;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -305,7 +305,13 @@ function RatingBoard({ title, rows }: {
             <li key={r.id} className="flex items-center justify-between px-3 py-1.5">
               <span>
                 <span className="mr-2 text-muted-foreground">{i + 1}.</span>
-                <Link to="/bowlers/$bowlerId" params={{ bowlerId: r.id }} className="underline">{r.name}</Link>
+                {r.role === "sub" ? (
+                  <Link to="/bowlers/sub/$substituteId" params={{ substituteId: r.id }} className="underline">{r.name}</Link>
+                ) : r.role === "rostered" ? (
+                  <Link to="/bowlers/$bowlerId" params={{ bowlerId: r.id }} className="underline">{r.name}</Link>
+                ) : (
+                  <span>{r.name}</span>
+                )}
                 <span className="ml-2 text-[10px] text-muted-foreground">{r.sample}g</span>
               </span>
               <span className="font-mono tabular-nums">{formatRating(r.value)}</span>
@@ -316,4 +322,5 @@ function RatingBoard({ title, rows }: {
     </div>
   );
 }
+
 
