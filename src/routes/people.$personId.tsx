@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 import { getCareerProfile } from "@/lib/history-repo.functions";
-import { getHistoricalCareerContributions } from "@/lib/historical-repo.functions";
+import { getHistoricalCareerContributions, getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
 import { formatRecord } from "@/lib/mock-data";
 import {
   aggregateCareerTotals,
@@ -16,6 +16,10 @@ import {
   type CareerAdvancedContribution,
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
+import { RatingsSection } from "@/components/ratings/RatingsSection";
+import { computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
+import { useMemo } from "react";
 
 
 export const Route = createFileRoute("/people/$personId")({
@@ -73,12 +77,68 @@ function PersonPage() {
               hist.data?.advancedContributions ?? [],
             )}
           />
+          <CareerRatingsPanel personId={personId} />
           {q.data.person.notes && (
             <p className="mt-4 text-sm text-muted-foreground">{q.data.person.notes}</p>
           )}
         </>
       )}
     </AppShell>
+  );
+}
+
+/** Fetch each contributing archived season snapshot, compute its 100-centered
+ *  ratings, then aggregate a game-weighted career rating for this permanent
+ *  person. Uses the same public snapshot loader as archived pages. */
+function CareerRatingsPanel({ personId }: { personId: string }) {
+  const hist = useQuery({
+    queryKey: ["people", "career-historical", personId],
+    queryFn: () => getHistoricalCareerContributions({ data: { personId } }),
+  });
+  const seasonIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of hist.data?.rows ?? []) set.add(r.seasonId);
+    return Array.from(set);
+  }, [hist.data]);
+  const snapshots = useQueries({
+    queries: seasonIds.map((sid) => ({
+      queryKey: ["seasons", "public", "historical-snapshot", sid],
+      queryFn: () => getPublicHistoricalSnapshot({ data: { seasonId: sid } }),
+    })),
+  });
+  const perSeason = useMemo(() => {
+    const out: Array<{ seasonId: string; seasonLabel?: string; offense: number | null;
+      defense: number | null; actualGames: number; opponentGames: number; fullLinescoreGames: number }> = [];
+    snapshots.forEach((qi, idx) => {
+      const snap = qi.data?.snapshot;
+      if (!snap) return;
+      const rows = ratingGamesFromHistoricalSnapshot(snap);
+      const all = computeSeasonRatings(rows);
+      // Match by any historical alias for this person; participants carry personId.
+      const refs = new Set<string>();
+      for (const p of snap.participants) if (p.personId === personId) refs.add(p.ref);
+      const contribs = all.filter((r) => refs.has(r.personRef));
+      // Merge (person may be listed under one ref per season).
+      const off = contribs.find((c) => c.offensiveRating != null)?.offensiveRating ?? null;
+      const def = contribs.find((c) => c.matchupDefense != null)?.matchupDefense ?? null;
+      const gCount = contribs.reduce((a, c) => a + c.details.actualGames, 0);
+      const oCount = contribs.reduce((a, c) => a + c.details.opponentGames, 0);
+      const fCount = contribs.reduce((a, c) => a + c.details.fullLinescoreGames, 0);
+      if (gCount > 0) out.push({ seasonId: seasonIds[idx], seasonLabel: snap.season?.label,
+        offense: off, defense: def, actualGames: gCount, opponentGames: oCount, fullLinescoreGames: fCount });
+    });
+    return out;
+  }, [snapshots, personId, seasonIds]);
+  if (perSeason.length === 0) return null;
+  const career = computeCareerRatings(personId, perSeason);
+  return (
+    <RatingsSection
+      offense={career.offensiveRating}
+      defense={career.matchupDefense}
+      twoWay={career.twoWayRating}
+      quality={career.quality}
+      careerContributions={career.contributions}
+    />
   );
 }
 
