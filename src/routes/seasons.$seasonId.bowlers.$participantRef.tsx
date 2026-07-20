@@ -23,6 +23,10 @@ import { getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
 import { EmptyState } from "@/components/layout/AppShell";
 import { GameLinescore } from "@/components/linescore/GameLinescore";
 import type { HistoricalMatch, HistoricalWeekSummary } from "@/lib/historical-snapshot";
+import { RatingsSection } from "@/components/ratings/RatingsSection";
+import { computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
+import { useMemo } from "react";
 
 export const Route = createFileRoute("/seasons/$seasonId/bowlers/$participantRef")({
   component: SeasonBowlerPage,
@@ -50,6 +54,11 @@ function SeasonBowlerPage() {
       .map((m) => ({ w, m })),
   );
 
+  const rating = useMemo(() => {
+    const rows = ratingGamesFromHistoricalSnapshot(snap);
+    return computeSeasonRatings(rows).find((r) => r.personRef === participantRef) ?? null;
+  }, [snap, participantRef]);
+
   const adv = personal?.advanced ?? null;
   return (
     <div className="space-y-4">
@@ -64,6 +73,18 @@ function SeasonBowlerPage() {
           </Link>
         )}
       </header>
+
+      {rating && (
+        <RatingsSection
+          offense={rating.offensiveRating}
+          defense={rating.matchupDefense}
+          twoWay={rating.twoWayRating}
+          quality={rating.quality}
+          details={rating.details}
+        />
+      )}
+
+
 
       <section>
         <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">

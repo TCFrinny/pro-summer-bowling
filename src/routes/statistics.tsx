@@ -7,11 +7,13 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Trophy } from "lucide-react";
+import { computeSeasonRatings, leaderboardOffense, leaderboardDefense, leaderboardTwoWay, formatRating } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason } from "@/lib/ratings-extract";
 
 export const Route = createFileRoute("/statistics")({
   head: () => ({
@@ -136,12 +138,27 @@ function StatisticsPage() {
     [rows, activeMetric],
   );
 
+  const ratings = useMemo(() => {
+    const games = ratingGamesFromCurrentSeason("current", getLeagueState().db.matchesByWeek);
+    const base = computeSeasonRatings(games).map((r) => ({
+      ...r,
+      displayName: BOWLERS.find((b) => b.id === r.personRef)?.name ?? r.personRef,
+    }));
+    return {
+      offense: leaderboardOffense(base).slice(0, 10),
+      defense: leaderboardDefense(base).slice(0, 10),
+      twoWay: leaderboardTwoWay(base).slice(0, 10),
+    };
+  }, []);
+
   return (
     <AppShell>
       <PageHeader
         title="Statistics"
         subtitle="Season leaders and sortable tables — derived once from saved match linescores, not recomputed on load."
       />
+
+
 
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
         {METRICS.slice(0, 5).map((m) => {
@@ -221,6 +238,28 @@ function StatisticsPage() {
           </tbody>
         </table>
       </div>
+
+      <section className="mt-10 rounded-lg border border-border bg-card/60 p-4">
+        <header className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-lg">
+            Offense &amp; Matchup Defense
+            <span className="ml-2 text-xs uppercase tracking-widest text-muted-foreground">Experimental</span>
+          </h2>
+        </header>
+        <div className="grid gap-3 md:grid-cols-3">
+          <RatingBoard title="Offense" rows={ratings.offense.map((r) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, value: r.offensiveRating!, sample: r.details.actualGames }))} />
+          <RatingBoard title="Matchup Defense" rows={ratings.defense.map((r) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
+          <RatingBoard title="Two-Way" rows={ratings.twoWay.map((r) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Ratings are centered at 100 (season average); ± scale ≈ 15 = 1 standard
+          deviation. Requires ≥6 games for offense, ≥6 opponent games for defense.
+        </p>
+      </section>
+
       <p className="mt-3 text-[11px] text-muted-foreground">
         POA baseline (Phase 1) = entry average. Best Game/Set POA = best single
         game / 3-game set pinfall minus that baseline. Points Won (W - L) counts
@@ -241,3 +280,30 @@ function formatSigned(n: number): string {
   const abs = Math.abs(rounded).toFixed(2).replace(/\.?0+$/, "");
   return `${sign}${abs}`;
 }
+
+function RatingBoard({ title, rows }: {
+  title: string; rows: Array<{ id: string; name: string; value: number; sample: number }>;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <div className="border-b border-border p-3 text-sm font-semibold">{title}</div>
+      {rows.length === 0 ? (
+        <p className="p-3 text-xs text-muted-foreground">Not enough data yet.</p>
+      ) : (
+        <ol className="divide-y divide-border text-sm">
+          {rows.map((r, i) => (
+            <li key={r.id} className="flex items-center justify-between px-3 py-1.5">
+              <span>
+                <span className="mr-2 text-muted-foreground">{i + 1}.</span>
+                <Link to="/bowlers/$bowlerId" params={{ bowlerId: r.id }} className="underline">{r.name}</Link>
+                <span className="ml-2 text-[10px] text-muted-foreground">{r.sample}g</span>
+              </span>
+              <span className="font-mono tabular-nums">{formatRating(r.value)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+

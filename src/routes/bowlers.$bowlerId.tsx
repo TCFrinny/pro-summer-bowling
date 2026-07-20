@@ -8,11 +8,14 @@ import {
   getBowlerSeasonExtras,
   type BowlerHistoryRow,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
+import { RatingsSection } from "@/components/ratings/RatingsSection";
+import { computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason } from "@/lib/ratings-extract";
 
 export const Route = createFileRoute("/bowlers/$bowlerId")({
   loader: ({ params }) => {
@@ -58,6 +61,11 @@ function BowlerProfile() {
   const history = getBowlerHistory(bowler.id);
   const extras = getBowlerSeasonExtras(bowler.id);
   const maxUsage = Math.max(1, ...extras.lanePairUsage.map((u) => u.count));
+  const ratings = useMemo(() => {
+    const rows = ratingGamesFromCurrentSeason("current", getLeagueState().db.matchesByWeek);
+    const all = computeSeasonRatings(rows);
+    return all.find((r) => r.personRef === bowler.id) ?? null;
+  }, [bowler.id]);
 
   return (
     <AppShell>
@@ -142,6 +150,16 @@ function BowlerProfile() {
           value={`${extras.clutchPct.toFixed(1)}%`}
         />
       </div>
+
+      {ratings && (
+        <RatingsSection
+          offense={ratings.offensiveRating}
+          defense={ratings.matchupDefense}
+          twoWay={ratings.twoWayRating}
+          quality={ratings.quality}
+          details={ratings.details}
+        />
+      )}
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-card">

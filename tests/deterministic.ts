@@ -36,6 +36,7 @@ import "./historical-phase-final";
 import "./historical-privacy-migration";
 import "./seasons-layout-outlet";
 import "./career-advanced";
+import "./ratings";
 
 
 
