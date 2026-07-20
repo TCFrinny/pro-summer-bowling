@@ -312,5 +312,146 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
     "absent side must not emit personal rows");
 })();
 
+// ---------- audit-corrections regressions ----------
+
+// combineAliasRatings: two aliases with different sample sizes get
+// game-weighted correctly and sample counts sum exactly once.
+(function combineAliases() {
+  const aliases: BowlerRatings[] = [
+    {
+      personRef: "roster-x", offensiveRating: 110, matchupDefense: 105, twoWayRating: 108,
+      details: { actualGames: 15, opponentGames: 15, fullLinescoreGames: 15,
+        actualZ: 0, opponentZ: 0, offenseShrunkZ: 0, defenseShrunkZ: 0,
+        components: {} as never, opponentComponents: {} as never },
+    } as unknown as BowlerRatings,
+    {
+      personRef: "sub-x", offensiveRating: 90, matchupDefense: 95, twoWayRating: 92,
+      details: { actualGames: 3, opponentGames: 3, fullLinescoreGames: 0,
+        actualZ: 0, opponentZ: 0, offenseShrunkZ: 0, defenseShrunkZ: 0,
+        components: {} as never, opponentComponents: {} as never },
+    } as unknown as BowlerRatings,
+  ];
+  const c = combineAliasRatings(aliases);
+  assert(c != null, "combined result exists");
+  assert(c!.actualGames === 18, "actualGames summed once");
+  assert(c!.opponentGames === 18, "opponentGames summed once");
+  assert(c!.fullLinescoreGames === 15, "full linescore games summed once");
+  // Offense weighted mean = (110*15 + 90*3)/18 = (1650+270)/18 = 106.66..
+  assert(approx(c!.offense!, Number(((110 * 15 + 90 * 3) / 18).toFixed(1)), 1e-9),
+    "offense actual-game weighted");
+  assert(approx(c!.defense!, Number(((105 * 15 + 95 * 3) / 18).toFixed(1)), 1e-9),
+    "defense opponent-game weighted");
+
+  // Null propagation: no alias has a rating → null returned for that axis.
+  const nulls = combineAliasRatings([
+    { personRef: "a", offensiveRating: null, matchupDefense: null, twoWayRating: null,
+      details: { actualGames: 5, opponentGames: 5, fullLinescoreGames: 0 } } as unknown as BowlerRatings,
+  ]);
+  assert(nulls != null && nulls.offense === null && nulls.defense === null,
+    "null ratings propagate when no alias provides them");
+
+  assert(combineAliasRatings([]) === null, "empty aliases -> null");
+})();
+
+// careerRatingQuality: sample thresholds and evidence gates.
+(function careerQuality() {
+  // Not enough games -> Limited sample
+  const limited = { totals: { actualGames: 5, opponentGames: 5,
+    fullLinescoreGames: 0, seasonsOffense: 1, seasonsDefense: 1 } } as never;
+  assert(careerRatingQuality(limited) === "Limited sample",
+    "small career sample => Limited sample");
+  // Eligible but no frame linescore -> Score-based
+  const scoreOnly = { totals: { actualGames: 40, opponentGames: 40,
+    fullLinescoreGames: 0, seasonsOffense: 2, seasonsDefense: 2 } } as never;
+  assert(careerRatingQuality(scoreOnly) === "Score-based",
+    "eligible career, no frames => Score-based");
+  // Eligible + rich frame linescore -> Full
+  const full = { totals: { actualGames: 60, opponentGames: 60,
+    fullLinescoreGames: 30, seasonsOffense: 2, seasonsDefense: 2 } } as never;
+  assert(careerRatingQuality(full) === "Full",
+    "eligible frame-rich career => Full");
+})();
+
+// Canonical clutch marks override any conflicting naive interpretation:
+// pass a linescore game with a deliberately misleading marks string and
+// verify frameStatsFromLinescore reads segments.clutchMarks.
+(function canonicalClutch() {
+  // Build a minimal GameLinescore-shaped input.
+  const rolls = Array.from({ length: 10 }, () => [0, 0] as [number, number]);
+  const g = {
+    rolls,
+    frameScores: Array(10).fill(0),
+    total: 0,
+    segments: {
+      firstFive: 0, lastFive: 0,
+      strikes: 0, spares: 0, opens: 0,
+      cleanFrames: 0, marks: 0,
+      // deliberately conflict: naive count of "X"/"/" in a made-up mark
+      // string would be 3, but canonical segments.clutchMarks is 1.
+      clutchMarks: 1, clutchOpportunities: 2,
+      pinsLeftOnOpens: 0, isCleanGame: false,
+      marksString: "X/X",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const f = frameStatsFromLinescore(g as any);
+  assert(f.clutchMarks === 1 && f.clutchOpportunities === 2,
+    "frame stats read canonical clutchMarks, not marksString");
+})();
+
+// Source-level regression: public rating routes must import
+// useCurrentPublicSnapshot (from public-snapshot) and must NOT read
+// useLeagueSnapshot as their rating data source.
+(function ratingsSnapshotSource() {
+  const routes = [
+    "src/routes/bowlers.$bowlerId.tsx",
+    "src/routes/bowlers.sub.$substituteId.tsx",
+    "src/routes/statistics.tsx",
+    "src/routes/people.$personId.tsx",
+  ];
+  for (const path of routes) {
+    const src = readFileSync(path, "utf8");
+    assert(src.includes("useCurrentPublicSnapshot"),
+      `${path} must import useCurrentPublicSnapshot`);
+    assert(!/useLeagueSnapshot\s*\(/.test(src),
+      `${path} must not call useLeagueSnapshot() for rating data`);
+    assert(!src.includes('from "@/lib/league-store"'),
+      `${path} must not import from league-store`);
+  }
+})();
+
+// Hook-order regression for archived per-bowler route: no React hook may
+// appear textually AFTER the first conditional early return.
+(function archivedHookOrder() {
+  const path = "src/routes/seasons.$seasonId.bowlers.$participantRef.tsx";
+  const src = readFileSync(path, "utf8");
+  const fnStart = src.indexOf("function SeasonBowlerPage");
+  assert(fnStart > 0, "SeasonBowlerPage function found");
+  const body = src.slice(fnStart);
+  const firstReturn = body.search(/^\s*if\s*\([^\n]+\)\s*return/m);
+  assert(firstReturn > 0, "first conditional return found");
+  const afterReturn = body.slice(firstReturn);
+  assert(!/\buseMemo\s*\(/.test(afterReturn) &&
+         !/\buseState\s*\(/.test(afterReturn) &&
+         !/\buseQuery\s*\(/.test(afterReturn),
+    "no hooks may appear after the first conditional return");
+})();
+
+// Ratings math must not leak into scoring/snapshot/mock-data modules.
+(function ratingsIsolation() {
+  for (const path of [
+    "src/lib/snapshot-builder.server.ts",
+    "src/lib/mock-data.ts",
+    "src/lib/live-scoring.ts",
+    "src/lib/standings-rank.ts",
+  ]) {
+    const src = readFileSync(path, "utf8");
+    assert(!src.includes('from "@/lib/ratings"') && !src.includes("from './ratings'") && !src.includes('from "./ratings"'),
+      `${path} must not import from ratings`);
+  }
+})();
+
 // eslint-disable-next-line no-console
 console.log("ratings tests passed");
+
