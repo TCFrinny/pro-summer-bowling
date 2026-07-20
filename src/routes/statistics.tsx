@@ -7,11 +7,13 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useLeagueSnapshot, getLeagueState } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Trophy } from "lucide-react";
+import { computeSeasonRatings, leaderboardOffense, leaderboardDefense, leaderboardTwoWay, formatRating } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason } from "@/lib/ratings-extract";
 
 export const Route = createFileRoute("/statistics")({
   head: () => ({
