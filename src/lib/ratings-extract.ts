@@ -77,14 +77,18 @@ function projectSide(
 
 /** Build RatingGame rows from the CURRENT-season matches by week. Only
  *  completed weeks that are public should be passed in. Absent-side
- *  synthetic scores are excluded because we gate on `participation.status`. */
+ *  synthetic scores are excluded because we gate on `participation.status`.
+ *  When `publishedWeeks` is provided, weeks not in the set are skipped so
+ *  public callers cannot leak unpublished data. */
 export function ratingGamesFromCurrentSeason(
   seasonId: string,
   matchesByWeek: Record<number, Match[]>,
+  publishedWeeks?: ReadonlySet<number>,
 ): RatingGame[] {
   const rows: RatingGame[] = [];
   for (const [wkStr, matches] of Object.entries(matchesByWeek)) {
     const week = Number(wkStr);
+    if (publishedWeeks && !publishedWeeks.has(week)) continue;
     for (const m of matches) {
       if (m.status !== "completed" || !m.result) continue;
       const r: MatchResult = m.result;
