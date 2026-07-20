@@ -1,0 +1,244 @@
+/**
+ * Deterministic tests for the experimental ratings module. Runs via
+ * `bun run test:deterministic`. No RNG, no Supabase, no globals.
+ */
+import {
+  buildEnvironment, popStdev, zToRating, shrinkZ, twoWay,
+  computeSeasonRatings, computeCareerRatings,
+  leaderboardOffense, leaderboardDefense, leaderboardTwoWay,
+  type RatingGame, type RatingFrameStats,
+} from "../src/lib/ratings";
+import { readFileSync } from "node:fs";
+
+function assert(cond: unknown, msg: string): asserts cond {
+  if (!cond) throw new Error("ratings: " + msg);
+}
+function approx(a: number, b: number, eps = 1e-6): boolean {
+  return Math.abs(a - b) <= eps;
+}
+
+// ---------- helpers ----------
+const NO_FRAME: RatingFrameStats | undefined = undefined;
+function scoreGame(
+  person: string, opp: string | null, week: number, lane: string, score: number,
+  entryAverage: number | null = null, frame: RatingFrameStats | null = null,
+): RatingGame {
+  return { seasonId: "S", weekNumber: week, lanePair: lane, personRef: person,
+           opponentRef: opp, scratchScore: score,
+           entryAverage: entryAverage ?? undefined, frame: frame ?? NO_FRAME };
+}
+function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 2): RatingFrameStats {
+  return { framesRolled: 10, strikes, spares, opens, clutchMarks: cm, clutchOpportunities: co };
+}
+
+// ---------- 1) environment adjustment fallback ----------
+(function envFallback() {
+  // Build a season with a hot week+lane cell (6 games avg 180), season mean 100.
+  const rows: RatingGame[] = [];
+  // 20 baseline scores of 100 across various weeks/lanes
+  for (let i = 0; i < 20; i++) {
+    rows.push(scoreGame(`p${i}`, null, 2 + (i % 3), "3-4", 100));
+  }
+  // one specific cell wk1 lane 1-2 with 6 hot scores 180
+  for (let i = 0; i < 6; i++) rows.push(scoreGame(`h${i}`, null, 1, "1-2", 180));
+  const env = buildEnvironment(rows);
+  const before = 180;
+  const adjusted = env.adjust(scoreGame("hX", null, 1, "1-2", before));
+  // cell mean 180, season mean = (20*100 + 6*180)/26 = (2000+1080)/26 ≈ 118.46
+  const seasonMean = (20 * 100 + 6 * 180) / 26;
+  assert(approx(env.seasonMean, seasonMean), "season mean matches");
+  assert(approx(adjusted, before - (180 - seasonMean)), "wk+lane env adjust applied");
+
+  // If cell has <6 games, fall back to week; if week too, season.
+  const rows2: RatingGame[] = [];
+  for (let i = 0; i < 20; i++) rows2.push(scoreGame(`p${i}`, null, 1, "3-4", 100));
+  const env2 = buildEnvironment(rows2);
+  const adj2 = env2.adjust(scoreGame("x", null, 1, "9-10", 150));
+  // wk mean 100, season mean 100 → adj = 150-0 = 150
+  assert(approx(adj2, 150), "no adjustment when means equal");
+})();
+
+// ---------- 2) 100-centered standardization and zero-variance omission ----------
+(function standardization() {
+  // Everyone identical -> stdev 0 -> rating null (component omitted; nothing left → null).
+  const rows: RatingGame[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (let g = 0; g < 3; g++) rows.push(scoreGame(`p${i}`, `p${(i + 1) % 6}`, g + 1, "1-2", 100));
+  }
+  const res = computeSeasonRatings(rows);
+  for (const r of res) assert(r.offensiveRating == null, `zero-variance offense null for ${r.personRef}`);
+})();
+
+// ---------- 3) score-only offensive rating and Score-based badge ----------
+(function scoreOnly() {
+  const rows: RatingGame[] = [];
+  // 6 bowlers, 9 games each, varied scores, no frames
+  const skill = [80, 90, 100, 110, 120, 130];
+  for (let i = 0; i < 6; i++) {
+    for (let g = 0; g < 9; g++) {
+      rows.push(scoreGame(`p${i}`, `p${(i + 1) % 6}`, 1 + Math.floor(g / 3), `${g}-${g+1}`, skill[i] + (g % 3) * 5));
+    }
+  }
+  const res = computeSeasonRatings(rows);
+  const top = res.find((r) => r.personRef === "p5")!;
+  const bot = res.find((r) => r.personRef === "p0")!;
+  assert(top.offensiveRating != null && bot.offensiveRating != null, "both have score-only ratings");
+  assert(top.offensiveRating! > 100, "top scorer above 100");
+  assert(bot.offensiveRating! < 100, "bottom scorer below 100");
+  assert(top.quality === "Score-based" || top.quality === "Limited sample", "quality is score-based or limited");
+  // 9 games meets Full sample threshold; but no frames → Score-based
+  assert(top.quality === "Score-based", "9 actual games & no frames → Score-based");
+})();
+
+// ---------- 4) full-linescore inclusion and reweighting ----------
+(function fullLinescore() {
+  const rows: RatingGame[] = [];
+  // 6 bowlers, 9 full games. p5 dominates.
+  for (let i = 0; i < 6; i++) {
+    for (let g = 0; g < 9; g++) {
+      const s = 100 + i * 10;
+      rows.push(scoreGame(`p${i}`, `p${(i + 1) % 6}`, 1 + Math.floor(g / 3), `${g}-${g+1}`, s,
+        null, fullFrame(2 + i, 3, 5 - i, 1 + Math.floor(i / 3))));
+    }
+  }
+  const res = computeSeasonRatings(rows);
+  const top = res.find((r) => r.personRef === "p5")!;
+  assert(top.quality === "Full", "≥9 games with frames → Full");
+  assert(top.details.strikePct != null && top.details.openPct != null, "frame details populated");
+})();
+
+// ---------- 5) substitute personal attribution ----------
+(function subAttribution() {
+  // Two bowlers p1, p2 playing head-to-head. In one match, sub 'subX' rolls for p1.
+  // The substitute's personal offense must accrue to 'subX', not 'p1'.
+  const rows: RatingGame[] = [];
+  for (let w = 1; w <= 3; w++) {
+    rows.push(scoreGame("p1", "p2", w, "1-2", 100));
+    rows.push(scoreGame("p1", "p2", w, "1-2", 100));
+    rows.push(scoreGame("p1", "p2", w, "1-2", 100));
+    rows.push(scoreGame("p2", "p1", w, "1-2", 100));
+    rows.push(scoreGame("p2", "p1", w, "1-2", 100));
+    rows.push(scoreGame("p2", "p1", w, "1-2", 100));
+  }
+  // Week 4: sub rolls for p1, scoring 190 each game. p2 opponent is p2.
+  for (let g = 0; g < 3; g++) {
+    rows.push(scoreGame("subX", "p2", 4, "3-4", 190));
+    rows.push(scoreGame("p2", "subX", 4, "3-4", 110));
+  }
+  const res = computeSeasonRatings(rows);
+  const p1 = res.find((r) => r.personRef === "p1")!;
+  const sub = res.find((r) => r.personRef === "subX")!;
+  assert(p1.details.actualGames === 9, "p1 keeps 9 personal games (weeks 1-3 only)");
+  assert(sub.details.actualGames === 3, "sub receives 3 personal games");
+})();
+
+// ---------- 6) absent synthetic scores excluded (extractor concern) ----------
+// Enforced at extract time by projectSide; direct module test: rows never
+// contain absent-side entries. See ratings-extract.ts.
+
+// ---------- 7) opponent LOO baseline + entry-average fallback + season-mean ----------
+(function looBaseline() {
+  // p1 faces p2 (weak) and p3 (strong). p3's non-p1 games avg 200,
+  // vs p1 they scored 150. Expected suppression for p1 is positive.
+  const rows: RatingGame[] = [];
+  // p3 vs others 6 games at 200 (env-adjusted)
+  for (let w = 1; w <= 2; w++) {
+    for (let g = 0; g < 3; g++) {
+      rows.push(scoreGame("p3", "p4", w, "5-6", 200));
+      rows.push(scoreGame("p4", "p3", w, "5-6", 150));
+    }
+  }
+  // p1 vs p3 at week 3 — p3 scored only 150 (suppressed)
+  for (let g = 0; g < 3; g++) {
+    rows.push(scoreGame("p3", "p1", 3, "1-2", 150));
+    rows.push(scoreGame("p1", "p3", 3, "1-2", 150));
+  }
+  // Filler for pool eligibility
+  for (let i = 5; i < 12; i++) {
+    for (let g = 0; g < 3; g++) {
+      rows.push(scoreGame(`f${i}`, `f${i + 1}`, 1 + (g % 3), "7-8", 150));
+      rows.push(scoreGame(`f${i + 1}`, `f${i}`, 1 + (g % 3), "7-8", 150));
+    }
+  }
+  const res = computeSeasonRatings(rows);
+  const p1 = res.find((r) => r.personRef === "p1");
+  assert(p1?.details.opponentScoreSuppressionPerGame != null, "p1 has defense sample");
+  assert(p1!.details.opponentScoreSuppressionPerGame! > 0, "positive suppression when opp underperforms LOO baseline");
+})();
+
+// ---------- 8) reliability shrinkage + 50-150 cap ----------
+(function shrinkAndCap() {
+  assert(shrinkZ(4, 3) < 4, "shrink pulls toward 0 for small n");
+  assert(approx(shrinkZ(1, 9), 0.5), "n=9 shrinks by 0.5 exactly");
+  assert(zToRating(-10) === 50, "cap floor 50");
+  assert(zToRating(10) === 150, "cap ceiling 150");
+  assert(zToRating(0) === 100, "z=0 → 100");
+})();
+
+// ---------- 9) two-way 70/30 ----------
+(function twoWayMath() {
+  assert(twoWay(120, 100) === 114, "0.7*120+0.3*100 = 114");
+  assert(twoWay(120, null) == null, "unavailable defense → two-way null");
+  assert(twoWay(null, 120) == null, "unavailable offense → two-way null");
+})();
+
+// ---------- 10) career game-weighted, season-normalized ----------
+(function career() {
+  const c = computeCareerRatings("pp", [
+    { seasonId: "2025", offense: 120, defense: 110, actualGames: 20, opponentGames: 20, fullLinescoreGames: 20 },
+    { seasonId: "2024", offense: 100, defense: null, actualGames: 10, opponentGames: 10, fullLinescoreGames: 0 },
+  ]);
+  // offense = (120*20 + 100*10)/30 = (2400+1000)/30 = 113.333 → 113.3
+  assert(c.offensiveRating === 113.3, "career offense weighted");
+  assert(c.matchupDefense === 110, "defense only counts seasons with defense value");
+  assert(c.twoWayRating === twoWay(113.3, 110), "career two-way");
+})();
+
+// ---------- 11) leaderboard thresholds and stable ties ----------
+(function boards() {
+  const entries = [
+    { personRef: "A", displayName: "Alpha", offensiveRating: 120, matchupDefense: 100, twoWayRating: 114,
+      quality: "Full" as const, details: { actualGames: 6, opponentGames: 6, fullLinescoreGames: 6,
+      adjustedAverage: null, adjustedPinsPerGameVsLeague: null, strikePct: null, spareConversionPct: null,
+      openPct: null, clutchPct: null, opponentScoreSuppressionPerGame: null, opponentStrikeSuppressionPct: null,
+      opponentSpareConversionSuppressionPct: null, opponentOpenIncreasePct: null, opponentClutchSuppressionPct: null } },
+    { personRef: "B", displayName: "Bravo", offensiveRating: 120, matchupDefense: 100, twoWayRating: 114,
+      quality: "Full" as const, details: { actualGames: 10, opponentGames: 10, fullLinescoreGames: 10,
+      adjustedAverage: null, adjustedPinsPerGameVsLeague: null, strikePct: null, spareConversionPct: null,
+      openPct: null, clutchPct: null, opponentScoreSuppressionPerGame: null, opponentStrikeSuppressionPct: null,
+      opponentSpareConversionSuppressionPct: null, opponentOpenIncreasePct: null, opponentClutchSuppressionPct: null } },
+    { personRef: "C", displayName: "Charlie", offensiveRating: 90, matchupDefense: 90, twoWayRating: 90,
+      quality: "Full" as const, details: { actualGames: 3, opponentGames: 3, fullLinescoreGames: 3,
+      adjustedAverage: null, adjustedPinsPerGameVsLeague: null, strikePct: null, spareConversionPct: null,
+      openPct: null, clutchPct: null, opponentScoreSuppressionPerGame: null, opponentStrikeSuppressionPct: null,
+      opponentSpareConversionSuppressionPct: null, opponentOpenIncreasePct: null, opponentClutchSuppressionPct: null } },
+  ];
+  const off = leaderboardOffense(entries);
+  assert(off.length === 2 && off[0].personRef === "B", "larger sample tiebreak wins");
+  const def = leaderboardDefense(entries);
+  assert(def.length === 2, "excludes <6 opponent games");
+  const tw = leaderboardTwoWay(entries);
+  assert(tw.length === 2 && tw[0].personRef === "B", "two-way tiebreak by min sample size");
+})();
+
+// ---------- 12) source-level regression: current 2026 standings paths unmodified ----------
+(function sourceRegression() {
+  const buildSnapshot = readFileSync("src/lib/snapshot-builder.server.ts", "utf-8");
+  assert(!/ratings\.ts/.test(buildSnapshot) && !/from ["']\.\/ratings/.test(buildSnapshot),
+    "snapshot-builder.server.ts must not import the experimental ratings module");
+  const mock = readFileSync("src/lib/mock-data.ts", "utf-8");
+  assert(!/from ["']\.\/ratings["']/.test(mock),
+    "mock-data.ts must not import ratings module");
+  const rr = readFileSync("src/lib/season-history.ts", "utf-8");
+  assert(!/from ["']\.\/ratings["']/.test(rr),
+    "season-history.ts must not import ratings module");
+})();
+
+// ---------- 13) sanity: popStdev / mean ----------
+(function statsHelpers() {
+  assert(approx(popStdev([1, 1, 1]), 0), "zero variance");
+  assert(approx(popStdev([0, 10]), 5), "population stdev for [0,10]");
+})();
+
+// eslint-disable-next-line no-console
+console.log("ratings tests passed");
