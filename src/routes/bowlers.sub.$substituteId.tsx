@@ -131,6 +131,18 @@ function SubstituteProfilePage() {
         />
       </div>
 
+      {rating && (
+        <RatingsSection
+          offense={rating.offensiveRating}
+          defense={rating.matchupDefense}
+          twoWay={rating.twoWayRating}
+          quality={rating.quality}
+          details={rating.details}
+        />
+      )}
+
+
+
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-card">
           <CardHeader>
