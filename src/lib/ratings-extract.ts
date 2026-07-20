@@ -132,22 +132,18 @@ export function ratingGamesFromCurrentSeason(
   return rows;
 }
 
-/** Return the ACTUAL person ref for a historical match side — substitute
- *  attribution follows the actual person, falling back to permanent
- *  person id via the participants lookup when available. */
-function historicalPersonRef(
-  snap: HistoricalSnapshot,
-  ref: string,
-): string {
-  const p = snap.participants.find((pp) => pp.ref === ref);
-  return p?.personId ?? ref;
-}
-
 /** Build RatingGame rows from a PUBLIC filtered historical snapshot.
  *  Snapshot is already filtered to published weeks by the loader; we
  *  additionally gate on `hasGameData` and `!absent`. FULL_LINESCORE rows
  *  contribute frame stats; GAME_SCORES rows contribute score-only rows;
- *  SUMMARY_ONLY seasons have no matches to iterate. */
+ *  SUMMARY_ONLY seasons have no matches to iterate.
+ *
+ *  IDENTITY: historical rows are keyed by the SEASON participant ref
+ *  (`m.actualA` / `m.actualB`) — not permanent person ids — so that
+ *  archived per-participant lookups (`/seasons/$seasonId/bowlers/$participantRef`)
+ *  resolve. Career aggregation upstream collects every participantRef
+ *  linked to the same permanent person.
+ */
 export function ratingGamesFromHistoricalSnapshot(snap: HistoricalSnapshot): RatingGame[] {
   const rows: RatingGame[] = [];
   for (const wk of snap.weeks) {
@@ -162,7 +158,7 @@ export function ratingGamesFromHistoricalSnapshot(snap: HistoricalSnapshot): Rat
 
 function pushHistoricalSide(
   rows: RatingGame[],
-  snap: HistoricalSnapshot,
+  _snap: HistoricalSnapshot,
   m: HistoricalMatch,
   side: "A" | "B",
 ): void {
@@ -174,15 +170,15 @@ function pushHistoricalSide(
   const games = side === "A" ? m.scratchGamesA : m.scratchGamesB;
   if (!games) return;
   const ls = side === "A" ? m.linescoreA : m.linescoreB;
-  const personRef = historicalPersonRef(snap, side === "A" ? m.actualA : m.actualB);
+  const personRef = side === "A" ? m.actualA : m.actualB;
   const opponentRef = (oppAbsent || !oppHas)
     ? null
-    : historicalPersonRef(snap, side === "A" ? m.actualB : m.actualA);
+    : (side === "A" ? m.actualB : m.actualA);
   const entryAverage = side === "A" ? m.entryAverageA : m.entryAverageB;
   for (let i = 0; i < 3; i++) {
-    if (games[i] == null || games[i] === 0) continue;
+    if (games[i] == null) continue;
     rows.push({
-      seasonId: snap.seasonId,
+      seasonId: _snap.seasonId,
       weekNumber: m.weekNumber,
       lanePair: m.lanePair,
       personRef,
@@ -193,3 +189,4 @@ function pushHistoricalSide(
     });
   }
 }
+
