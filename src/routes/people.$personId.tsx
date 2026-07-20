@@ -124,7 +124,7 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
       const gCount = contribs.reduce((a, c) => a + c.details.actualGames, 0);
       const oCount = contribs.reduce((a, c) => a + c.details.opponentGames, 0);
       const fCount = contribs.reduce((a, c) => a + c.details.fullLinescoreGames, 0);
-      if (gCount > 0) out.push({ seasonId: seasonIds[idx], seasonLabel: snap.season?.label,
+      if (gCount > 0) out.push({ seasonId: seasonIds[idx], seasonLabel: snap.seasonLabel,
         offense: off, defense: def, actualGames: gCount, opponentGames: oCount, fullLinescoreGames: fCount });
     });
     return out;
@@ -136,7 +136,6 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
       offense={career.offensiveRating}
       defense={career.matchupDefense}
       twoWay={career.twoWayRating}
-      quality={career.quality}
       careerContributions={career.contributions}
     />
   );
