@@ -38,7 +38,16 @@ function SeasonBowlerPage() {
     queryKey: ["seasons", "public", "historical-snapshot", seasonId],
     queryFn: () => getPublicHistoricalSnapshot({ data: { seasonId } }),
   });
-  const snap = q.data?.snapshot;
+  const snap = q.data?.snapshot ?? null;
+  // Hooks must run in the same order on every render — compute BEFORE any
+  // conditional return. `useMemo` returns null when the snapshot is not yet
+  // loaded so the following render bails out safely.
+  const rating = useMemo(() => {
+    if (!snap) return null;
+    const rows = ratingGamesFromHistoricalSnapshot(snap);
+    return computeSeasonRatings(rows).find((r) => r.personRef === participantRef) ?? null;
+  }, [snap, participantRef]);
+
   if (!snap) return <EmptyState title="Not available" description="No cached snapshot for this season." />;
   const p = snap.participants.find((x) => x.ref === participantRef);
   const s = snap.standings.find((x) => x.participantRef === participantRef);
@@ -54,12 +63,8 @@ function SeasonBowlerPage() {
       .map((m) => ({ w, m })),
   );
 
-  const rating = useMemo(() => {
-    const rows = ratingGamesFromHistoricalSnapshot(snap);
-    return computeSeasonRatings(rows).find((r) => r.personRef === participantRef) ?? null;
-  }, [snap, participantRef]);
-
   const adv = personal?.advanced ?? null;
+
   return (
     <div className="space-y-4">
       <header className="flex items-baseline justify-between">
