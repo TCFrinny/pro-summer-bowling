@@ -56,16 +56,17 @@ export const Route = createFileRoute("/bowlers/$bowlerId")({
 });
 
 function BowlerProfile() {
-  useLeagueSnapshot();
+  const snap = useLeagueSnapshot();
   const { bowler } = Route.useLoaderData();
   const history = getBowlerHistory(bowler.id);
   const extras = getBowlerSeasonExtras(bowler.id);
   const maxUsage = Math.max(1, ...extras.lanePairUsage.map((u) => u.count));
   const ratings = useMemo(() => {
-    const rows = ratingGamesFromCurrentSeason("current", getLeagueState().db.matchesByWeek);
+    const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
+    const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     const all = computeSeasonRatings(rows);
     return all.find((r) => r.personRef === bowler.id) ?? null;
-  }, [bowler.id]);
+  }, [bowler.id, snap]);
 
   return (
     <AppShell>
