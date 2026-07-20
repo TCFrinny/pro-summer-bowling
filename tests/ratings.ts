@@ -421,22 +421,27 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
   }
 })();
 
-// Hook-order regression for archived per-bowler route: no React hook may
-// appear textually AFTER the first conditional early return.
+// Hook-order regression for archived per-bowler route: within the
+// SeasonBowlerPage function body, no React hook may appear textually AFTER
+// the first conditional early return.
 (function archivedHookOrder() {
   const path = "src/routes/seasons.$seasonId.bowlers.$participantRef.tsx";
   const src = readFileSync(path, "utf8");
   const fnStart = src.indexOf("function SeasonBowlerPage");
   assert(fnStart > 0, "SeasonBowlerPage function found");
-  const body = src.slice(fnStart);
+  // Body ends at the next top-level `function ` declaration.
+  const rest = src.slice(fnStart + 1);
+  const nextFn = rest.indexOf("\nfunction ");
+  const body = nextFn > 0 ? src.slice(fnStart, fnStart + 1 + nextFn) : src.slice(fnStart);
   const firstReturn = body.search(/^\s*if\s*\([^\n]+\)\s*return/m);
   assert(firstReturn > 0, "first conditional return found");
   const afterReturn = body.slice(firstReturn);
   assert(!/\buseMemo\s*\(/.test(afterReturn) &&
          !/\buseState\s*\(/.test(afterReturn) &&
          !/\buseQuery\s*\(/.test(afterReturn),
-    "no hooks may appear after the first conditional return");
+    "no hooks may appear after the first conditional return in SeasonBowlerPage");
 })();
+
 
 // Ratings math must not leak into scoring/snapshot/mock-data modules.
 (function ratingsIsolation() {
