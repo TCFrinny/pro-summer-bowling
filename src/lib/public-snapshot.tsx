@@ -114,6 +114,7 @@ export const snapshotQueryOptions = queryOptions({
 export function useSnapshotRealtime(): void {
   const queryClient = useQueryClient();
   useEffect(() => {
+
     const channel = supabase
       .channel("public-snapshots")
       .on(
