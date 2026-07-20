@@ -6,9 +6,12 @@ import {
   buildEnvironment, popStdev, zToRating, shrinkZ, twoWay,
   computeSeasonRatings, computeCareerRatings,
   leaderboardOffense, leaderboardDefense, leaderboardTwoWay,
-  type RatingGame, type RatingFrameStats,
+  careerRatingQuality, combineAliasRatings,
+  type RatingGame, type RatingFrameStats, type BowlerRatings,
 } from "../src/lib/ratings";
+import { frameStatsFromLinescore } from "../src/lib/ratings-extract";
 import { readFileSync } from "node:fs";
+
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error("ratings: " + msg);
