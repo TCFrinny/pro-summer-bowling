@@ -375,18 +375,18 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
 // pass a linescore game with a deliberately misleading marks string and
 // verify frameStatsFromLinescore reads segments.clutchMarks.
 (function canonicalClutch() {
-  // Build a minimal GameLinescore-shaped input.
-  const rolls = Array.from({ length: 10 }, () => [0, 0] as [number, number]);
+  const frames = Array.from({ length: 10 }, () => ({
+    rolls: [0, 0], marks: "--", frameScore: 0, cumulative: 0,
+  }));
   const g = {
-    rolls,
-    frameScores: Array(10).fill(0),
+    frames,
     total: 0,
     segments: {
       firstFive: 0, lastFive: 0,
       strikes: 0, spares: 0, opens: 0,
       cleanFrames: 0, marks: 0,
-      // deliberately conflict: naive count of "X"/"/" in a made-up mark
-      // string would be 3, but canonical segments.clutchMarks is 1.
+      // deliberately conflict: naive count of "X"/"/" would be 3, but
+      // canonical segments.clutchMarks is 1.
       clutchMarks: 1, clutchOpportunities: 2,
       pinsLeftOnOpens: 0, isCleanGame: false,
       marksString: "X/X",
@@ -398,6 +398,7 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
   assert(f.clutchMarks === 1 && f.clutchOpportunities === 2,
     "frame stats read canonical clutchMarks, not marksString");
 })();
+
 
 // Source-level regression: public rating routes must import
 // useCurrentPublicSnapshot (from public-snapshot) and must NOT read
