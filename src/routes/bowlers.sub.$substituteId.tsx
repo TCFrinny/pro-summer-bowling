@@ -49,9 +49,15 @@ export const Route = createFileRoute("/bowlers/sub/$substituteId")({
 });
 
 function SubstituteProfilePage() {
-  useLeagueSnapshot();
+  const snap = useLeagueSnapshot();
   const { profile } = Route.useLoaderData() as { profile: SubstituteProfile };
   const maxUsage = Math.max(1, ...profile.lanePairUsage.map((u: { count: number }) => u.count));
+  const rating = useMemo(() => {
+    const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
+    const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
+    return computeSeasonRatings(rows).find((r) => r.personRef === profile.id) ?? null;
+  }, [profile.id, snap]);
+
 
   return (
     <AppShell>
