@@ -17,9 +17,11 @@ import {
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
 import { RatingsSection } from "@/components/ratings/RatingsSection";
-import { computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
-import { ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
+import { careerRatingQuality, computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason, ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
+import { useLeagueSnapshot } from "@/lib/league-store";
 import { useMemo } from "react";
+
 
 
 export const Route = createFileRoute("/people/$personId")({
