@@ -797,6 +797,55 @@ export function computeCareerRatings(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Multi-alias combination within a single already-normalized season
+// ---------------------------------------------------------------------------
+
+/**
+ * Combine several `BowlerRatings` rows for aliases that belong to the SAME
+ * person within a SINGLE season (e.g. a person appearing as a rostered
+ * bowler AND as a substitute in the same season, or multiple archived
+ * participantRefs linked to one permanent person). All rows must come from
+ * the SAME `computeSeasonRatings(rows)` call so ratings share one
+ * environment. Returns `null` when no alias rows exist.
+ *
+ * - offense = actual-game-weighted mean of available alias offense ratings
+ * - defense = opponent-game-weighted mean of available alias defense ratings
+ * - sample counts sum exactly once (no double counting)
+ * - unavailable rating stays null if no alias provides it
+ */
+export function combineAliasRatings(
+  aliases: readonly BowlerRatings[],
+): CareerSeasonContribution | null {
+  if (aliases.length === 0) return null;
+  let offNum = 0, offDen = 0;
+  let defNum = 0, defDen = 0;
+  let actual = 0, opp = 0, full = 0;
+  for (const a of aliases) {
+    actual += a.details.actualGames;
+    opp += a.details.opponentGames;
+    full += a.details.fullLinescoreGames;
+    if (a.offensiveRating != null && a.details.actualGames > 0) {
+      offNum += a.offensiveRating * a.details.actualGames;
+      offDen += a.details.actualGames;
+    }
+    if (a.matchupDefense != null && a.details.opponentGames > 0) {
+      defNum += a.matchupDefense * a.details.opponentGames;
+      defDen += a.details.opponentGames;
+    }
+  }
+  if (actual === 0 && opp === 0) return null;
+  return {
+    seasonId: "",
+    offense: offDen > 0 ? Number((offNum / offDen).toFixed(1)) : null,
+    defense: defDen > 0 ? Number((defNum / defDen).toFixed(1)) : null,
+    actualGames: actual,
+    opponentGames: opp,
+    fullLinescoreGames: full,
+  };
+}
+
+
 /** Career-level quality label derived from aggregate contributions.
  *  - `Limited sample` when total actual games < 9 or no rating available.
  *  - `Full` when every contribution that produced an offense rating used
