@@ -107,9 +107,24 @@ export const snapshotQueryOptions = queryOptions({
   staleTime: 5 * 60_000,
 });
 
+/**
+ * Subscribed accessor for the current-season PUBLIC snapshot (the real
+ * Supabase row installed by `snapshotQueryOptions`). Returns `null` while
+ * the snapshot is unavailable — DO NOT fall back to `getLeagueState()` or
+ * `useLeagueSnapshot()` for anything shown to public users, including
+ * rating calculations. Public routes already run under `PublicSnapshotGate`,
+ * so this normally reads the cached DB result without a new network fetch.
+ */
+export function useCurrentPublicSnapshot(): PublicSnapshot | null {
+  const { data } = useQuery(snapshotQueryOptions);
+  return data ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Realtime subscription (root-level, single instance)
 // ---------------------------------------------------------------------------
+
+
 
 export function useSnapshotRealtime(): void {
   const queryClient = useQueryClient();
