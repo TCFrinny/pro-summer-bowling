@@ -7,7 +7,7 @@ interface Props {
   offense: number | null;
   defense: number | null;
   twoWay: number | null;
-  quality?: BowlerRatings["quality"];
+  quality: BowlerRatings["quality"];
   details?: BowlerRatings["details"];
   careerContributions?: CareerRatings["contributions"];
 }
@@ -24,8 +24,9 @@ export function RatingsSection(props: Props) {
           Offense &amp; Matchup Defense
           <span className="ml-2 text-xs uppercase tracking-widest text-muted-foreground">Experimental</span>
         </h2>
-        <QualityBadge value={quality ?? (offense != null || defense != null ? "Full" : "Limited sample")} />
+        <QualityBadge value={quality} />
       </header>
+
 
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
         <RatingCard label="Offensive Rating" value={offense} accent />

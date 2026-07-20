@@ -141,20 +141,24 @@ function StatisticsPage() {
   const ratings = useMemo(() => {
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const games = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
+    const subs = snap.substitutes ?? [];
+    const roleOf = (id: string): "rostered" | "sub" | "unknown" => {
+      if (snap.bowlersById[id]) return "rostered";
+      if (subs.some((s) => s.id === id)) return "sub";
+      return "unknown";
+    };
     const nameOf = (id: string) =>
-      snap.bowlersById[id]?.name
-      ?? snap.substitutes?.find((s) => s.id === id)?.name
-      ?? id;
-    const base = computeSeasonRatings(games).map((r) => ({
-      ...r,
-      displayName: nameOf(r.personRef),
-    }));
+      snap.bowlersById[id]?.name ?? subs.find((s) => s.id === id)?.name ?? id;
+    const base = computeSeasonRatings(games)
+      .filter((r) => roleOf(r.personRef) !== "unknown")
+      .map((r) => ({ ...r, displayName: nameOf(r.personRef) }));
     return {
-      offense: leaderboardOffense(base).slice(0, 10),
-      defense: leaderboardDefense(base).slice(0, 10),
-      twoWay: leaderboardTwoWay(base).slice(0, 10),
+      offense: leaderboardOffense(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
+      defense: leaderboardDefense(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
+      twoWay: leaderboardTwoWay(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
     };
   }, [snap]);
+
 
   return (
     <AppShell>
@@ -252,13 +256,14 @@ function StatisticsPage() {
           </h2>
         </header>
         <div className="grid gap-3 md:grid-cols-3">
-          <RatingBoard title="Offense" rows={ratings.offense.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.offensiveRating!, sample: r.details.actualGames }))} />
-          <RatingBoard title="Matchup Defense" rows={ratings.defense.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
-          <RatingBoard title="Two-Way" rows={ratings.twoWay.map((r) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
+          <RatingBoard title="Offense" rows={ratings.offense.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.offensiveRating!, sample: r.details.actualGames }))} />
+          <RatingBoard title="Matchup Defense" rows={ratings.defense.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
+          <RatingBoard title="Two-Way" rows={ratings.twoWay.map(({ r, role }) => ({
+            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
         </div>
+
         <p className="mt-2 text-[11px] text-muted-foreground">
           Ratings are centered at 100 (season average); ± scale ≈ 15 = 1 standard
           deviation. Requires ≥6 games for offense, ≥6 opponent games for defense.
@@ -287,7 +292,7 @@ function formatSigned(n: number): string {
 }
 
 function RatingBoard({ title, rows }: {
-  title: string; rows: Array<{ id: string; name: string; value: number; sample: number }>;
+  title: string; rows: Array<{ id: string; name: string; role: "rostered" | "sub" | "unknown"; value: number; sample: number }>;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -300,7 +305,13 @@ function RatingBoard({ title, rows }: {
             <li key={r.id} className="flex items-center justify-between px-3 py-1.5">
               <span>
                 <span className="mr-2 text-muted-foreground">{i + 1}.</span>
-                <Link to="/bowlers/$bowlerId" params={{ bowlerId: r.id }} className="underline">{r.name}</Link>
+                {r.role === "sub" ? (
+                  <Link to="/bowlers/sub/$substituteId" params={{ substituteId: r.id }} className="underline">{r.name}</Link>
+                ) : r.role === "rostered" ? (
+                  <Link to="/bowlers/$bowlerId" params={{ bowlerId: r.id }} className="underline">{r.name}</Link>
+                ) : (
+                  <span>{r.name}</span>
+                )}
                 <span className="ml-2 text-[10px] text-muted-foreground">{r.sample}g</span>
               </span>
               <span className="font-mono tabular-nums">{formatRating(r.value)}</span>
@@ -311,4 +322,5 @@ function RatingBoard({ title, rows }: {
     </div>
   );
 }
+
 

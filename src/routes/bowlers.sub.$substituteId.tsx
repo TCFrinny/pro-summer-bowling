@@ -4,9 +4,13 @@ import { getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
 import type { SubstituteProfile, SubstituteWeekRow } from "@/lib/substitute-profiles";
+import { RatingsSection } from "@/components/ratings/RatingsSection";
+import { computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason } from "@/lib/ratings-extract";
+
 
 export const Route = createFileRoute("/bowlers/sub/$substituteId")({
   loader: ({ params }) => {
@@ -45,9 +49,15 @@ export const Route = createFileRoute("/bowlers/sub/$substituteId")({
 });
 
 function SubstituteProfilePage() {
-  useLeagueSnapshot();
+  const snap = useLeagueSnapshot();
   const { profile } = Route.useLoaderData() as { profile: SubstituteProfile };
   const maxUsage = Math.max(1, ...profile.lanePairUsage.map((u: { count: number }) => u.count));
+  const rating = useMemo(() => {
+    const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
+    const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
+    return computeSeasonRatings(rows).find((r) => r.personRef === profile.id) ?? null;
+  }, [profile.id, snap]);
+
 
   return (
     <AppShell>
@@ -120,6 +130,18 @@ function SubstituteProfilePage() {
           value={`${profile.clutchPct.toFixed(1)}% (${profile.clutchMarks}/${profile.clutchOpportunities})`}
         />
       </div>
+
+      {rating && (
+        <RatingsSection
+          offense={rating.offensiveRating}
+          defense={rating.matchupDefense}
+          twoWay={rating.twoWayRating}
+          quality={rating.quality}
+          details={rating.details}
+        />
+      )}
+
+
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2 bg-card">
