@@ -138,12 +138,27 @@ function StatisticsPage() {
     [rows, activeMetric],
   );
 
+  const ratings = useMemo(() => {
+    const games = ratingGamesFromCurrentSeason("current", getLeagueState().db.matchesByWeek);
+    const base = computeSeasonRatings(games).map((r) => ({
+      ...r,
+      displayName: BOWLERS.find((b) => b.id === r.personRef)?.name ?? r.personRef,
+    }));
+    return {
+      offense: leaderboardOffense(base).slice(0, 10),
+      defense: leaderboardDefense(base).slice(0, 10),
+      twoWay: leaderboardTwoWay(base).slice(0, 10),
+    };
+  }, []);
+
   return (
     <AppShell>
       <PageHeader
         title="Statistics"
         subtitle="Season leaders and sortable tables — derived once from saved match linescores, not recomputed on load."
       />
+
+
 
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
         {METRICS.slice(0, 5).map((m) => {
