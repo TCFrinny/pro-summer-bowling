@@ -7,7 +7,7 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -115,7 +115,7 @@ const METRICS: MetricDef[] = [
 ];
 
 function StatisticsPage() {
-  const snap = useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
+  const snap = useCurrentPublicSnapshot();
   // Derive once from linescores — no per-render recomputation across the season.
   const rows: StatRow[] = useMemo(
     () =>
@@ -139,6 +139,7 @@ function StatisticsPage() {
   );
 
   const ratings = useMemo(() => {
+    if (!snap) return null;
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const games = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     const subs = snap.substitutes ?? [];
@@ -158,6 +159,7 @@ function StatisticsPage() {
       twoWay: leaderboardTwoWay(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
     };
   }, [snap]);
+
 
 
   return (
@@ -255,14 +257,19 @@ function StatisticsPage() {
             <span className="ml-2 text-xs uppercase tracking-widest text-muted-foreground">Experimental</span>
           </h2>
         </header>
-        <div className="grid gap-3 md:grid-cols-3">
-          <RatingBoard title="Offense" rows={ratings.offense.map(({ r, role }) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.offensiveRating!, sample: r.details.actualGames }))} />
-          <RatingBoard title="Matchup Defense" rows={ratings.defense.map(({ r, role }) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
-          <RatingBoard title="Two-Way" rows={ratings.twoWay.map(({ r, role }) => ({
-            id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
-        </div>
+        {ratings ? (
+          <div className="grid gap-3 md:grid-cols-3">
+            <RatingBoard title="Offense" rows={ratings.offense.map(({ r, role }) => ({
+              id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.offensiveRating!, sample: r.details.actualGames }))} />
+            <RatingBoard title="Matchup Defense" rows={ratings.defense.map(({ r, role }) => ({
+              id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.matchupDefense!, sample: r.details.opponentGames }))} />
+            <RatingBoard title="Two-Way" rows={ratings.twoWay.map(({ r, role }) => ({
+              id: r.personRef, name: r.displayName ?? r.personRef, role, value: r.twoWayRating!, sample: Math.min(r.details.actualGames, r.details.opponentGames) }))} />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Loading public snapshot…</p>
+        )}
+
 
         <p className="mt-2 text-[11px] text-muted-foreground">
           Ratings are centered at 100 (season average); ± scale ≈ 15 = 1 standard

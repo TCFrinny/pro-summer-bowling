@@ -8,7 +8,7 @@ import {
   getBowlerSeasonExtras,
   type BowlerHistoryRow,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -56,17 +56,19 @@ export const Route = createFileRoute("/bowlers/$bowlerId")({
 });
 
 function BowlerProfile() {
-  const snap = useLeagueSnapshot();
+  const snap = useCurrentPublicSnapshot();
   const { bowler } = Route.useLoaderData();
   const history = getBowlerHistory(bowler.id);
   const extras = getBowlerSeasonExtras(bowler.id);
   const maxUsage = Math.max(1, ...extras.lanePairUsage.map((u) => u.count));
   const ratings = useMemo(() => {
+    if (!snap) return null;
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     const all = computeSeasonRatings(rows);
     return all.find((r) => r.personRef === bowler.id) ?? null;
   }, [bowler.id, snap]);
+
 
   return (
     <AppShell>

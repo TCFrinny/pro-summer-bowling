@@ -17,10 +17,11 @@ import {
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
 import { RatingsSection } from "@/components/ratings/RatingsSection";
-import { careerRatingQuality, computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
+import { careerRatingQuality, combineAliasRatings, computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
 import { ratingGamesFromCurrentSeason, ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { useMemo } from "react";
+
 
 
 
@@ -93,7 +94,7 @@ function PersonPage() {
  *  ratings, then aggregate a game-weighted career rating for this permanent
  *  person. Uses the same public snapshot loader as archived pages. */
 function CareerRatingsPanel({ personId }: { personId: string }) {
-  const snap = useLeagueSnapshot();
+  const snap = useCurrentPublicSnapshot();
   const hist = useQuery({
     queryKey: ["people", "career-historical", personId],
     queryFn: () => getHistoricalCareerContributions({ data: { personId } }),
@@ -110,6 +111,7 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
     })),
   });
   const currentContribution = useMemo(() => {
+    if (!snap) return null;
     const refs = new Set<string>();
     for (const b of snap.bowlers) if (b.personId === personId) refs.add(b.id);
     for (const s of snap.substitutes ?? []) if (s.personId === personId) refs.add(s.id);
@@ -118,29 +120,9 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
     const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     const all = computeSeasonRatings(rows);
     const contribs = all.filter((r) => refs.has(r.personRef));
-    if (contribs.length === 0) return null;
-    let offN = 0, offD = 0, defN = 0, defD = 0, act = 0, opp = 0, full = 0;
-    for (const c of contribs) {
-      act += c.details.actualGames;
-      opp += c.details.opponentGames;
-      full += c.details.fullLinescoreGames;
-      if (c.offensiveRating != null && c.details.actualGames > 0) {
-        offN += c.offensiveRating * c.details.actualGames; offD += c.details.actualGames;
-      }
-      if (c.matchupDefense != null && c.details.opponentGames > 0) {
-        defN += c.matchupDefense * c.details.opponentGames; defD += c.details.opponentGames;
-      }
-    }
-    if (act === 0) return null;
-    return {
-      seasonId: "current",
-      seasonLabel: "2026 Summer",
-      offense: offD > 0 ? Number((offN / offD).toFixed(1)) : null,
-      defense: defD > 0 ? Number((defN / defD).toFixed(1)) : null,
-      actualGames: act,
-      opponentGames: opp,
-      fullLinescoreGames: full,
-    };
+    const combined = combineAliasRatings(contribs);
+    if (!combined || combined.actualGames === 0) return null;
+    return { ...combined, seasonId: "current", seasonLabel: "2026 Summer" };
   }, [snap, personId]);
   const perSeason = useMemo(() => {
     const out: Array<{ seasonId: string; seasonLabel?: string; offense: number | null;
@@ -154,13 +136,10 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
       const refs = new Set<string>();
       for (const p of s.participants) if (p.personId === personId) refs.add(p.ref);
       const contribs = all.filter((r) => refs.has(r.personRef));
-      const off = contribs.find((c) => c.offensiveRating != null)?.offensiveRating ?? null;
-      const def = contribs.find((c) => c.matchupDefense != null)?.matchupDefense ?? null;
-      const gCount = contribs.reduce((a, c) => a + c.details.actualGames, 0);
-      const oCount = contribs.reduce((a, c) => a + c.details.opponentGames, 0);
-      const fCount = contribs.reduce((a, c) => a + c.details.fullLinescoreGames, 0);
-      if (gCount > 0) out.push({ seasonId: seasonIds[idx], seasonLabel: s.seasonLabel,
-        offense: off, defense: def, actualGames: gCount, opponentGames: oCount, fullLinescoreGames: fCount });
+      const combined = combineAliasRatings(contribs);
+      if (combined && combined.actualGames > 0) {
+        out.push({ ...combined, seasonId: seasonIds[idx], seasonLabel: s.seasonLabel });
+      }
     });
     return out;
   }, [snapshots, personId, seasonIds, currentContribution]);
@@ -168,6 +147,7 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
   const career = computeCareerRatings(personId, perSeason);
   return (
     <RatingsSection
+
       offense={career.offensiveRating}
       defense={career.matchupDefense}
       twoWay={career.twoWayRating}

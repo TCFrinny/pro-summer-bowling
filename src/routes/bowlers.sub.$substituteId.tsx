@@ -1,7 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -49,14 +49,16 @@ export const Route = createFileRoute("/bowlers/sub/$substituteId")({
 });
 
 function SubstituteProfilePage() {
-  const snap = useLeagueSnapshot();
+  const snap = useCurrentPublicSnapshot();
   const { profile } = Route.useLoaderData() as { profile: SubstituteProfile };
   const maxUsage = Math.max(1, ...profile.lanePairUsage.map((u: { count: number }) => u.count));
   const rating = useMemo(() => {
+    if (!snap) return null;
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const rows = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     return computeSeasonRatings(rows).find((r) => r.personRef === profile.id) ?? null;
   }, [profile.id, snap]);
+
 
 
   return (
