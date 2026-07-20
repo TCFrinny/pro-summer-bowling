@@ -4,9 +4,13 @@ import { getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-data";
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronDown, ChevronLeft, ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ThreeGameLinescore } from "@/components/linescore/ThreeGameLinescore";
 import type { SubstituteProfile, SubstituteWeekRow } from "@/lib/substitute-profiles";
+import { RatingsSection } from "@/components/ratings/RatingsSection";
+import { computeSeasonRatings } from "@/lib/ratings";
+import { ratingGamesFromCurrentSeason } from "@/lib/ratings-extract";
+
 
 export const Route = createFileRoute("/bowlers/sub/$substituteId")({
   loader: ({ params }) => {
