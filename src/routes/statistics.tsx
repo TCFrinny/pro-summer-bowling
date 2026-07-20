@@ -141,20 +141,24 @@ function StatisticsPage() {
   const ratings = useMemo(() => {
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const games = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
+    const subs = snap.substitutes ?? [];
+    const roleOf = (id: string): "rostered" | "sub" | "unknown" => {
+      if (snap.bowlersById[id]) return "rostered";
+      if (subs.some((s) => s.id === id)) return "sub";
+      return "unknown";
+    };
     const nameOf = (id: string) =>
-      snap.bowlersById[id]?.name
-      ?? snap.substitutes?.find((s) => s.id === id)?.name
-      ?? id;
-    const base = computeSeasonRatings(games).map((r) => ({
-      ...r,
-      displayName: nameOf(r.personRef),
-    }));
+      snap.bowlersById[id]?.name ?? subs.find((s) => s.id === id)?.name ?? id;
+    const base = computeSeasonRatings(games)
+      .filter((r) => roleOf(r.personRef) !== "unknown")
+      .map((r) => ({ ...r, displayName: nameOf(r.personRef) }));
     return {
-      offense: leaderboardOffense(base).slice(0, 10),
-      defense: leaderboardDefense(base).slice(0, 10),
-      twoWay: leaderboardTwoWay(base).slice(0, 10),
+      offense: leaderboardOffense(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
+      defense: leaderboardDefense(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
+      twoWay: leaderboardTwoWay(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
     };
   }, [snap]);
+
 
   return (
     <AppShell>
