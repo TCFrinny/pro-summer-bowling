@@ -93,10 +93,12 @@ export function ratingGamesFromCurrentSeason(
       const A = projectSide(
         r.participationA.scheduledId, r.actualNameA, r.linescoreA,
         r.scoreOnly, r.pairCompleted, r.gamesA, r.entryAverageA, absentA,
+        r.participationA.actualId,
       );
       const B = projectSide(
         r.participationB.scheduledId, r.actualNameB, r.linescoreB,
         r.scoreOnly, r.pairCompleted, r.gamesB, r.entryAverageB, absentB,
+        r.participationB.actualId,
       );
       const lanePair = String(m.lanePair);
       // emit rows only for scores actually recorded on both sides so games
