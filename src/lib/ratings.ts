@@ -797,6 +797,21 @@ export function computeCareerRatings(
   };
 }
 
+/** Career-level quality label derived from aggregate contributions.
+ *  - `Limited sample` when total actual games < 9 or no rating available.
+ *  - `Full` when every contribution that produced an offense rating used
+ *    eligible frame evidence (>=3 full-linescore games in that season)
+ *    AND aggregate full-linescore games across the career reach 9+.
+ *  - Otherwise `Score-based`. */
+export function careerRatingQuality(c: CareerRatings): QualityBadge {
+  if (c.offensiveRating == null || c.totals.actualGames < 9) return "Limited sample";
+  const available = c.contributions.filter((x) => x.offense != null);
+  if (available.length === 0) return "Limited sample";
+  const allHaveFrames = available.every((x) => x.fullLinescoreGames >= 3);
+  if (allHaveFrames && c.totals.fullLinescoreGames >= 9) return "Full";
+  return "Score-based";
+}
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
