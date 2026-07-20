@@ -7,7 +7,7 @@ import {
   getBowlerSeasonExtras,
   type Bowler,
 } from "@/lib/mock-data";
-import { useLeagueSnapshot } from "@/lib/league-store";
+import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -115,7 +115,7 @@ const METRICS: MetricDef[] = [
 ];
 
 function StatisticsPage() {
-  const snap = useLeagueSnapshot(); // subscribe: re-render when admin saves rebuild the snapshot
+  const snap = useCurrentPublicSnapshot();
   // Derive once from linescores — no per-render recomputation across the season.
   const rows: StatRow[] = useMemo(
     () =>
@@ -139,6 +139,7 @@ function StatisticsPage() {
   );
 
   const ratings = useMemo(() => {
+    if (!snap) return null;
     const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
     const games = ratingGamesFromCurrentSeason("current", snap.matchesByWeek, publishedWeeks);
     const subs = snap.substitutes ?? [];
@@ -158,6 +159,7 @@ function StatisticsPage() {
       twoWay: leaderboardTwoWay(base).slice(0, 10).map((r) => ({ r, role: roleOf(r.personRef) })),
     };
   }, [snap]);
+
 
 
   return (
