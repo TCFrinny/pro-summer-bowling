@@ -1,121 +1,159 @@
-# Phase D — Reusable Historical Season Data System
 
-This plan covers a single reusable system for every non-current season (2025, 2024, future archives). Nothing here touches 2026 code paths.
+# Career Records + All-Time Leaderboards
 
-## Scope check
+## 1. New pure module: `src/lib/career-records.ts`
 
-This is a large body of work — new schema, ~10 admin surfaces, 6 public routes, career aggregation, and tests. I'll do it in one commit but in clearly separated internal phases so it stays reviewable. If any phase turns out larger than expected I'll flag it rather than silently shrinking scope.
+Owns the three new record definitions. No frame-stat coupling.
 
-## Safety invariants (enforced in every phase)
+### Types
+```ts
+type WLT = { wins: number; losses: number; ties: number } | null;
+type WL  = { wins: number; losses: number } | null;
 
-- All new code paths guard `season.is_current = false` server-side. Attempting a historical write against the current season → 403.
-- 2026 uses existing tables (`weeks`, `match_results`, `live_match_results`, `public_snapshots`) untouched.
-- Historical writes go to NEW season-scoped tables (see schema). No historical row ever lands in the current-season tables.
-- Additive migration only. No column drops, no data rewrites, no changes to existing RLS on 2026 tables.
-- Existing snapshot builder unchanged. New `historical_season_snapshots` is a separate cache.
-
-## Phase D.1 — Schema (single additive migration)
-
-```text
-historical_weeks(id, season_id, week_number, date, published, completed, ...)
-  UNIQUE (season_id, week_number)
-
-historical_schedule_slots(id, season_id, week_id, lane_pair, slot,
-  bowler_a_participant_id, bowler_b_participant_id, ...)
-  UNIQUE (season_id, week_id, lane_pair, slot)
-  CHECK bowler_a != bowler_b
-
-historical_match_results(id, season_id, week_id, slot_id,
-  detail_mode: 'full_linescore' | 'game_scores' | 'summary_only',
-  side_a JSONB, side_b JSONB,          -- frozen participation, names, avgs, hdcps
-  linescore_a JSONB, linescore_b JSONB, -- null unless full_linescore
-  game_scores_a INT[3], game_scores_b INT[3], -- null unless game_scores/full
-  points_a NUMERIC, points_b NUMERIC,
-  point_override JSONB,                -- {points_a, points_b, reason}
-  ...)
-
-historical_season_summary_records(id, season_id, participant_ref,
-  role: 'rostered'|'substitute',
-  games, scratch_pinfall, average, high_game, high_set,
-  points, points_lost, final_finish, is_champion, ...)
-  -- every stat column NULLABLE; NULL = unavailable (never 0)
-
-historical_season_snapshots(season_id PK, snapshot JSONB, built_at)
+interface CareerRecords {
+  gameRecord: WLT;      // personal, per-game handicap outcomes
+  setRecord:  WLT;      // personal, per-3-game-set handicap outcomes
+  overallRecord: WL;    // roster-credit official points won/lost
+}
 ```
 
-- `seasons.point_system` already exists; reuse it (4 or 7).
-- Full RLS: public SELECT only when `season.public_visible AND status='archived'`; writes gated by `has_role(auth.uid(),'admin')` AND `season.is_current = false`.
-- GRANTs for anon (SELECT) + authenticated + service_role per project rules.
+### Contribution shape (one per season / role / identity)
+```ts
+interface CareerRecordContribution {
+  seasonId: string;
+  role: "rostered" | "substitute";
+  // Personal — from every game/set the person actually rolled.
+  gameW: number | null; gameL: number | null; gameT: number | null;
+  setW:  number | null; setL:  number | null; setT:  number | null;
+  // Roster-credit only. .5 allowed. Populated even when personal is null.
+  pointsWon: number | null; pointsLost: number | null;
+}
+```
 
-## Phase D.2 — Server functions (`src/lib/historical-*.functions.ts`)
+`aggregateCareerRecords(contribs)` sums each bucket independently, treating `null` in a bucket as "unavailable, do not zero-fill". If EVERY contribution has `null` for a bucket, the aggregated bucket is `null`.
 
-- `listHistoricalWeeks`, `generateHistoricalWeeks(seasonId, totalWeeks)`, `updateHistoricalWeek`.
-- `listHistoricalSchedule(weekId)`, `upsertHistoricalScheduleSlot`, `deleteHistoricalScheduleSlot` — validates capacity, lane order, no duplicate bowler in a week.
-- `saveHistoricalMatchResult` — routes by `detail_mode`; reuses existing 7-point / adds 4-point calculator; freezes identity; honors override.
-- `upsertHistoricalSummaryRecord`, `listHistoricalSummaryRecords`.
-- `rebuildHistoricalSeasonSnapshot(seasonId)` — season-scoped snapshot builder producing standings, weekly results, stats/leaderboards. Skips frame-derived stats for game-score/summary-only rows; marks unavailable fields as `null`.
-- `getPublicHistoricalSeason(seasonId)` — enforces `archived + public_visible`; 404-shaped response otherwise.
+### Extractors
+- `extractCurrentRosterRecordContribution(snapshot, rosterId, seasonId)`
+  - Walk `history[rosterId]`: skip absent; when `!isSub` compare handicap game totals and 3-game handicap totals to the opponent — the row already carries `handicapGames[i]` and `opponentHandicapTotal`. For score-only rows, only count pairs in `pairCompleted`.
+  - Overall record: `points`/`pointsLost` from `bowlersById[rosterId]`.
+- `extractCurrentRosterPersonalIfSubbed(snapshot, rosterId)` — walk history rows where `isSub === true`; personal record is credited via the substitute path, not here. (No-op contribution.)
+- `extractCurrentSubstituteRecordContribution(snapshot, subId, seasonId)`
+  - Iterate `substituteProfiles[subId].weeks`: personal game/set W-L-T from handicap totals vs the paired opponent handicap totals recorded on the week. No overall.
+- `extractHistoricalRecordContribution({ snapshot, participantRef, role, seasonId })`
+  - Personal: iterate `snapshot.weeks[*].matches`, matching `actualA/actualB === ref` and `!absent*` and side has `scratchGamesX`; compare `handicapGamesA[i] + handicapA*` – actually `HistoricalMatch` provides `handicapGamesA/B` and `handicapTotalA/B`. Skip games with score `0`/no data (`hasGameDataX === false`).
+  - Overall (rostered only): `standings.points` / `standings.pointsLost`.
+- Summary-only historical: overall from `summaryRecords[*]` (points, points_lost); personal null.
 
-## Phase D.3 — Points calculators
+Dedup: same season+role rule as `dedupeHistoricalContributions` — snapshot-derived wins over pure summary, but summary contributes overall when snapshot lacks it.
 
-- `src/lib/points-7.ts` (extract from current logic, unchanged behavior).
-- `src/lib/points-4.ts` — 1/game, 1 set, ties 0.5-0.5.
-- Shared substitute/absent semantics identical to 2026.
+### Diagnostics / invariants
+`assertCareerRecordInvariants(contribs, aggregated)`:
+- personal totals equal sum of contributing buckets;
+- for every rostered contribution that carries both `pointsWon` and season `pointSystem`, `pointsWon + pointsLost == pointSystem * matchesCredited` (allowing .5). Verified in test with synthetic data — not enforced against the live DB.
 
-## Phase D.4 — Admin UI
+## 2. Wire records into `/people/$personId`
 
-Extend `src/routes/admin.seasons.$seasonId.tsx` with a "Historical Data" section (only rendered when `!season.is_current`):
+Replace the current "Record (W - L)" card. Insert `Game W-L-T`, `Set W-L-T`, `Overall W-L` as the first three cards of the advanced grid.
 
-- Progress card: roster / weeks / schedules / results / summary counts.
-- Sub-panels (tabs or collapsibles):
-  1. Weeks (bulk generate + list editor)
-  2. Weekly Schedule (week selector → lane-pair grid, uses `compareLanePairSlotSnake`)
-  3. Match Results (per slot → modal picking mode: full linescore reuses `MatchLinescoreEditor`; game-scores = simple 3-score form; summary-only disabled at match level)
-  4. Season Summary Records (per participant form, all fields optional)
-- Delete + bulk actions gated behind confirm dialogs.
+Merge contributions from:
+- current snapshot (`useCurrentPublicSnapshot`) for all rostered/sub aliases whose `personId === route personId`;
+- historical career loader (already fetched via `getHistoricalCareerContributions`) — extend that server fn to also return `recordContributions: CareerRecordContribution[]` from the same filtered snapshots + summary rows so the browser never touches raw historical data.
 
-## Phase D.5 — Public archived routes
+Formatting: `31-20-3`, `12-5-1`, `92.5-47.5`. Unavailable buckets render `—`.
 
-New routes reading `historical_season_snapshots` and related tables:
+Update the explanatory paragraph so the three definitions are stated plainly.
 
-- `/seasons/$seasonId` — already exists; extend Overview when historical data present.
-- `/seasons/$seasonId/standings`
-- `/seasons/$seasonId/schedule`
-- `/seasons/$seasonId/weekly-results`
-- `/seasons/$seasonId/statistics`
-- `/seasons/$seasonId/bowlers/$participantId`
+## 3. New server fn: `getAllTimeLeaderboards`
 
-All server-side hide draft/private (already covered by `getPublicSeasonDetail` pattern). Unavailable fields render as "—", never 0. Game-score rows show a "full linescore unavailable" note; summary-only seasons hide weekly UI entirely.
+File: `src/lib/leaderboards-repo.functions.ts` (new).
 
-## Phase D.6 — Career profile
+Runs entirely on the server, returns COMPACT rows only — never raw snapshots.
 
-Update `/people/$personId` to merge historical seasons:
-- Prefer computed values (full/game-score) from `historical_season_snapshots`.
-- Fall back to `historical_season_summary_records`.
-- Deduplicate by `(person_id, season_id, role)`.
-- Show role per season; unavailable → dashes.
-- Do not include draft/private seasons.
+### Aggregation
+1. Load current public snapshot (via existing `buildFullSnapshot` result stored in `public_snapshots` for the current season) using the service-role client, filtered to visible bowlers/subs.
+2. Load every archived+`public_visible` season's `historical_season_snapshots`, then `filterPublicHistoricalSnapshot` each one.
+3. For every roster/sub identity, resolve `personId` when present:
+   - Aggregate across identities sharing a `personId` — cross-season merged.
+   - Identities without `personId` remain their own bucket, labeled `Seasonal identity` in the row `subtitle`, linked to `/bowlers/...` or archived participant route.
+4. Compute per-category metrics from already-derived fields (never re-scan frames beyond what extractors already do).
 
-## Phase D.7 — Deterministic tests (`tests/historical-*.ts`)
+### Categories (single response, one array per category)
+```
+records: championships, gameWins, setWins, overallWins
+scoring: games, scratchPinfall, scratchAverage(min9), highGame, highSet, careerPOA(min9)
+frames:  strikes, spares, marks, markPct(min90fr), spareConvPct(min90fr),
+         openPctAsc(min90fr), pinsLostAsc(min90fr), clutchPct(min ClutchOpp>=20)
+ratings: offensive, defense, twoWay  (reuse computeCareerRatings pipeline;
+         eligibility same as existing ratings; run server-side)
+```
 
-1. `historical-isolation.ts` — creating/editing historical data for two archived seasons never touches 2026 `weeks`/`match_results`/snapshot.
-2. `historical-lane-order.ts` — schedules + weekly results order 11-12 after 9-10 (reuses shared comparator).
-3. `historical-privacy.ts` — draft or private seasons return `forbidden` server-side even with correct UUID.
-4. `points-7-and-4.ts` — cover 2/1 game wins, ties, set-tie halves, override.
-5. `historical-detail-modes.ts` — full vs game-score vs summary-only: unavailable fields stay `null`, aggregates never treat null as 0.
-6. `career-aggregation.ts` — two archived + one current season → no duplicates, correct role labels, dashes for unavailable.
-7. `historical-substitute-absent.ts` — points credit scheduled bowler; sub personal stats separate; absent excluded from personal scratch stats.
+Each row:
+```ts
+interface LbRow {
+  key: string;              // stable person-or-identity id
+  href: string;             // /people/... or /bowlers/... etc
+  displayName: string;
+  primary: number;          // sort value
+  primaryDisplay: string;   // formatted, e.g. "92.5", "12.3%"
+  secondary?: string;       // "231 games" / "1,140 frames" / etc
+  rank: number;             // competition ranking (shared ties)
+}
+```
+
+Sorting: metric direction → secondary sample DESC → displayName ASC. Top 10 per category.
+
+### Response shape
+```ts
+{
+  builtAt: number;
+  categories: Record<CategoryKey, LbRow[]>;
+  eligibility: { minGamesForAvg: 9, minFramesForRates: 90, minClutchOpps: 20 };
+}
+```
+
+No raw snapshot data leaves the server.
+
+## 4. UI: All-Time Leaderboards on `/seasons` index
+
+Below the archived-seasons grid in `src/routes/seasons.index.tsx`, add `<AllTimeLeaderboards />`.
+
+Component:
+- Fetches `getAllTimeLeaderboards` via useQuery.
+- Compact grouped tabbed selector: `Records | Scoring | Frame Stats | Ratings`. Inside each group a dropdown (mobile) or radio pill row (md+) picks one category. Renders one Top 10 table at a time.
+- Responsive: table on md+, card list on small screens.
+- Person rows link to `/people/$personId`, unlinked seasonal identities to their bowler/archived route.
+
+## 5. Tests (`tests/career-records.ts`, registered in `tests/deterministic.ts`)
+
+- current rostered: 3 games win/lose/tie by handicap totals -> personal game W-L-T; set W-L-T from 3-game total.
+- current substitute: personal Game/Set present; rostered scheduled bowler receives Overall credit only.
+- absent person: no personal, no set, opponent still records outcome per opponent's completed games.
+- historical override 0 vs 2.5 in 4-point season: rostered contribution `pointsWon=0, pointsLost=4` and `pointsWon=2.5, pointsLost=1.5`.
+- historical 7-point normal: each side pointsWon+pointsLost=7.
+- historical GAME_SCORES produces Game/Set W-L-T.
+- historical SUMMARY_ONLY → Overall present, personal null.
+- multi-alias person: two identities with `personId` collapse; contributions sum without duplication.
+- balance invariants pass on fixture.
+- unpublished weeks removed by `filterPublicHistoricalSnapshot` don't leak.
+- leaderboard sort: descending primary, sample tiebreak, competition ranking for ties, lower-is-better categories reverse; sample eligibility thresholds excluded.
+- unlinked seasonal identity appears as its own row, not merged by display name.
+- response shape contains no `snapshot` / `weeks` / raw match arrays (grep-style assertion on serialized JSON).
+- current 2026 modules (`league-store`, `snapshot-builder.server`, `mock-data.buildSnapshot`) do NOT import `career-records` (module-import assertion).
+
+## 6. Scope guards / non-changes
+
+- `src/lib/mock-data.ts`, `src/lib/snapshot-builder.server.ts`, `src/lib/league-store.ts`, admin schedule/results/live-scoring, DB schema — untouched.
+- `historical-snapshot.ts` — untouched except type re-exports if needed.
+- Existing chronological sort of Contributing seasons — preserved.
+- No new migrations.
 
 ## Verification
+- `bunx tsgo --noEmit`
+- `bun run test:deterministic`
+- `bun run build`
 
-Typecheck, `bun run test:deterministic`, production build (`bun run build`). Reported at end.
-
-## Explicit non-goals / limitations
-
-- Migration will be recorded in `supabase/migrations/` but I will NOT run it (per project rule for pending migrations you've reviewed). You approve/run it separately; UI degrades gracefully until then.
-- Historical live-scoring (final-week live entry for archived seasons) is out of scope — archived seasons only get static entry modes.
-- No deployment through Lovable; you push `main` to trigger Cloudflare.
-
-## Assumption to confirm or correct
-
-I'm assuming you want the migration authored via the `supabase--migration` tool (which stages it for your approval), NOT executed by me. If you'd instead like the SQL written directly under `db/pending-migrations/` like `20260716_120000_seasons_people_phase.sql`, say so and I'll switch.
+## Known limitations to state honestly
+- Historical GAME_SCORES sets: the historical scoring pipeline stores per-game handicap totals; set W-L-T uses their sum. Sets with any missing game contribute nothing.
+- Ratings leaderboards depend on the existing rating quality thresholds; unqualified persons excluded.
+- Overall W-L .5 arises from historical overrides only.
+- Unlinked historical participants can appear as separate identities. If two archived seasons have the same unlinked "Bob Smith", they intentionally stay separate to avoid name-only merging.
