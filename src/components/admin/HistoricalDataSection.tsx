@@ -185,6 +185,7 @@ function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels, pointSystem }: {
               expanded={selectedWeek === w.id}
               onToggle={() => setSelectedWeek(selectedWeek === w.id ? null : w.id)}
               lanePairLabels={lanePairLabels}
+              pointSystem={pointSystem}
               onChanged={() => qc.invalidateQueries({ queryKey: ["admin", "historical"] })}
             />
           ))}
