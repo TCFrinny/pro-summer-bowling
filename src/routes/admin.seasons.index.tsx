@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { adminListSeasons, adminUpsertSeason } from "@/lib/history-repo.functions";
+import { sortSeasonsChronological } from "@/lib/season-history";
 import { Loader2, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/admin/seasons/")({
@@ -123,7 +124,7 @@ function AdminSeasonsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {q.data.seasons.map((s) => (
+                {sortSeasonsChronological(q.data.seasons).map((s) => (
                   <tr key={s.id}>
                     <td className="px-3 py-2 font-medium">{s.label}</td>
                     <td className="px-3 py-2"><StatusBadge status={s.status} /></td>

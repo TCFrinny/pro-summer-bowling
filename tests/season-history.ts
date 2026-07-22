@@ -5,10 +5,13 @@
 
 import {
   aggregateCareerTotals,
+  compareSeasonsChronological,
   filterPublicSeasons,
   normalizeName,
   parseSnapshotBackwardCompat,
   planPersonMerge,
+  seasonSortYear,
+  sortSeasonsChronological,
   summarizeCapacityList,
   summarizeLanePairs,
   withPersonId,
@@ -141,6 +144,90 @@ import {
   if (parseSnapshotBackwardCompat({}) === null) throw new Error("parse empty rejected");
   if (parseSnapshotBackwardCompat(null) !== null) throw new Error("null must yield null");
   if (parseSnapshotBackwardCompat("nope") !== null) throw new Error("string must yield null");
+}
+
+// 9. Chronological sort: insertion order must not matter.
+{
+  const seasons: SeasonRecord[] = [
+    { id: "s-2026", label: "2026 Summer", status: "current", publicVisible: true, startDate: "2026-05-01" },
+    { id: "s-2025", label: "2025 Summer", status: "archived", publicVisible: true, startDate: "2025-05-01" },
+    { id: "s-2022", label: "2022 Summer", status: "archived", publicVisible: true, startDate: "2022-05-01" },
+    { id: "s-2024", label: "2024 Summer", status: "archived", publicVisible: true, startDate: "2024-05-01" },
+  ];
+  const sorted = sortSeasonsChronological(seasons).map((s) => s.id).join(",");
+  if (sorted !== "s-2026,s-2025,s-2024,s-2022") {
+    throw new Error(`chronological sort wrong: ${sorted}`);
+  }
+  if (seasons.map((s) => s.id).join(",") !== "s-2026,s-2025,s-2022,s-2024") {
+    throw new Error("sortSeasonsChronological mutated input");
+  }
+}
+
+// 10. Adding a 2023 season slots between 2024 and 2022.
+{
+  const withNew: SeasonRecord[] = [
+    { id: "s-2026", label: "2026 Summer", status: "current", publicVisible: true, startDate: "2026-05-01" },
+    { id: "s-2022", label: "2022 Summer", status: "archived", publicVisible: true, startDate: "2022-05-01" },
+    { id: "s-2024", label: "2024 Summer", status: "archived", publicVisible: true, startDate: "2024-05-01" },
+    { id: "s-2025", label: "2025 Summer", status: "archived", publicVisible: true, startDate: "2025-05-01" },
+    { id: "s-2023", label: "2023 Summer", status: "archived", publicVisible: true, startDate: "2023-05-01" },
+  ];
+  const order = sortSeasonsChronological(withNew).map((s) => s.id).join(",");
+  if (order !== "s-2026,s-2025,s-2024,s-2023,s-2022") {
+    throw new Error(`2023 insertion wrong: ${order}`);
+  }
+}
+
+// 11. Missing startDate falls back to the four-digit year in the label.
+{
+  const rows: SeasonRecord[] = [
+    { id: "cur", label: "2026 Summer", status: "current", publicVisible: true },
+    { id: "no-date-2023", label: "2023 Summer", status: "archived", publicVisible: true },
+    { id: "no-date-2024", label: "2024 Summer", status: "archived", publicVisible: true },
+    { id: "no-date-2022", label: "2022 Summer", status: "archived", publicVisible: true },
+    { id: "no-year", label: "Legacy", status: "archived", publicVisible: true },
+  ];
+  const order = sortSeasonsChronological(rows).map((s) => s.id).join(",");
+  if (order !== "cur,no-date-2024,no-date-2023,no-date-2022,no-year") {
+    throw new Error(`label-year fallback wrong: ${order}`);
+  }
+  if (seasonSortYear({ label: "2023 Summer", startDate: null }) !== 2023) {
+    throw new Error("seasonSortYear label extract wrong");
+  }
+  if (seasonSortYear({ label: "Legacy", startDate: null }) !== null) {
+    throw new Error("seasonSortYear must return null when no year");
+  }
+}
+
+// 12. Current always leads even when another season has a later year/date.
+{
+  const rows: SeasonRecord[] = [
+    { id: "future", label: "2030 Planning", status: "archived", publicVisible: true, startDate: "2030-01-01" },
+    { id: "cur", label: "2026 Summer", status: "current", publicVisible: true, startDate: "2026-05-01" },
+  ];
+  const first = sortSeasonsChronological(rows)[0];
+  if (first.id !== "cur") throw new Error("current must stay first");
+  if (compareSeasonsChronological(rows[0], rows[1]) <= 0) {
+    throw new Error("comparator did not place current first");
+  }
+}
+
+// 13. Admin sort keeps drafts/private rows; public filter drops them.
+{
+  const rows: SeasonRecord[] = [
+    { id: "cur", label: "2026 Summer", status: "current", publicVisible: true, startDate: "2026-05-01" },
+    { id: "draft-2027", label: "2027 planning", status: "draft", publicVisible: false, startDate: "2027-01-01" },
+    { id: "priv-2024", label: "2024 Winter", status: "archived", publicVisible: false, startDate: "2024-01-01" },
+    { id: "pub-2025", label: "2025 Summer", status: "archived", publicVisible: true, startDate: "2025-05-01" },
+  ];
+  const admin = sortSeasonsChronological(rows).map((s) => s.id).join(",");
+  if (admin !== "cur,draft-2027,pub-2025,priv-2024") {
+    throw new Error(`admin sort wrong: ${admin}`);
+  }
+  const pub = filterPublicSeasons(rows).map((s) => s.id).join(",");
+  if (pub !== "cur,pub-2025") {
+    throw new Error(`public filter wrong: ${pub}`);
+  }
 }
 
 // eslint-disable-next-line no-console
