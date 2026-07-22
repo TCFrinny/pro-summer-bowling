@@ -120,11 +120,11 @@ function wk(m: HistoricalMatch): HistoricalWeekSummary {
 {
   const src = fs.readFileSync("src/lib/historical-repo.functions.ts", "utf8");
   truthy(
-    /Override points [AB] must be between 0 and \$\{ps\}/.test(src),
+    src.includes("Override points ${label} must be between 0 and ${ps}"),
     "server enforces 0..pointSystem override range",
   );
   truthy(
-    /must be in 0\.5 increments/.test(src),
+    src.includes("must be in 0.5 increments"),
     "server enforces 0.5-step override values",
   );
 }
