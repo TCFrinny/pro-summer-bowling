@@ -172,15 +172,41 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
 
 
 function CareerBody({
+  personId,
   rows,
   advancedContribs,
+  historicalRecordContribs,
 }: {
+  personId: string;
   rows: CareerSeasonRow[];
   advancedContribs: CareerAdvancedContribution[];
+  historicalRecordContribs: CareerRecordContribution[];
 }) {
   const sorted = [...rows].sort((a, b) => a.seasonLabel.localeCompare(b.seasonLabel));
   const totals = aggregateCareerTotals(sorted);
   const adv = aggregateCareerAdvanced(advancedContribs);
+  const snap = useCurrentPublicSnapshot();
+  const currentRecordContribs = useMemo<CareerRecordContribution[]>(() => {
+    if (!snap) return [];
+    const out: CareerRecordContribution[] = [];
+    for (const b of snap.bowlers) {
+      if (b.personId === personId) {
+        out.push(extractCurrentRosterRecordContribution(snap, b.id, "current", "2026 Summer"));
+      }
+    }
+    for (const s of snap.substitutes ?? []) {
+      if (s.personId === personId) {
+        out.push(extractCurrentSubstituteRecordContribution(snap, s.id, "current", "2026 Summer"));
+      }
+    }
+    return out;
+  }, [snap, personId]);
+  const records = useMemo(
+    () => aggregateCareerRecords([...currentRecordContribs, ...historicalRecordContribs]),
+    [currentRecordContribs, historicalRecordContribs],
+  );
+  // silence unused warning for emptyContribution import when only reading formatters
+  void emptyContribution;
   if (sorted.length === 0) {
     return <EmptyState title="No public seasons yet" description="This person has no public rostered or substitute record." />;
   }
@@ -194,15 +220,21 @@ function CareerBody({
         <Stat label="Seasons w/ Game Data" value={totals.seasonsWithGameData} />
       </section>
 
-      <CareerAdvancedCards totals={adv} totalsBasic={totals} />
+      <CareerAdvancedCards totals={adv} totalsBasic={totals} records={records} />
 
       <p className="text-xs text-muted-foreground">
-        Basic stats include game-score-only historical rows. Frame-derived stats
-        (marks, pins lost, first 5 / last 5, clutch, consistency) come only from
-        full-linescore data and show <span aria-label="unavailable">—</span> when
-        unavailable. Record (points won – points lost), handicap pinfall are
-        roster credit only; substitute weeks contribute personal stats only.
+        <strong>Game W-L-T</strong> and <strong>Set W-L-T</strong> follow the person who
+        actually rolled the games — including substitute weeks — and compare handicap-adjusted
+        game totals and three-game totals. <strong>Overall W-L</strong> is official league-point
+        credit for the scheduled rostered bowler, includes point overrides, and includes weeks a
+        substitute rolled in their place. Personal Game W-L-T does not have to numerically
+        equal Overall W-L. Frame-derived stats (marks, pins lost, first 5 / last 5, clutch,
+        consistency) come only from full-linescore data and show
+        <span aria-label="unavailable"> —</span> when unavailable.
       </p>
+
+
+
 
 
       <section className="rounded-lg border border-border bg-card">
