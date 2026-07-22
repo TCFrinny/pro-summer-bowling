@@ -107,6 +107,9 @@ export interface SeasonListResult {
   available: boolean;
   seasons: SeasonRecord[];
   bowlerCounts: Record<string, number>;
+  /** Optional per-season derived champion. Populated only for archived
+   *  public seasons whose snapshot marks the season complete. */
+  champions?: Record<string, { displayName: string; personId: string | null }>;
 }
 
 async function fetchSeasonsWide(sb: Sb): Promise<{ available: boolean; rows: SeasonRecord[] }> {
@@ -186,7 +189,36 @@ export const listPublicSeasons = createServerFn({ method: "GET" }).handler(async
   // returned to unauthenticated clients.
   const publicRows = publicVisibleSeasons(rows);
   const counts = available ? await fetchBowlerCounts(sb, publicRows.map((r) => r.id)) : {};
-  return { available, seasons: publicRows, bowlerCounts: counts } as SeasonListResult;
+
+  // Derive champions for completed archived seasons from historical
+  // snapshots. Raw snapshots are admin-only via RLS; we run this through
+  // the service-role client and expose ONLY the derived display name +
+  // optional personId — no raw snapshot content leaks.
+  const champions: Record<string, { displayName: string; personId: string | null }> = {};
+  const archivedIds = publicRows
+    .filter((r) => r.status === "archived" && r.publicVisible)
+    .map((r) => r.id);
+  if (archivedIds.length > 0) {
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { deriveHistoricalChampion, filterPublicHistoricalSnapshot } =
+        await import("@/lib/historical-snapshot");
+      const snaps = await (supabaseAdmin.from as unknown as LooseFrom)("historical_season_snapshots")
+        .select("season_id,snapshot").in("season_id", archivedIds);
+      if (!snaps.error && Array.isArray(snaps.data)) {
+        for (const row of snaps.data as Array<{ season_id: string; snapshot: unknown }>) {
+          const filtered = filterPublicHistoricalSnapshot(
+            row.snapshot as Parameters<typeof filterPublicHistoricalSnapshot>[0],
+          );
+          const champ = deriveHistoricalChampion(filtered);
+          if (champ) champions[row.season_id] = { displayName: champ.displayName, personId: champ.personId };
+        }
+      }
+    } catch {
+      // Champion decoration is optional — never fail the season list on it.
+    }
+  }
+  return { available, seasons: publicRows, bowlerCounts: counts, champions } as SeasonListResult;
 });
 
 // ---------------- PUBLIC: season detail (server-enforced visibility) -------
@@ -265,11 +297,31 @@ export const getPublicSeasonDetail = createServerFn({ method: "GET" })
       } as SeasonDetailResult;
     }
 
-    const [lanePairs, counts, champion] = await Promise.all([
+    const [lanePairs, counts, championExplicit] = await Promise.all([
       loadLanePairs(sb, data.seasonId),
       loadCounts(sb, data.seasonId),
       season.championPersonId ? loadChampion(sb, season.championPersonId) : Promise.resolve(null),
     ]);
+    // Fallback: derive champion from the historical snapshot when the
+    // seasons row hasn't been synced yet. Only exposes displayName + optional
+    // id — no raw snapshot content.
+    let champion = championExplicit;
+    if (!champion && season.status === "archived" && season.publicVisible) {
+      try {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { deriveHistoricalChampion, filterPublicHistoricalSnapshot } =
+          await import("@/lib/historical-snapshot");
+        const snapRow = await (supabaseAdmin.from as unknown as LooseFrom)("historical_season_snapshots")
+          .select("snapshot").eq("season_id", data.seasonId).maybeSingle();
+        if (!snapRow.error && snapRow.data?.snapshot) {
+          const filtered = filterPublicHistoricalSnapshot(
+            snapRow.data.snapshot as Parameters<typeof filterPublicHistoricalSnapshot>[0],
+          );
+          const c = deriveHistoricalChampion(filtered);
+          if (c) champion = { id: c.personId ?? c.participantRef, displayName: c.displayName };
+        }
+      } catch { /* champion is optional */ }
+    }
     return {
       available: true, season, lanePairs,
       rosteredCount: counts.roster, substituteCount: counts.sub, champion,
@@ -354,10 +406,49 @@ export const adminUpsertSeason = createServerFn({ method: "POST" })
     if (data.publicVisible !== undefined) payload.public_visible = data.publicVisible;
 
     if (data.id) {
+      // Capture pre-update values so we can decide whether to rebuild the
+      // historical snapshot. Recomputing on point-system change is what
+      // keeps saved 4-vs-7-point outcomes honest.
+      const before = await (context.supabase.from as unknown as LooseFrom)("seasons")
+        .select("id,is_current,point_system,total_weeks")
+        .eq("id", data.id).maybeSingle();
+      if (before.error) throw new Error(before.error.message);
+      const beforeRow = (before.data ?? null) as
+        | { id: string; is_current: boolean; point_system: number | null; total_weeks: number | null }
+        | null;
       const upd = await (context.supabase.from as unknown as LooseFrom)("seasons")
         .update(payload).eq("id", data.id).select("id").single();
       if (upd.error) throw new Error(upd.error.message);
-      return { id: String(upd.data.id), created: false };
+
+      let rebuilt = false;
+      let rebuildError: string | null = null;
+      const nextPS = (payload.point_system as number | null) ?? null;
+      const nextTW = (payload.total_weeks as number | null) ?? null;
+      const psChanged = beforeRow && nextPS != null && beforeRow.point_system !== nextPS;
+      const twChanged = beforeRow && nextTW != null && beforeRow.total_weeks !== nextTW;
+      // Only rebuild for NON-CURRENT seasons. Current-season snapshots are
+      // rebuilt by their own live pipeline; we must not touch them here.
+      if (beforeRow && !beforeRow.is_current && (psChanged || twChanged)) {
+        const hasSnap = await (context.supabase.from as unknown as LooseFrom)("historical_season_snapshots")
+          .select("season_id").eq("season_id", data.id).maybeSingle();
+        const hasWeeks = await (context.supabase.from as unknown as LooseFrom)("historical_weeks")
+          .select("id").eq("season_id", data.id).limit(1);
+        const hasResults = await (context.supabase.from as unknown as LooseFrom)("historical_match_results")
+          .select("id").eq("season_id", data.id).limit(1);
+        const hasHistorical = !!hasSnap.data
+          || (Array.isArray(hasWeeks.data) && hasWeeks.data.length > 0)
+          || (Array.isArray(hasResults.data) && hasResults.data.length > 0);
+        if (hasHistorical) {
+          try {
+            const { rebuildHistoricalSnapshotServer } = await import("@/lib/historical-repo.functions");
+            await rebuildHistoricalSnapshotServer(context.supabase, data.id);
+            rebuilt = true;
+          } catch (e) {
+            rebuildError = e instanceof Error ? e.message : String(e);
+          }
+        }
+      }
+      return { id: String(upd.data.id), created: false, rebuilt, rebuildError };
     }
     // Always create as draft unless the caller explicitly said "archived".
     if (payload.status == null) payload.status = "draft";
@@ -370,7 +461,7 @@ export const adminUpsertSeason = createServerFn({ method: "POST" })
       }
       throw new Error(ins.error.message);
     }
-    return { id: String(ins.data.id), created: true };
+    return { id: String(ins.data.id), created: true, rebuilt: false, rebuildError: null };
   });
 
 export const adminMakeSeasonCurrent = createServerFn({ method: "POST" })

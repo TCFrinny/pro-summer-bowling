@@ -35,7 +35,9 @@ import {
   buildHistoricalParticipantStats,
   buildHistoricalStandings,
   dedupeHistoricalContributions,
+  deriveHistoricalChampion,
   filterPublicHistoricalSnapshot,
+  isHistoricalSeasonComplete,
   type HistoricalCareerContribution,
   type HistoricalMatch,
   type HistoricalParticipantMeta,
@@ -1102,22 +1104,55 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         hasResult: !!r,
       });
       if (!r) continue;
-      const derived = r.derived as (null | {
-        detailMode: HistoricalDetailMode;
-        hasGameDataA?: boolean; hasGameDataB?: boolean;
-        a: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
-        b: { gameScoresScratch: [number, number, number]; gameScoresHandicap: [number, number, number]; scratchTotal: number; handicapTotal: number; gameAwards: [number, number, number]; gamePoints: number; setPoint: number; totalPoints: number };
-        finalPointsA: number; finalPointsB: number; winner: "A" | "B" | "T";
-        override: { pointsA: number; pointsB: number } | null;
-      });
-      if (!derived) continue;
+      const storedDetailMode = (r.detail_mode as HistoricalDetailMode | null)
+        ?? ((r.derived as { detailMode?: HistoricalDetailMode } | null)?.detailMode ?? null);
+      if (!storedDetailMode) continue;
       const sideA = r.side_a as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
       const sideB = r.side_b as { status: string; actualRef: string; actualName: string; entryAverage: number; handicap: number; absentScores?: [number, number, number] | null };
-      const hasA = typeof derived.hasGameDataA === "boolean" ? derived.hasGameDataA
-        : (sideA.status !== "absent" || Array.isArray(sideA.absentScores));
-      const hasB = typeof derived.hasGameDataB === "boolean" ? derived.hasGameDataB
-        : (sideB.status !== "absent" || Array.isArray(sideB.absentScores));
-      const isFull = derived.detailMode === "full_linescore";
+      const gsA = (r.game_scores_a as [number, number, number] | null) ?? null;
+      const gsB = (r.game_scores_b as [number, number, number] | null) ?? null;
+      const override = (r.point_override as { pointsA: number; pointsB: number; reason?: string } | null) ?? null;
+
+      // Rebuild-time override validation under the CURRENT point system.
+      // Fail closed with a clear week/slot message so the admin can edit.
+      if (override) {
+        for (const [lab, v] of [["A", override.pointsA], ["B", override.pointsB]] as const) {
+          if (!Number.isFinite(v) || v < 0 || v > seasonInfo.pointSystem
+              || Math.abs(v * 2 - Math.round(v * 2)) > 1e-9) {
+            throw new Error(
+              `Week ${Number(w.week_number)} slot ${String(s.lane_pair)}#${Number(s.slot)}: ` +
+              `saved override points ${lab}=${v} is invalid under the current ` +
+              `${seasonInfo.pointSystem}-point system (must be 0..${seasonInfo.pointSystem} in 0.5 increments). ` +
+              `Edit this override before rebuilding.`,
+            );
+          }
+        }
+      }
+
+      // Recompute the outcome from stored authoritative inputs under the
+      // CURRENT season point system. Never trust the persisted `derived`
+      // block — stale point-system awards are exactly the bug we're fixing.
+      const compA: HistoricalSideInput = sideA.status === "absent"
+        ? { gameScores: [null, null, null], handicap: sideA.handicap,
+            participation: { status: "absent",
+              absentScores: Array.isArray(sideA.absentScores) ? sideA.absentScores : undefined } }
+        : { gameScores: gsA ?? [null, null, null], handicap: sideA.handicap,
+            participation: { status: sideA.status as "rostered" | "substitute" } };
+      const compB: HistoricalSideInput = sideB.status === "absent"
+        ? { gameScores: [null, null, null], handicap: sideB.handicap,
+            participation: { status: "absent",
+              absentScores: Array.isArray(sideB.absentScores) ? sideB.absentScores : undefined } }
+        : { gameScores: gsB ?? [null, null, null], handicap: sideB.handicap,
+            participation: { status: sideB.status as "rostered" | "substitute" } };
+      const outcome = computeHistoricalMatch({
+        pointSystem: seasonInfo.pointSystem,
+        sideA: compA, sideB: compB,
+        override,
+      });
+
+      const hasA = sideA.status !== "absent" || Array.isArray(sideA.absentScores);
+      const hasB = sideB.status !== "absent" || Array.isArray(sideB.absentScores);
+      const isFull = storedDetailMode === "full_linescore";
       const rawLA = r.linescore_a;
       const rawLB = r.linescore_b;
       const lineA = isFull && Array.isArray(rawLA) && rawLA.length === 3
@@ -1129,7 +1164,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         weekNumber: Number(w.week_number),
         lanePair: String(s.lane_pair),
         slot: Number(s.slot),
-        detailMode: derived.detailMode,
+        detailMode: storedDetailMode,
         scheduledA, scheduledB,
         scheduledNameA: nameA, scheduledNameB: nameB,
         actualA: sideA.actualRef, actualB: sideB.actualRef,
@@ -1139,19 +1174,19 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
         entryAverageA: sideA.entryAverage,   entryAverageB: sideB.entryAverage,
         handicapA: sideA.handicap,           handicapB: sideB.handicap,
         hasGameDataA: hasA, hasGameDataB: hasB,
-        scratchGamesA: hasA && sideA.status !== "absent" ? derived.a.gameScoresScratch : null,
-        scratchGamesB: hasB && sideB.status !== "absent" ? derived.b.gameScoresScratch : null,
-        handicapGamesA: derived.a.gameScoresHandicap,
-        handicapGamesB: derived.b.gameScoresHandicap,
-        scratchTotalA: derived.a.scratchTotal, scratchTotalB: derived.b.scratchTotal,
-        handicapTotalA: derived.a.handicapTotal, handicapTotalB: derived.b.handicapTotal,
-        gameAwardsA: derived.a.gameAwards, gameAwardsB: derived.b.gameAwards,
-        gamePointsA: derived.a.gamePoints, gamePointsB: derived.b.gamePoints,
-        setPointA: derived.a.setPoint, setPointB: derived.b.setPoint,
-        totalPointsA: derived.a.totalPoints, totalPointsB: derived.b.totalPoints,
-        finalPointsA: derived.finalPointsA, finalPointsB: derived.finalPointsB,
-        overrideEnabled: !!derived.override,
-        winner: derived.winner,
+        scratchGamesA: hasA && sideA.status !== "absent" ? outcome.a.gameScoresScratch : null,
+        scratchGamesB: hasB && sideB.status !== "absent" ? outcome.b.gameScoresScratch : null,
+        handicapGamesA: outcome.a.gameScoresHandicap,
+        handicapGamesB: outcome.b.gameScoresHandicap,
+        scratchTotalA: outcome.a.scratchTotal, scratchTotalB: outcome.b.scratchTotal,
+        handicapTotalA: outcome.a.handicapTotal, handicapTotalB: outcome.b.handicapTotal,
+        gameAwardsA: outcome.a.gameAwards, gameAwardsB: outcome.b.gameAwards,
+        gamePointsA: outcome.a.gamePoints, gamePointsB: outcome.b.gamePoints,
+        setPointA: outcome.a.setPoint, setPointB: outcome.b.setPoint,
+        totalPointsA: outcome.a.totalPoints, totalPointsB: outcome.b.totalPoints,
+        finalPointsA: outcome.finalPointsA, finalPointsB: outcome.finalPointsB,
+        overrideEnabled: !!outcome.override,
+        winner: outcome.winner,
         linescoreA: lineA,
         linescoreB: lineB,
       });
@@ -1188,6 +1223,24 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
     .upsert({ season_id: seasonId, snapshot, built_at: new Date().toISOString() },
       { onConflict: "season_id" });
   if (up.error) throw new Error(`historical snapshot upsert failed: ${up.error.message}`);
+
+  // Sync seasons.champion_person_id to the derived champion when we have a
+  // linked person. If the season went incomplete (weeks removed / unpublished),
+  // clear an automatically derived champion so no stale badge remains.
+  const derivedChamp = deriveHistoricalChampion(snapshot);
+  const targetChampionId = derivedChamp?.personId ?? null;
+  if (isHistoricalSeasonComplete(snapshot)) {
+    if (targetChampionId) {
+      await (sb.from as unknown as LooseFrom)("seasons")
+        .update({ champion_person_id: targetChampionId }).eq("id", seasonId);
+    }
+    // If derived champion has no person link, leave any manual value alone.
+  } else {
+    // Season is incomplete: clear champion_person_id so we don't display a
+    // stale winner. Skip when the value is already null to avoid a write.
+    await (sb.from as unknown as LooseFrom)("seasons")
+      .update({ champion_person_id: null }).eq("id", seasonId);
+  }
 }
 
 export const adminRebuildHistoricalSnapshot = createServerFn({ method: "POST" })
@@ -1322,13 +1375,14 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
         // season page. Otherwise unpublished-week points, games, and
         // frame stats leak onto the permanent career profile.
         const snap = filterPublicHistoricalSnapshot(row.snapshot);
+        // Champion is derived from snapshot completeness, not stored on
+        // the row: an unpublished-final-week season must not surface a
+        // championship on career profiles.
+        const champ = deriveHistoricalChampion(snap);
         // Match participants by personId.
         for (const p of snap.participants ?? []) {
           if (p.personId !== data.personId) continue;
           const standings = (snap.standings ?? []).find((s) => s.participantRef === p.ref) ?? null;
-          // Personal bowling stats (games/pinfall/highs/etc) come from the
-          // participantStats projection so substitutes retain them and
-          // rostered-with-a-sub-that-match do not inherit sub totals.
           const personal = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref) ?? null;
           rows.push({
             seasonId: row.season_id,
@@ -1345,7 +1399,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             highSet: personal?.highSet ?? standings?.highSet ?? null,
             points: standings?.points ?? null,
             finalFinish: standings?.rank ?? null,
-            isChampion: (snap.summaryRecords ?? []).some((s) => s.participantRef === p.ref && s.isChampion),
+            isChampion: !!champ && champ.participantRef === p.ref,
             hasGameData: (personal?.games ?? standings?.games ?? null) != null,
             source: "historical_snapshot",
           });
