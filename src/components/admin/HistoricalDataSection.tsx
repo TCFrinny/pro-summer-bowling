@@ -58,9 +58,10 @@ interface Props {
   isCurrent: boolean;
   totalWeeksHint: number | null;
   lanePairLabels: string[];
+  pointSystem: 4 | 7;
 }
 
-export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalWeeksHint, lanePairLabels }: Props) {
+export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalWeeksHint, lanePairLabels, pointSystem }: Props) {
   if (isCurrent) {
     return (
       <section className="mt-6 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -75,7 +76,7 @@ export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalW
         <RebuildSnapshotButton seasonId={seasonId} />
       </header>
       <ProgressCard seasonId={seasonId} />
-      <WeeksBlock seasonId={seasonId} totalWeeksHint={totalWeeksHint} lanePairLabels={lanePairLabels} />
+      <WeeksBlock seasonId={seasonId} totalWeeksHint={totalWeeksHint} lanePairLabels={lanePairLabels} pointSystem={pointSystem} />
       <SummaryRecordsBlock seasonId={seasonId} />
     </section>
   );
