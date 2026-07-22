@@ -436,8 +436,11 @@ export function buildHistoricalStandings(input: {
       sa.matches += 1; sb.matches += 1;
       sa.points += m.finalPointsA;
       sb.points += m.finalPointsB;
-      sa.pointsLost += m.finalPointsB;
-      sb.pointsLost += m.finalPointsA;
+      // Each side's losses = pointSystem - own points won. Never derive
+      // from opponent's points (independent overrides may not sum to
+      // pointSystem). Snap to nearest 0.5 to absorb float noise.
+      sa.pointsLost += halfRound(input.pointSystem - m.finalPointsA);
+      sb.pointsLost += halfRound(input.pointSystem - m.finalPointsB);
       if (m.hasGameDataA) { sa.handicapPinfall += m.handicapTotalA; sa.hasHandicapData = true; }
       if (m.hasGameDataB) { sb.handicapPinfall += m.handicapTotalB; sb.hasHandicapData = true; }
 
