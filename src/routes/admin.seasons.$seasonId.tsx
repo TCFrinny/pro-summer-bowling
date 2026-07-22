@@ -92,6 +92,7 @@ function SeasonEditor() {
         isCurrent={season.status === "current"}
         totalWeeksHint={season.totalWeeks ?? null}
         lanePairLabels={detail.data.lanePairs.map((p) => p.label)}
+        pointSystem={season.pointSystem === 4 ? 4 : 7}
       />
     </>
   );
