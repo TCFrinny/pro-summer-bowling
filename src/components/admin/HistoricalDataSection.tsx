@@ -271,7 +271,7 @@ function WeekRow({
           className="ml-auto inline-flex items-center gap-1 rounded border border-destructive/40 px-1.5 text-xs text-destructive"
         ><Trash2 className="h-3 w-3" /></button>
       </div>
-      {expanded && <WeekScheduleEditor week={week} seasonId={seasonId} lanePairLabels={lanePairLabels} onChanged={onChanged} />}
+      {expanded && <WeekScheduleEditor week={week} seasonId={seasonId} lanePairLabels={lanePairLabels} pointSystem={pointSystem} onChanged={onChanged} />}
     </div>
   );
 }
