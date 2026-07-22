@@ -16,11 +16,21 @@ import {
   type CareerAdvancedContribution,
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
+import {
+  aggregateCareerRecords,
+  emptyContribution,
+  extractCurrentRosterRecordContribution,
+  extractCurrentSubstituteRecordContribution,
+  formatWL,
+  formatWLT,
+  type CareerRecordContribution,
+} from "@/lib/career-records";
 import { RatingsSection } from "@/components/ratings/RatingsSection";
 import { careerRatingQuality, combineAliasRatings, computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
 import { ratingGamesFromCurrentSeason, ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
 import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { useMemo } from "react";
+
 
 
 
