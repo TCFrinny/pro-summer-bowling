@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { adminListSeasons, adminUpsertSeason } from "@/lib/history-repo.functions";
+import { sortSeasonsChronological } from "@/lib/season-history";
 import { Loader2, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/admin/seasons/")({
