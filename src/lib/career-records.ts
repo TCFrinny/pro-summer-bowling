@@ -25,7 +25,12 @@
  * No DB access, no schema changes.
  */
 
-import type { PublicSnapshot } from "./mock-data";
+import { getAwardedPoints, type PublicSnapshot } from "./mock-data";
+
+/** Current-season point system. Every current-season match distributes
+ *  exactly 7 points across both sides (see mock-data validation). Used
+ *  to derive the losing side's points from `pointSystem - awarded`. */
+const CURRENT_POINT_SYSTEM = 7;
 
 export type WLT = { wins: number; losses: number; ties: number };
 export type WL = { wins: number; losses: number };
