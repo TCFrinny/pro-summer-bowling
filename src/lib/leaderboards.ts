@@ -30,6 +30,8 @@
  *   Missing values are excluded, never converted to zero.
  */
 
+import { computeCareerRatings, type CareerSeasonContribution } from "./ratings";
+
 // ---------------------------------------------------------------------------
 // Identity + input contribution shape
 // ---------------------------------------------------------------------------
