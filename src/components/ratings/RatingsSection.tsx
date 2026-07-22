@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { BowlerRatings, CareerRatings } from "@/lib/ratings";
-import { formatRating } from "@/lib/ratings";
+import { formatRating, sortCareerContributions } from "@/lib/ratings";
 
 interface Props {
   offense: number | null;
@@ -57,7 +57,7 @@ export function RatingsSection(props: Props) {
         <div className="mt-4 rounded-md border border-border/60 p-3 text-xs">
           <div className="mb-2 font-semibold uppercase tracking-widest text-muted-foreground">Contributing seasons</div>
           <ul className="space-y-1">
-            {careerContributions.map((c) => (
+            {sortCareerContributions(careerContributions).map((c) => (
               <li key={c.seasonId} className="flex flex-wrap justify-between gap-2">
                 <span>{c.seasonLabel ?? c.seasonId}</span>
                 <span className="tabular-nums text-muted-foreground">
