@@ -277,8 +277,8 @@ function WeekRow({
 }
 
 function WeekScheduleEditor({
-  week, seasonId, lanePairLabels, onChanged,
-}: { week: HistoricalWeekRow; seasonId: string; lanePairLabels: string[]; onChanged: () => void }) {
+  week, seasonId, lanePairLabels, pointSystem, onChanged,
+}: { week: HistoricalWeekRow; seasonId: string; lanePairLabels: string[]; pointSystem: 4 | 7; onChanged: () => void }) {
   const qc = useQueryClient();
   const parts = useQuery({
     queryKey: ["admin", "seasons", "participants", seasonId],
