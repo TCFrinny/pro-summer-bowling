@@ -668,6 +668,18 @@ export const adminSaveHistoricalMatchResult = createServerFn({ method: "POST" })
     if (week.published && data.allowPublished !== true) {
       throw new Error(`Week ${week.weekNumber} is published. Set allowPublished=true to modify.`);
     }
+    if (data.pointOverride) {
+      const { pointsA, pointsB } = data.pointOverride;
+      const ps = season.pointSystem;
+      for (const [label, v] of [["A", pointsA], ["B", pointsB]] as const) {
+        if (!Number.isFinite(v) || v < 0 || v > ps) {
+          throw new Error(`Override points ${label} must be between 0 and ${ps}.`);
+        }
+        if (Math.abs(v * 2 - Math.round(v * 2)) > 1e-9) {
+          throw new Error(`Override points ${label} must be in 0.5 increments.`);
+        }
+      }
+    }
 
     // Authoritative participant validation — freeze identity server-side.
     const subIds = await loadSubstituteIds(context.supabase, data.seasonId);
@@ -1155,7 +1167,7 @@ export async function rebuildHistoricalSnapshotServer(sb: Sb, seasonId: string):
   });
 
   const summaryRecords = summaryRaw.map(mapSummaryRow);
-  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords });
+  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords, pointSystem: seasonInfo.pointSystem });
   const participantStats = buildHistoricalParticipantStats({ participants, weeks });
   const snapshot: HistoricalSnapshot = {
     version: 1,

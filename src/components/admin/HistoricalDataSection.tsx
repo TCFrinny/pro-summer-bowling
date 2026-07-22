@@ -58,9 +58,10 @@ interface Props {
   isCurrent: boolean;
   totalWeeksHint: number | null;
   lanePairLabels: string[];
+  pointSystem: 4 | 7;
 }
 
-export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalWeeksHint, lanePairLabels }: Props) {
+export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalWeeksHint, lanePairLabels, pointSystem }: Props) {
   if (isCurrent) {
     return (
       <section className="mt-6 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -75,7 +76,7 @@ export function HistoricalDataSection({ seasonId, seasonLabel, isCurrent, totalW
         <RebuildSnapshotButton seasonId={seasonId} />
       </header>
       <ProgressCard seasonId={seasonId} />
-      <WeeksBlock seasonId={seasonId} totalWeeksHint={totalWeeksHint} lanePairLabels={lanePairLabels} />
+      <WeeksBlock seasonId={seasonId} totalWeeksHint={totalWeeksHint} lanePairLabels={lanePairLabels} pointSystem={pointSystem} />
       <SummaryRecordsBlock seasonId={seasonId} />
     </section>
   );
@@ -140,7 +141,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 
 // ---------- Weeks + per-week schedule + per-slot result ----------
 
-function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels }: { seasonId: string; totalWeeksHint: number | null; lanePairLabels: string[] }) {
+function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels, pointSystem }: { seasonId: string; totalWeeksHint: number | null; lanePairLabels: string[]; pointSystem: 4 | 7 }) {
   const qc = useQueryClient();
   const weeks = useQuery({
     queryKey: ["admin", "historical", "weeks", seasonId],
@@ -184,6 +185,7 @@ function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels }: { seasonId: st
               expanded={selectedWeek === w.id}
               onToggle={() => setSelectedWeek(selectedWeek === w.id ? null : w.id)}
               lanePairLabels={lanePairLabels}
+              pointSystem={pointSystem}
               onChanged={() => qc.invalidateQueries({ queryKey: ["admin", "historical"] })}
             />
           ))}
@@ -194,10 +196,10 @@ function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels }: { seasonId: st
 }
 
 function WeekRow({
-  week, seasonId, expanded, onToggle, lanePairLabels, onChanged,
+  week, seasonId, expanded, onToggle, lanePairLabels, pointSystem, onChanged,
 }: {
   week: HistoricalWeekRow; seasonId: string; expanded: boolean; onToggle: () => void;
-  lanePairLabels: string[]; onChanged: () => void;
+  lanePairLabels: string[]; pointSystem: 4 | 7; onChanged: () => void;
 }) {
   const [date, setDate] = useState(week.date ?? "");
   const [pub, setPub] = useState(week.published);
@@ -269,14 +271,14 @@ function WeekRow({
           className="ml-auto inline-flex items-center gap-1 rounded border border-destructive/40 px-1.5 text-xs text-destructive"
         ><Trash2 className="h-3 w-3" /></button>
       </div>
-      {expanded && <WeekScheduleEditor week={week} seasonId={seasonId} lanePairLabels={lanePairLabels} onChanged={onChanged} />}
+      {expanded && <WeekScheduleEditor week={week} seasonId={seasonId} lanePairLabels={lanePairLabels} pointSystem={pointSystem} onChanged={onChanged} />}
     </div>
   );
 }
 
 function WeekScheduleEditor({
-  week, seasonId, lanePairLabels, onChanged,
-}: { week: HistoricalWeekRow; seasonId: string; lanePairLabels: string[]; onChanged: () => void }) {
+  week, seasonId, lanePairLabels, pointSystem, onChanged,
+}: { week: HistoricalWeekRow; seasonId: string; lanePairLabels: string[]; pointSystem: 4 | 7; onChanged: () => void }) {
   const qc = useQueryClient();
   const parts = useQuery({
     queryKey: ["admin", "seasons", "participants", seasonId],
@@ -347,6 +349,7 @@ function WeekScheduleEditor({
                   rosterOptions={rosterOptions}
                   allOptions={allOptions}
                   sortedLanes={sortedLanes}
+                  pointSystem={pointSystem}
                   onChanged={() => {
                     qc.invalidateQueries({ queryKey: ["admin", "historical", "schedule", week.id] });
                     onChanged();
@@ -391,11 +394,11 @@ function BowlerSelect({ value, onChange, options, placeholder }: {
 }
 
 function SlotRow({
-  slot, seasonId, weekId, weekPublished, rosterOptions, allOptions, sortedLanes, onChanged,
+  slot, seasonId, weekId, weekPublished, rosterOptions, allOptions, sortedLanes, pointSystem, onChanged,
 }: {
   slot: HistoricalSlotRow; seasonId: string; weekId: string; weekPublished: boolean;
   rosterOptions: ParticipantRow[]; allOptions: ParticipantRow[]; sortedLanes: string[];
-  onChanged: () => void;
+  pointSystem: 4 | 7; onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<null | "result" | "slot">(null);
   return (
@@ -440,6 +443,7 @@ function SlotRow({
             <ResultEntryForm
               seasonId={seasonId} weekId={weekId} slot={slot}
               weekPublished={weekPublished}
+              pointSystem={pointSystem}
               rosterOptions={rosterOptions} allOptions={allOptions}
               onSaved={() => { setEditing(null); onChanged(); }}
             />
@@ -505,9 +509,10 @@ type Status = "rostered" | "substitute" | "absent";
 type DetailMode = "game_scores" | "full_linescore";
 
 function ResultEntryForm({
-  seasonId, weekId, slot, weekPublished, rosterOptions, allOptions, onSaved,
+  seasonId, weekId, slot, weekPublished, pointSystem, rosterOptions, allOptions, onSaved,
 }: {
   seasonId: string; weekId: string; slot: HistoricalSlotRow; weekPublished: boolean;
+  pointSystem: 4 | 7;
   rosterOptions: ParticipantRow[]; allOptions: ParticipantRow[]; onSaved: () => void;
 }) {
   const existing = useQuery({
@@ -719,8 +724,8 @@ function ResultEntryForm({
       <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border pt-2">
         <label><input type="checkbox" checked={ovr} onChange={(e) => setOvr(e.target.checked)} /> Override</label>
         {ovr && <>
-          <input type="number" step={0.5} placeholder="pts A" value={ovrA} onChange={(e) => setOvrA(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
-          <input type="number" step={0.5} placeholder="pts B" value={ovrB} onChange={(e) => setOvrB(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
+          <input type="number" min={0} max={pointSystem} step={0.5} placeholder="pts A" value={ovrA} onChange={(e) => setOvrA(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
+          <input type="number" min={0} max={pointSystem} step={0.5} placeholder="pts B" value={ovrB} onChange={(e) => setOvrB(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
           <input type="text" placeholder="reason" value={ovrReason} onChange={(e) => setOvrReason(e.target.value)} className="flex-1 rounded border border-border bg-background px-1" />
         </>}
         <button onClick={save} disabled={busy} className="ml-auto rounded bg-primary px-2 py-0.5 text-primary-foreground disabled:opacity-60">
@@ -737,6 +742,11 @@ function ResultEntryForm({
           className="rounded border border-destructive/40 px-2 py-0.5 text-destructive">Clear</button>
         {msg && <span className="text-[10px] text-muted-foreground">{msg}</span>}
       </div>
+      {ovr && (
+        <p className="text-[10px] text-muted-foreground">
+          Each bowler's losses are calculated as {pointSystem} minus their own points. Override values do not have to add to {pointSystem}.
+        </p>
+      )}
     </div>
   );
 }
