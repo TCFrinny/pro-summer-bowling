@@ -37,8 +37,10 @@ import "./historical-override-semantics";
 import "./historical-privacy-migration";
 import "./seasons-layout-outlet";
 import "./career-advanced";
+import "./career-records";
 import "./ratings";
 import "./champion-and-rebuild";
+
 
 
 

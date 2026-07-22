@@ -318,8 +318,10 @@ function makeLineGame(score: number, strikes = 0, spares = 0, opens = 0) {
     'label="Big Opening / Game"',
     'label="Big Finish / Game"',
     'label="Career POA"',
-    'label="Record (W - L)"',
-    'formatRecord(',
+    'label="Game W-L-T"',
+    'label="Set W-L-T"',
+    'label="Overall W-L"',
+
     'toLocaleString()',
   ];
   for (const s of need) {

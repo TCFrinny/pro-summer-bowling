@@ -16,11 +16,21 @@ import {
   type CareerAdvancedContribution,
   type CareerAdvancedTotals,
 } from "@/lib/career-advanced";
+import {
+  aggregateCareerRecords,
+  emptyContribution,
+  extractCurrentRosterRecordContribution,
+  extractCurrentSubstituteRecordContribution,
+  formatWL,
+  formatWLT,
+  type CareerRecordContribution,
+} from "@/lib/career-records";
 import { RatingsSection } from "@/components/ratings/RatingsSection";
 import { careerRatingQuality, combineAliasRatings, computeCareerRatings, computeSeasonRatings } from "@/lib/ratings";
 import { ratingGamesFromCurrentSeason, ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
 import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { useMemo } from "react";
+
 
 
 
@@ -74,11 +84,13 @@ function PersonPage() {
             <Link to="/bowlers" className="text-sm underline">Roster</Link>
           </PageHeader>
           <CareerBody
+            personId={personId}
             rows={mergeHistoricalIntoCareer(q.data.rows, hist.data?.rows ?? [])}
             advancedContribs={mergeCareerAdvancedContributions(
               q.data.advancedContributions ?? [],
               hist.data?.advancedContributions ?? [],
             )}
+            historicalRecordContribs={hist.data?.recordContributions ?? []}
           />
           <CareerRatingsPanel personId={personId} />
           {q.data.person.notes && (
@@ -89,6 +101,7 @@ function PersonPage() {
     </AppShell>
   );
 }
+
 
 /** Fetch each contributing archived season snapshot, compute its 100-centered
  *  ratings, then aggregate a game-weighted career rating for this permanent
@@ -159,15 +172,41 @@ function CareerRatingsPanel({ personId }: { personId: string }) {
 
 
 function CareerBody({
+  personId,
   rows,
   advancedContribs,
+  historicalRecordContribs,
 }: {
+  personId: string;
   rows: CareerSeasonRow[];
   advancedContribs: CareerAdvancedContribution[];
+  historicalRecordContribs: CareerRecordContribution[];
 }) {
   const sorted = [...rows].sort((a, b) => a.seasonLabel.localeCompare(b.seasonLabel));
   const totals = aggregateCareerTotals(sorted);
   const adv = aggregateCareerAdvanced(advancedContribs);
+  const snap = useCurrentPublicSnapshot();
+  const currentRecordContribs = useMemo<CareerRecordContribution[]>(() => {
+    if (!snap) return [];
+    const out: CareerRecordContribution[] = [];
+    for (const b of snap.bowlers) {
+      if (b.personId === personId) {
+        out.push(extractCurrentRosterRecordContribution(snap, b.id, "current", "2026 Summer"));
+      }
+    }
+    for (const s of snap.substitutes ?? []) {
+      if (s.personId === personId) {
+        out.push(extractCurrentSubstituteRecordContribution(snap, s.id, "current", "2026 Summer"));
+      }
+    }
+    return out;
+  }, [snap, personId]);
+  const records = useMemo(
+    () => aggregateCareerRecords([...currentRecordContribs, ...historicalRecordContribs]),
+    [currentRecordContribs, historicalRecordContribs],
+  );
+  // silence unused warning for emptyContribution import when only reading formatters
+  void emptyContribution;
   if (sorted.length === 0) {
     return <EmptyState title="No public seasons yet" description="This person has no public rostered or substitute record." />;
   }
@@ -181,15 +220,21 @@ function CareerBody({
         <Stat label="Seasons w/ Game Data" value={totals.seasonsWithGameData} />
       </section>
 
-      <CareerAdvancedCards totals={adv} totalsBasic={totals} />
+      <CareerAdvancedCards totals={adv} totalsBasic={totals} records={records} />
 
       <p className="text-xs text-muted-foreground">
-        Basic stats include game-score-only historical rows. Frame-derived stats
-        (marks, pins lost, first 5 / last 5, clutch, consistency) come only from
-        full-linescore data and show <span aria-label="unavailable">—</span> when
-        unavailable. Record (points won – points lost), handicap pinfall are
-        roster credit only; substitute weeks contribute personal stats only.
+        <strong>Game W-L-T</strong> and <strong>Set W-L-T</strong> follow the person who
+        actually rolled the games — including substitute weeks — and compare handicap-adjusted
+        game totals and three-game totals. <strong>Overall W-L</strong> is official league-point
+        credit for the scheduled rostered bowler, includes point overrides, and includes weeks a
+        substitute rolled in their place. Personal Game W-L-T does not have to numerically
+        equal Overall W-L. Frame-derived stats (marks, pins lost, first 5 / last 5, clutch,
+        consistency) come only from full-linescore data and show
+        <span aria-label="unavailable"> —</span> when unavailable.
       </p>
+
+
+
 
 
       <section className="rounded-lg border border-border bg-card">
@@ -247,19 +292,19 @@ function CareerBody({
 function CareerAdvancedCards({
   totals,
   totalsBasic,
+  records,
 }: {
   totals: CareerAdvancedTotals;
   totalsBasic: ReturnType<typeof aggregateCareerTotals>;
+  records: ReturnType<typeof aggregateCareerRecords>;
 }) {
   const dash = (v: number | null | undefined) => (v == null ? "—" : v);
   const fixed = (v: number | null, digits = 1) => (v == null ? "—" : v.toFixed(digits));
   const pct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
   const loc = (v: number | null | undefined) =>
     v == null ? "—" : v.toLocaleString();
-  const record =
-    totals.pointsCredited != null || totals.pointsLost != null
-      ? formatRecord(totals.pointsCredited ?? 0, totals.pointsLost ?? 0)
-      : "—";
+  // Retain legacy scratch record for fallback only when new records are unavailable.
+  void formatRecord;
   const poa = (() => {
     const v = totals.careerPOA;
     if (v == null) return "—";
@@ -270,7 +315,9 @@ function CareerAdvancedCards({
   })();
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
-      <Stat label="Record (W - L)" value={record} />
+      <Stat label="Game W-L-T" value={formatWLT(records.gameRecord)} />
+      <Stat label="Set W-L-T" value={formatWLT(records.setRecord)} />
+      <Stat label="Overall W-L" value={formatWL(records.overallRecord)} />
       <Stat label="Scratch Pinfall" value={loc(totalsBasic.totalScratchPinfall || null)} />
       <Stat label="Handicap Pinfall" value={loc(totals.handicapPinfall)} />
       <Stat label="High Game" value={dash(totalsBasic.highGame)} />
@@ -298,6 +345,7 @@ function CareerAdvancedCards({
     </section>
   );
 }
+
 
 
 function Stat({ label, value }: { label: string; value: string | number }) {

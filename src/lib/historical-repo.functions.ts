@@ -50,6 +50,13 @@ import {
   extractHistoricalAdvancedContribution,
   type CareerAdvancedContribution,
 } from "@/lib/career-advanced";
+import {
+  extractHistoricalRecordContribution,
+  extractHistoricalSummaryRecordContribution,
+  type CareerRecordContribution,
+} from "@/lib/career-records";
+
+
 
 
 // ---------------------------------------------------------------
@@ -1367,6 +1374,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
 
     const rows: HistoricalCareerContribution[] = [];
     const advancedContributions: CareerAdvancedContribution[] = [];
+    const recordContributions: CareerRecordContribution[] = [];
     if (!snaps.error && snaps.data) {
       for (const row of (snaps.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>)) {
         const meta = seasonMeta.get(row.season_id);
@@ -1375,11 +1383,7 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
         // season page. Otherwise unpublished-week points, games, and
         // frame stats leak onto the permanent career profile.
         const snap = filterPublicHistoricalSnapshot(row.snapshot);
-        // Champion is derived from snapshot completeness, not stored on
-        // the row: an unpublished-final-week season must not surface a
-        // championship on career profiles.
         const champ = deriveHistoricalChampion(snap);
-        // Match participants by personId.
         for (const p of snap.participants ?? []) {
           if (p.personId !== data.personId) continue;
           const standings = (snap.standings ?? []).find((s) => s.participantRef === p.ref) ?? null;
@@ -1413,9 +1417,21 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
               participantStats: snap.participantStats,
             }),
           );
+          recordContributions.push(
+            extractHistoricalRecordContribution({
+              seasonId: row.season_id,
+              seasonLabel: meta.label,
+              role: p.role,
+              participantRef: p.ref,
+              weeks: snap.weeks,
+              standings: snap.standings,
+            }),
+          );
         }
       }
     }
+
+
 
 
     // Summary-only fallback: rows tagged with this person that snapshot
@@ -1470,9 +1486,18 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             pointsLost,
           });
         }
+        recordContributions.push(extractHistoricalSummaryRecordContribution({
+          seasonId: sid,
+          seasonLabel: meta.label,
+          role,
+          participantRef: String(r.participant_ref),
+          points,
+          pointsLost,
+        }));
       }
     }
 
-    return { rows: dedupeHistoricalContributions(rows), advancedContributions };
+    return { rows: dedupeHistoricalContributions(rows), advancedContributions, recordContributions };
   });
+
 
