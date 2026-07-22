@@ -178,7 +178,7 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   const m = src.match(/export interface AllTimeRow \{([\s\S]*?)\n\}/);
   assert(m, "AllTimeRow interface must exist");
   const body = m![1];
-  for (const f of ["snapshot", "matchesByWeek", "linescore", "weeks:", "history:"]) {
+  for (const f of ["snapshot", "matchesByWeek", "linescoreA", "linescoreB", "weeks:", "history:"]) {
     assert(!body.toLowerCase().includes(f.toLowerCase()),
       `AllTimeRow must not expose ${f}`);
   }
