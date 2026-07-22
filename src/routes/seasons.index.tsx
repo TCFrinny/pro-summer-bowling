@@ -38,9 +38,11 @@ function SeasonsPage() {
           legacyOnly={!q.data.available}
         />
       )}
+      <AllTimeLeaderboards />
     </AppShell>
   );
 }
+
 
 function SeasonsList({
   seasons,
