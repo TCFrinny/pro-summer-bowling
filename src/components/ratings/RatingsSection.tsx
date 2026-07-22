@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { BowlerRatings, CareerRatings } from "@/lib/ratings";
-import { formatRating } from "@/lib/ratings";
+import { formatRating, sortCareerContributions } from "@/lib/ratings";
 
 interface Props {
   offense: number | null;

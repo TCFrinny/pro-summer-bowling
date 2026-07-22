@@ -797,6 +797,30 @@ export function computeCareerRatings(
   };
 }
 
+/** Sort career contributions newest-first by the four-digit year in the
+ *  season label. Seasons with the same year are sorted by label descending,
+ *  then by `seasonId` as a stable tie-breaker. Entries with no usable year
+ *  are placed last. The input array is never mutated. */
+export function sortCareerContributions(
+  contributions: readonly CareerSeasonContribution[],
+): CareerSeasonContribution[] {
+  const yearFromLabel = (label?: string): number | null => {
+    if (!label) return null;
+    const m = label.match(/\b(19|20)\d{2}\b/);
+    return m ? parseInt(m[1], 10) : null;
+  };
+  return [...contributions].sort((a, b) => {
+    const ya = yearFromLabel(a.seasonLabel);
+    const yb = yearFromLabel(b.seasonLabel);
+    if (ya != null && yb == null) return -1;
+    if (ya == null && yb != null) return 1;
+    if (ya != null && yb != null && ya !== yb) return yb - ya;
+    const labelCmp = (b.seasonLabel ?? "").localeCompare(a.seasonLabel ?? "");
+    if (labelCmp !== 0) return labelCmp;
+    return (a.seasonId ?? "").localeCompare(b.seasonId ?? "");
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Multi-alias combination within a single already-normalized season
 // ---------------------------------------------------------------------------
