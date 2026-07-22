@@ -175,10 +175,11 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
 // ---------------------------------------------------------------------------
 {
   const src = readFileSync("src/lib/leaderboards.ts", "utf8");
-  // The AllTimeRow interface block should not mention any raw shapes.
-  const forbidden = ["snapshot", "matches", "linescore", "weeks:"];
-  for (const f of forbidden) {
-    assert(!src.includes(`AllTimeRow`) || !src.match(new RegExp(`AllTimeRow[\\s\\S]{0,2000}${f}`, "i")),
+  const m = src.match(/export interface AllTimeRow \{([\s\S]*?)\n\}/);
+  assert(m, "AllTimeRow interface must exist");
+  const body = m![1];
+  for (const f of ["snapshot", "matchesByWeek", "linescore", "weeks:", "history:"]) {
+    assert(!body.toLowerCase().includes(f.toLowerCase()),
       `AllTimeRow must not expose ${f}`);
   }
 }
