@@ -5,10 +5,13 @@
 
 import {
   aggregateCareerTotals,
+  compareSeasonsChronological,
   filterPublicSeasons,
   normalizeName,
   parseSnapshotBackwardCompat,
   planPersonMerge,
+  seasonSortYear,
+  sortSeasonsChronological,
   summarizeCapacityList,
   summarizeLanePairs,
   withPersonId,
