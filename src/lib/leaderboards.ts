@@ -30,9 +30,23 @@
  *   Missing values are excluded, never converted to zero.
  */
 
+import { computeCareerRatings, type CareerSeasonContribution } from "./ratings";
+
 // ---------------------------------------------------------------------------
 // Identity + input contribution shape
 // ---------------------------------------------------------------------------
+
+/** Route kinds for public leaderboard rows. `Person` links to permanent
+ *  career profile; the other three name the correct unlinked seasonal
+ *  profile (current-season roster/sub or archived historical). */
+export const LeaderboardIdentityKind = {
+  Person: "person",
+  CurrentRoster: "current-roster",
+  CurrentSub: "current-sub",
+  Historical: "historical",
+} as const;
+export type LeaderboardIdentityKind =
+  (typeof LeaderboardIdentityKind)[keyof typeof LeaderboardIdentityKind];
 
 export interface LeaderboardIdentity {
   key: string;                    // dedup key; see IDENTITY MODEL above
@@ -40,6 +54,9 @@ export interface LeaderboardIdentity {
   personId: string | null;
   unlinkedSeasonId: string | null;
   unlinkedParticipantRef: string | null;
+  /** Explicit route kind. Optional for back-compat; defaults to Historical
+   *  when unlinked and Person when personId is present. */
+  hrefKind?: LeaderboardIdentityKind;
 }
 
 /** A per-season contribution for a single identity. Missing measurements
@@ -142,12 +159,15 @@ export function aggregateSeasonContributions(
     strikes: number; spares: number; opens: number;
     framesRolled: number; openPinsLeft: number;
     clutchMarks: number; clutchOpportunities: number;
-    offNum: number; offDen: number;
-    defNum: number; defDen: number;
+    offense: number | null; defense: number | null; twoWay: number | null;
     actualRatingGames: number; opponentRatingGames: number;
     fullLinescoreGames: number;
   }
   const map = new Map<string, Acc>();
+  // One CareerSeasonContribution per per-season row, grouped by identity.
+  // Rating aggregation is delegated to `computeCareerRatings` so the
+  // all-time leaderboard cannot diverge from permanent career profiles.
+  const ratingContribsByKey = new Map<string, CareerSeasonContribution[]>();
   for (const c of contribs) {
     let a = map.get(c.identityKey);
     if (!a) {
@@ -161,7 +181,7 @@ export function aggregateSeasonContributions(
         strikes: 0, spares: 0, opens: 0,
         framesRolled: 0, openPinsLeft: 0,
         clutchMarks: 0, clutchOpportunities: 0,
-        offNum: 0, offDen: 0, defNum: 0, defDen: 0,
+        offense: null, defense: null, twoWay: null,
         actualRatingGames: 0, opponentRatingGames: 0, fullLinescoreGames: 0,
       };
       map.set(c.identityKey, a);
@@ -184,22 +204,32 @@ export function aggregateSeasonContributions(
     a.openPinsLeft = addN(a.openPinsLeft, c.openPinsLeft);
     a.clutchMarks = addN(a.clutchMarks, c.clutchMarks);
     a.clutchOpportunities = addN(a.clutchOpportunities, c.clutchOpportunities);
-    if (c.offense != null && c.actualRatingGames > 0) {
-      a.offNum += c.offense * c.actualRatingGames; a.offDen += c.actualRatingGames;
-    }
-    if (c.defense != null && c.opponentRatingGames > 0) {
-      a.defNum += c.defense * c.opponentRatingGames; a.defDen += c.opponentRatingGames;
-    }
-    a.actualRatingGames += c.actualRatingGames;
-    a.opponentRatingGames += c.opponentRatingGames;
-    a.fullLinescoreGames += c.fullLinescoreGames;
+    const arr = ratingContribsByKey.get(c.identityKey) ?? [];
+    arr.push({
+      seasonId: "",
+      offense: c.offense,
+      defense: c.defense,
+      actualGames: c.actualRatingGames,
+      opponentGames: c.opponentRatingGames,
+      fullLinescoreGames: c.fullLinescoreGames,
+    });
+    ratingContribsByKey.set(c.identityKey, arr);
+  }
+  for (const [key, entries] of ratingContribsByKey.entries()) {
+    const a = map.get(key);
+    if (!a) continue;
+    const cr = computeCareerRatings(key, entries);
+    a.offense = cr.offensiveRating;
+    a.defense = cr.matchupDefense;
+    a.twoWay = cr.twoWayRating;
+    a.actualRatingGames = cr.totals.actualGames;
+    a.opponentRatingGames = cr.totals.opponentGames;
+    a.fullLinescoreGames = cr.totals.fullLinescoreGames;
   }
   const out: AllTimeRow[] = [];
   for (const a of map.values()) {
     const marks = a.strikes + a.spares;
     const spareOpp = a.spares + a.opens;
-    const off = a.offDen > 0 ? Number((a.offNum / a.offDen).toFixed(1)) : null;
-    const def = a.defDen > 0 ? Number((a.defNum / a.defDen).toFixed(1)) : null;
     out.push({
       identity: a.identity,
       championships: a.championships,
@@ -227,9 +257,9 @@ export function aggregateSeasonContributions(
       clutchMarks: a.clutchMarks,
       clutchOpportunities: a.clutchOpportunities,
       clutchPct: a.clutchOpportunities > 0 ? (a.clutchMarks / a.clutchOpportunities) * 100 : null,
-      offense: off,
-      defense: def,
-      twoWay: off != null && def != null ? Number((0.7 * off + 0.3 * def).toFixed(1)) : null,
+      offense: a.offense,
+      defense: a.defense,
+      twoWay: a.twoWay,
       actualRatingGames: a.actualRatingGames,
       opponentRatingGames: a.opponentRatingGames,
       fullLinescoreGames: a.fullLinescoreGames,
@@ -537,15 +567,16 @@ export function buildLeaderboard(
     return nameCmp(a.id.displayName, b.id.displayName);
   });
 
-  // Competition ranking; include every row tied at rank <= limit.
+  // Competition ranking on the PRIMARY metric only. Rows with equal
+  // primary values share the same rank even when their samples differ
+  // (sample is a within-rank sort tiebreaker, not part of the rank key).
   const entries: LeaderboardEntry[] = [];
   let rank = 0;
-  let prevKey: string | null = null;
+  let prevV: number | null = null;
   for (let i = 0; i < eligible.length; i++) {
     const cur = eligible[i];
-    const key = `${cur.v}|${cur.sample}`;
-    if (prevKey !== key) rank = i + 1;
-    prevKey = key;
+    if (prevV === null || cur.v !== prevV) rank = i + 1;
+    prevV = cur.v;
     if (rank > limit) break;
     entries.push({
       rank,

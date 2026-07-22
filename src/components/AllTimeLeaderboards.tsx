@@ -162,20 +162,43 @@ export function AllTimeLeaderboards() {
 function NameLink({
   identity,
 }: {
-  identity: { displayName: string; personId: string | null; unlinkedSeasonId: string | null; unlinkedParticipantRef: string | null };
+  identity: {
+    displayName: string;
+    personId: string | null;
+    unlinkedSeasonId: string | null;
+    unlinkedParticipantRef: string | null;
+    hrefKind?: "person" | "current-roster" | "current-sub" | "historical";
+  };
 }) {
-  if (identity.personId) {
+  const cls = "text-foreground hover:text-primary hover:underline";
+  // Explicit route kind wins; fall back for older aggregate payloads.
+  const kind = identity.hrefKind ?? (identity.personId ? "person" : "historical");
+  if (kind === "person" && identity.personId) {
+    return (
+      <Link to="/people/$personId" params={{ personId: identity.personId }} className={cls}>
+        {identity.displayName}
+      </Link>
+    );
+  }
+  if (kind === "current-roster" && identity.unlinkedParticipantRef) {
+    return (
+      <Link to="/bowlers/$bowlerId" params={{ bowlerId: identity.unlinkedParticipantRef }} className={cls}>
+        {identity.displayName}
+      </Link>
+    );
+  }
+  if (kind === "current-sub" && identity.unlinkedParticipantRef) {
     return (
       <Link
-        to="/people/$personId"
-        params={{ personId: identity.personId }}
-        className="text-foreground hover:text-primary hover:underline"
+        to="/bowlers/sub/$substituteId"
+        params={{ substituteId: identity.unlinkedParticipantRef }}
+        className={cls}
       >
         {identity.displayName}
       </Link>
     );
   }
-  if (identity.unlinkedSeasonId && identity.unlinkedParticipantRef) {
+  if (kind === "historical" && identity.unlinkedSeasonId && identity.unlinkedParticipantRef) {
     return (
       <Link
         to="/seasons/$seasonId/bowlers/$participantRef"
@@ -183,7 +206,7 @@ function NameLink({
           seasonId: identity.unlinkedSeasonId,
           participantRef: identity.unlinkedParticipantRef,
         }}
-        className="text-foreground hover:text-primary hover:underline"
+        className={cls}
       >
         {identity.displayName}
       </Link>
