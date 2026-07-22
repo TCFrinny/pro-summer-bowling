@@ -1486,9 +1486,18 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
             pointsLost,
           });
         }
+        recordContributions.push(extractHistoricalSummaryRecordContribution({
+          seasonId: sid,
+          seasonLabel: meta.label,
+          role,
+          participantRef: String(r.participant_ref),
+          points,
+          pointsLost,
+        }));
       }
     }
 
-    return { rows: dedupeHistoricalContributions(rows), advancedContributions };
+    return { rows: dedupeHistoricalContributions(rows), advancedContributions, recordContributions };
   });
+
 
