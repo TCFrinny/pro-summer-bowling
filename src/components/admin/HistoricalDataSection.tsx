@@ -742,6 +742,11 @@ function ResultEntryForm({
           className="rounded border border-destructive/40 px-2 py-0.5 text-destructive">Clear</button>
         {msg && <span className="text-[10px] text-muted-foreground">{msg}</span>}
       </div>
+      {ovr && (
+        <p className="text-[10px] text-muted-foreground">
+          Each bowler's losses are calculated as {pointSystem} minus their own points. Override values do not have to add to {pointSystem}.
+        </p>
+      )}
     </div>
   );
 }
