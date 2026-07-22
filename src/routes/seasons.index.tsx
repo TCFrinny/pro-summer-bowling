@@ -32,6 +32,7 @@ function SeasonsPage() {
         <SeasonsList
           seasons={filterPublicSeasons(q.data.seasons)}
           bowlerCounts={q.data.bowlerCounts}
+          champions={q.data.champions ?? {}}
           legacyOnly={!q.data.available}
         />
       )}
@@ -42,10 +43,12 @@ function SeasonsPage() {
 function SeasonsList({
   seasons,
   bowlerCounts,
+  champions,
   legacyOnly,
 }: {
   seasons: ReturnType<typeof filterPublicSeasons>;
   bowlerCounts: Record<string, number>;
+  champions: Record<string, { displayName: string; personId: string | null }>;
   legacyOnly: boolean;
 }) {
   if (seasons.length === 0) {
@@ -63,7 +66,7 @@ function SeasonsList({
       {current && (
         <section>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Current</h2>
-          <SeasonCard season={current} badge="Current" bowlerCount={bowlerCounts[current.id]} />
+          <SeasonCard season={current} badge="Current" bowlerCount={bowlerCounts[current.id]} champion={null} />
         </section>
       )}
       <section>
@@ -73,7 +76,7 @@ function SeasonsList({
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {archived.map((s) => (
-              <SeasonCard key={s.id} season={s} badge="Archived" bowlerCount={bowlerCounts[s.id]} />
+              <SeasonCard key={s.id} season={s} badge="Archived" bowlerCount={bowlerCounts[s.id]} champion={champions[s.id] ?? null} />
             ))}
           </div>
         )}
@@ -86,10 +89,12 @@ function SeasonCard({
   season,
   badge,
   bowlerCount,
+  champion,
 }: {
   season: ReturnType<typeof filterPublicSeasons>[number];
   badge: "Current" | "Archived";
   bowlerCount?: number;
+  champion: { displayName: string; personId: string | null } | null;
 }) {
   return (
     <Link
@@ -131,6 +136,13 @@ function SeasonCard({
           <dd>{bowlerCount ?? "—"}</dd>
         </div>
       </dl>
+      {champion && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs">
+          <span aria-hidden>🏆</span>
+          <span className="text-muted-foreground">Champion:</span>
+          <span className="font-medium">{champion.displayName}</span>
+        </div>
+      )}
       {season.description && (
         <p className="mt-3 text-sm text-muted-foreground line-clamp-2">{season.description}</p>
       )}

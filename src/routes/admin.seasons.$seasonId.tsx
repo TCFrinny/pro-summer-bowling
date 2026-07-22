@@ -145,7 +145,7 @@ function MetadataForm({
           setSaving(true);
           setMsg(null);
           try {
-            await adminUpsertSeason({
+            const res = await adminUpsertSeason({
               data: {
                 id: season.id,
                 label: label.trim(),
@@ -161,7 +161,13 @@ function MetadataForm({
                 description: description || null,
               },
             });
-            setMsg("Saved.");
+            if (res && "rebuildError" in res && res.rebuildError) {
+              setMsg("Saved. Snapshot rebuild failed: " + String(res.rebuildError));
+            } else if (res && "rebuilt" in res && res.rebuilt) {
+              setMsg("Saved. Historical snapshot rebuilt for the updated point system / week count.");
+            } else {
+              setMsg("Saved.");
+            }
             await onSaved();
           } catch (err) {
             setMsg(err instanceof Error ? err.message : "Save failed");
@@ -176,10 +182,20 @@ function MetadataForm({
             <option value="7">7-point</option>
             <option value="4">4-point</option>
           </select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Changing the point system for a non-current season recomputes every saved match
+            outcome from stored game scores and rebuilds the snapshot.
+          </p>
         </Field>
         <Field label="Start date"><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputCls} /></Field>
         <Field label="End date"><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputCls} /></Field>
-        <Field label="Total weeks"><input type="number" min={1} max={60} value={totalWeeks} onChange={(e) => setTotalWeeks(e.target.value)} className={inputCls} /></Field>
+        <Field label="Total weeks">
+          <input type="number" min={1} max={60} value={totalWeeks} onChange={(e) => setTotalWeeks(e.target.value)} className={inputCls} />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Total weeks determines season completion. A champion is only shown once every
+            week from 1 to Total weeks is published and completed.
+          </p>
+        </Field>
         <Field label="Handicap %"><input type="number" min={0} max={100} value={handicapPercent} onChange={(e) => setHandicapPercent(e.target.value)} className={inputCls} /></Field>
         <Field label="Handicap base"><input type="number" min={0} max={300} value={handicapBase} onChange={(e) => setHandicapBase(e.target.value)} className={inputCls} /></Field>
         {season.status !== "current" && (

@@ -562,6 +562,56 @@ export function filterPublicHistoricalSnapshot(snap: HistoricalSnapshot): Histor
   };
 }
 
+// ---------------- Season completion + champion derivation ----------------
+
+export interface HistoricalChampion {
+  participantRef: string;
+  personId: string | null;
+  displayName: string;
+}
+
+/** True only when totalWeeks is a positive integer AND every week number
+ *  1..totalWeeks exists in `snap.weeks` and is BOTH published AND
+ *  completed. Any missing / unpublished / incomplete week => false. */
+export function isHistoricalSeasonComplete(
+  snap: Pick<HistoricalSnapshot, "totalWeeks" | "weeks">,
+): boolean {
+  const tw = snap.totalWeeks;
+  if (tw == null || !Number.isInteger(tw) || tw <= 0) return false;
+  const byNum = new Map<number, HistoricalWeekSummary>();
+  for (const w of snap.weeks) byNum.set(w.weekNumber, w);
+  for (let n = 1; n <= tw; n++) {
+    const w = byNum.get(n);
+    if (!w || !w.published || !w.completed) return false;
+  }
+  return true;
+}
+
+/** Derived champion for a historical snapshot. Returns `null` unless the
+ *  season is fully complete. When complete:
+ *   1) prefer a single explicit summaryRecords[].isChampion,
+ *   2) otherwise the standings row ranked #1. */
+export function deriveHistoricalChampion(snap: HistoricalSnapshot): HistoricalChampion | null {
+  if (!isHistoricalSeasonComplete(snap)) return null;
+  const explicit = (snap.summaryRecords ?? []).filter((r) => r.isChampion === true);
+  if (explicit.length === 1) {
+    const e = explicit[0];
+    return {
+      participantRef: e.participantRef,
+      personId: e.personId ?? null,
+      displayName: e.displayName || e.participantRef,
+    };
+  }
+  const top = (snap.standings ?? []).find((r) => r.rank === 1);
+  if (!top) return null;
+  const meta = snap.participants.find((p) => p.ref === top.participantRef);
+  return {
+    participantRef: top.participantRef,
+    personId: top.personId ?? meta?.personId ?? null,
+    displayName: top.displayName || meta?.displayName || top.participantRef,
+  };
+}
+
 // ---------------- Career aggregation from historical snapshots -----------
 
 export interface HistoricalCareerContribution {

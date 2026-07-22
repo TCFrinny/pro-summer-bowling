@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getPublicHistoricalSnapshot } from "@/lib/historical-repo.functions";
 import { EmptyState } from "@/components/layout/AppShell";
+import { isHistoricalSeasonComplete, deriveHistoricalChampion } from "@/lib/historical-snapshot";
 
 export const Route = createFileRoute("/seasons/$seasonId/standings")({
   component: StandingsPage,
@@ -21,6 +22,10 @@ function StandingsPage() {
   // pinfall → scratch pinfall; render in that same order without local
   // re-sort so the tiebreaker is not accidentally masked.
   const rows = snap.standings;
+  // Only show the trophy when the season is fully complete AND the champion
+  // is derivable — never on an in-progress season.
+  const complete = isHistoricalSeasonComplete(snap);
+  const champion = complete ? deriveHistoricalChampion(snap) : null;
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <table className="min-w-full text-sm">
@@ -39,25 +44,29 @@ function StandingsPage() {
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {rows.map((r) => (
-            <tr key={r.participantRef}>
-              <td className="px-3 py-2">{r.rank}</td>
-              <td className="px-3 py-2">
-                <Link to="/seasons/$seasonId/bowlers/$participantRef"
-                  params={{ seasonId, participantRef: r.participantRef }}
-                  className="underline">{r.displayName}</Link>
-                {r.fromSummaryOnly && <span className="ml-1 text-[10px] text-muted-foreground">(summary)</span>}
-              </td>
-              <td className="px-3 py-2 text-right">{r.matchesPlayed}</td>
-              <td className="px-3 py-2 text-right">{r.points ?? "—"}</td>
-              <td className="px-3 py-2 text-right">{r.pointsLost ?? "—"}</td>
-              <td className="px-3 py-2 text-right">{r.handicapPinfall ?? "—"}</td>
-              <td className="px-3 py-2 text-right">{r.games ?? "—"}</td>
-              <td className="px-3 py-2 text-right">{r.scratchPinfall ?? "—"}</td>
-              <td className="px-3 py-2 text-right">{r.scratchAverage != null ? r.scratchAverage.toFixed(1) : "—"}</td>
-              <td className="px-3 py-2 text-right">{(r.highGame ?? "—") + " / " + (r.highSet ?? "—")}</td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const isChamp = champion?.participantRef === r.participantRef;
+            return (
+              <tr key={r.participantRef}>
+                <td className="px-3 py-2">{r.rank}</td>
+                <td className="px-3 py-2">
+                  {isChamp && <span aria-label="Season champion" title="Season champion" className="mr-1">🏆</span>}
+                  <Link to="/seasons/$seasonId/bowlers/$participantRef"
+                    params={{ seasonId, participantRef: r.participantRef }}
+                    className="underline">{r.displayName}</Link>
+                  {r.fromSummaryOnly && <span className="ml-1 text-[10px] text-muted-foreground">(summary)</span>}
+                </td>
+                <td className="px-3 py-2 text-right">{r.matchesPlayed}</td>
+                <td className="px-3 py-2 text-right">{r.points ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{r.pointsLost ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{r.handicapPinfall ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{r.games ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{r.scratchPinfall ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{r.scratchAverage != null ? r.scratchAverage.toFixed(1) : "—"}</td>
+                <td className="px-3 py-2 text-right">{(r.highGame ?? "—") + " / " + (r.highSet ?? "—")}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
