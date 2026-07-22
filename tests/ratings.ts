@@ -6,7 +6,7 @@ import {
   buildEnvironment, popStdev, zToRating, shrinkZ, twoWay,
   computeSeasonRatings, computeCareerRatings,
   leaderboardOffense, leaderboardDefense, leaderboardTwoWay,
-  careerRatingQuality, combineAliasRatings,
+  careerRatingQuality, combineAliasRatings, sortCareerContributions,
   type RatingGame, type RatingFrameStats, type BowlerRatings,
 } from "../src/lib/ratings";
 import { frameStatsFromLinescore } from "../src/lib/ratings-extract";
