@@ -34,12 +34,27 @@
 // Identity + input contribution shape
 // ---------------------------------------------------------------------------
 
+/** Route kinds for public leaderboard rows. `Person` links to permanent
+ *  career profile; the other three name the correct unlinked seasonal
+ *  profile (current-season roster/sub or archived historical). */
+export const LeaderboardIdentityKind = {
+  Person: "person",
+  CurrentRoster: "current-roster",
+  CurrentSub: "current-sub",
+  Historical: "historical",
+} as const;
+export type LeaderboardIdentityKind =
+  (typeof LeaderboardIdentityKind)[keyof typeof LeaderboardIdentityKind];
+
 export interface LeaderboardIdentity {
   key: string;                    // dedup key; see IDENTITY MODEL above
   displayName: string;
   personId: string | null;
   unlinkedSeasonId: string | null;
   unlinkedParticipantRef: string | null;
+  /** Explicit route kind. Optional for back-compat; defaults to Historical
+   *  when unlinked and Person when personId is present. */
+  hrefKind?: LeaderboardIdentityKind;
 }
 
 /** A per-season contribution for a single identity. Missing measurements
