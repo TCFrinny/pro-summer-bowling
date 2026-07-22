@@ -84,11 +84,13 @@ function PersonPage() {
             <Link to="/bowlers" className="text-sm underline">Roster</Link>
           </PageHeader>
           <CareerBody
+            personId={personId}
             rows={mergeHistoricalIntoCareer(q.data.rows, hist.data?.rows ?? [])}
             advancedContribs={mergeCareerAdvancedContributions(
               q.data.advancedContributions ?? [],
               hist.data?.advancedContributions ?? [],
             )}
+            historicalRecordContribs={hist.data?.recordContributions ?? []}
           />
           <CareerRatingsPanel personId={personId} />
           {q.data.person.notes && (
@@ -99,6 +101,7 @@ function PersonPage() {
     </AppShell>
   );
 }
+
 
 /** Fetch each contributing archived season snapshot, compute its 100-centered
  *  ratings, then aggregate a game-weighted career rating for this permanent
