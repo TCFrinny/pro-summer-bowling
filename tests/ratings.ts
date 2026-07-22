@@ -474,12 +474,10 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
   ];
   const sorted = sortCareerContributions(shuffled);
   const labels = sorted.map((c) => c.seasonLabel);
-  assert.deepStrictEq
-    ? assert.deepStrictEq
-    : assert(
-        labels.join(",") === "2026 Summer,2025 Summer,2024 Summer,2023 Summer,2022 Summer,Legacy archive",
-        "career contributions sorted newest-first, undated last",
-      );
+  assert(
+    labels.join(",") === "2026 Summer,2025 Summer,2024 Summer,2023 Summer,2022 Summer,Legacy archive",
+    "career contributions sorted newest-first, undated last",
+  );
   // Ensure input was not mutated.
   assert(
     shuffled[0].seasonLabel === "2024 Summer",
