@@ -457,6 +457,37 @@ function fullFrame(strikes: number, spares: number, opens: number, cm = 0, co = 
   }
 })();
 
+// Career contribution UI sort: newest season first; out-of-order input
+// including an undated legacy label must become chronological descending.
+(function careerContributionSort() {
+  const mk = (seasonId: string, seasonLabel: string) => ({
+    seasonId, seasonLabel, offense: 100, defense: 100,
+    actualGames: 1, opponentGames: 1, fullLinescoreGames: 1,
+  });
+  const shuffled = [
+    mk("s-2024", "2024 Summer"),
+    mk("s-2026", "2026 Summer"),
+    mk("legacy", "Legacy archive"),
+    mk("s-2023", "2023 Summer"),
+    mk("s-2022", "2022 Summer"),
+    mk("s-2025", "2025 Summer"),
+  ];
+  const sorted = sortCareerContributions(shuffled);
+  const labels = sorted.map((c) => c.seasonLabel);
+  assert.deepStrictEq
+    ? assert.deepStrictEq
+    : assert(
+        labels.join(",") === "2026 Summer,2025 Summer,2024 Summer,2023 Summer,2022 Summer,Legacy archive",
+        "career contributions sorted newest-first, undated last",
+      );
+  // Ensure input was not mutated.
+  assert(
+    shuffled[0].seasonLabel === "2024 Summer",
+    "sortCareerContributions does not mutate its input",
+  );
+})();
+
 // eslint-disable-next-line no-console
 console.log("ratings tests passed");
+
 
