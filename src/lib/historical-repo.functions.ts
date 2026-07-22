@@ -50,6 +50,13 @@ import {
   extractHistoricalAdvancedContribution,
   type CareerAdvancedContribution,
 } from "@/lib/career-advanced";
+import {
+  extractHistoricalRecordContribution,
+  extractHistoricalSummaryRecordContribution,
+  type CareerRecordContribution,
+} from "@/lib/career-records";
+
+
 
 
 // ---------------------------------------------------------------
