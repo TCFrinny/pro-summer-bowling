@@ -394,11 +394,11 @@ function BowlerSelect({ value, onChange, options, placeholder }: {
 }
 
 function SlotRow({
-  slot, seasonId, weekId, weekPublished, rosterOptions, allOptions, sortedLanes, onChanged,
+  slot, seasonId, weekId, weekPublished, rosterOptions, allOptions, sortedLanes, pointSystem, onChanged,
 }: {
   slot: HistoricalSlotRow; seasonId: string; weekId: string; weekPublished: boolean;
   rosterOptions: ParticipantRow[]; allOptions: ParticipantRow[]; sortedLanes: string[];
-  onChanged: () => void;
+  pointSystem: 4 | 7; onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<null | "result" | "slot">(null);
   return (
