@@ -1360,12 +1360,21 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
     // Snapshot contributions: filter snapshots to public seasons only.
     const snaps = await (sb.from as unknown as LooseFrom)("historical_season_snapshots")
       .select("season_id,snapshot");
+    if (snaps.error && !isMissingTable(snaps.error.code)) {
+      // FAIL CLOSED — partial data must never surface on a public career
+      // profile. Missing-table is the one benign case (migration not
+      // applied yet); every other DB error blocks the response.
+      throw new Error(`historical_season_snapshots read failed: ${snaps.error.message}`);
+    }
     const seasonMeta = new Map<string, { label: string }>();
     if (!snaps.error && snaps.data) {
       const ids = Array.from(new Set((snaps.data as Array<{ season_id: string }>).map((r) => r.season_id)));
       if (ids.length > 0) {
         const sq = await (sb.from as unknown as LooseFrom)("seasons")
           .select("id,label,status,public_visible").in("id", ids);
+        if (sq.error && !isMissingTable(sq.error.code)) {
+          throw new Error(`seasons read failed: ${sq.error.message}`);
+        }
         for (const s of ((sq.data as Array<{ id: string; label: string; status: string; public_visible: boolean }>) ?? [])) {
           if (s.status === "archived" && s.public_visible) seasonMeta.set(s.id, { label: s.label });
         }
@@ -1439,12 +1448,18 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
     const summ = await (sb.from as unknown as LooseFrom)("historical_season_summary_records")
       .select("season_id,participant_ref,person_id,role,display_name,bowler_number,games,scratch_pinfall,average,high_game,high_set,points,points_lost,final_finish,is_champion")
       .eq("person_id", data.personId);
+    if (summ.error && !isMissingTable(summ.error.code)) {
+      throw new Error(`historical_season_summary_records read failed: ${summ.error.message}`);
+    }
     if (!summ.error && summ.data) {
       const summaryIds = Array.from(new Set((summ.data as Array<{ season_id: string }>).map((r) => r.season_id)));
       const missing = summaryIds.filter((id) => !seasonMeta.has(id));
       if (missing.length > 0) {
         const sq = await (sb.from as unknown as LooseFrom)("seasons")
           .select("id,label,status,public_visible").in("id", missing);
+        if (sq.error && !isMissingTable(sq.error.code)) {
+          throw new Error(`seasons read failed: ${sq.error.message}`);
+        }
         for (const s of ((sq.data as Array<{ id: string; label: string; status: string; public_visible: boolean }>) ?? [])) {
           if (s.status === "archived" && s.public_visible) seasonMeta.set(s.id, { label: s.label });
         }
