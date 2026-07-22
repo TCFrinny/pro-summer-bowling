@@ -391,6 +391,7 @@ export function buildHistoricalStandings(input: {
   participants: HistoricalParticipantMeta[];
   weeks: HistoricalWeekSummary[];
   summaryRecords: HistoricalSnapshot["summaryRecords"];
+  pointSystem: HistoricalPointSystem;
 }): HistoricalStandingRow[] {
   type Acc = {
     ref: string;
