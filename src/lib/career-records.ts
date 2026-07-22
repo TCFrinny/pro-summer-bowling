@@ -309,12 +309,16 @@ export function extractCurrentRosterRecordContribution(
   seasonLabel?: string,
 ): CareerRecordContribution {
   const base = { seasonId, seasonLabel, role: "rostered" as const, identityRef: rosterId, priority: 2 };
-  const bb = snapshot.bowlersById?.[rosterId];
-  const overall = {
-    pointsWon: typeof bb?.points === "number" ? bb.points : null,
-    pointsLost: typeof bb?.pointsLost === "number" ? bb.pointsLost : null,
-    creditedMatches: typeof bb?.matchesPlayed === "number" ? bb.matchesPlayed : null,
-  };
+  // Overall roster credit — derived from PUBLISHED completed matches only.
+  // NEVER read snapshot.bowlersById.points / pointsLost / matchesPlayed,
+  // which can include unpublished match data and would leak future-week
+  // Overall W-L onto the public career profile. Point overrides are
+  // honored via getAwardedPoints; each credited match adds
+  //   pointsWon  += own awarded
+  //   pointsLost += CURRENT_POINT_SYSTEM - own awarded    (per-side, independent)
+  // creditedMatches counts only completed & published matches this
+  // rostered identity participated in as scheduledA/B.
+  let pW = 0, pL = 0, credited = 0, hasOverall = false;
   const acc = newPersonal();
   for (const [wkStr, matches] of Object.entries(snapshot.matchesByWeek ?? {})) {
     const wk = Number(wkStr);
@@ -325,11 +329,20 @@ export function extractCurrentRosterRecordContribution(
       const isA = r.scheduledA === rosterId;
       const isB = r.scheduledB === rosterId;
       if (!isA && !isB) continue;
+      // Overall — always credited to the SCHEDULED rostered bowler,
+      // even when a substitute rolled the games.
+      const award = getAwardedPoints(r);
+      const own = isA ? award.pointsA : award.pointsB;
+      if (typeof own === "number" && Number.isFinite(own)) {
+        pW += own;
+        pL += CURRENT_POINT_SYSTEM - own;
+        credited += 1;
+        hasOverall = true;
+      }
+      // Personal outcomes only when this rostered bowler actually rolled.
       const partSelf = isA ? r.participationA : r.participationB;
       const partOpp = isA ? r.participationB : r.participationA;
-      // Personal outcomes only when this rostered bowler actually rolled.
       if (partSelf.status !== "rostered") continue;
-      // Opponent must have a scorable side.
       const oppHasScores = partOpp.status !== "absent" || !!partOpp.absentScores;
       if (!oppHasScores) continue;
       const selfHcp = isA ? r.handicapGamesA : r.handicapGamesB;
@@ -338,6 +351,9 @@ export function extractCurrentRosterRecordContribution(
       creditGameSetHandicap(acc, selfHcp, oppHcp, mask);
     }
   }
+  const overall = hasOverall
+    ? { pointsWon: pW, pointsLost: pL, creditedMatches: credited }
+    : { pointsWon: null, pointsLost: null, creditedMatches: null };
   return personalToContrib(base, acc, overall);
 }
 
