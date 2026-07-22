@@ -69,6 +69,7 @@ function read(p: string) { return readFileSync(join(process.cwd(), p), "utf8"); 
     ],
     weeks: [],
     summaryRecords: [],
+    pointSystem: 7,
   });
   // No rows without any data — participants without weekly or summary rows are dropped.
   truthy(standings.length === 0, "no fabricated rows when no data");
