@@ -443,6 +443,7 @@ function SlotRow({
             <ResultEntryForm
               seasonId={seasonId} weekId={weekId} slot={slot}
               weekPublished={weekPublished}
+              pointSystem={pointSystem}
               rosterOptions={rosterOptions} allOptions={allOptions}
               onSaved={() => { setEditing(null); onChanged(); }}
             />
