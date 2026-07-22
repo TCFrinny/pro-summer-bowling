@@ -267,7 +267,7 @@ function makeMatch(overrides: Partial<HistoricalMatch>): HistoricalMatch {
       { ref: "T3", displayName: "T3", role: "rostered" },
       { ref: "T4", displayName: "T4", role: "rostered" },
     ],
-    weeks, summaryRecords: [],
+    weeks, summaryRecords: [], pointSystem: 7,
   });
   const order = standings.map((r) => r.participantRef);
   const t1i = order.indexOf("T1");
