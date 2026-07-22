@@ -72,14 +72,63 @@ export interface SeasonRecord {
   description?: string | null;
 }
 
+/** Extract a sortable four-digit year from a valid ISO startDate, falling
+ *  back to the first four-digit run inside the label (e.g. "2023 Summer"). */
+export function seasonSortYear(season: Pick<SeasonRecord, "startDate" | "label">): number | null {
+  const sd = season.startDate;
+  if (sd) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(sd);
+    if (m) {
+      const y = Number(m[1]);
+      if (Number.isFinite(y)) return y;
+    }
+  }
+  const lm = /(\d{4})/.exec(season.label ?? "");
+  if (lm) {
+    const y = Number(lm[1]);
+    if (Number.isFinite(y)) return y;
+  }
+  return null;
+}
+
+/** Canonical season comparator. Current first, then descending chronology
+ *  regardless of insertion order. Missing years sort last. Pure. */
+export function compareSeasonsChronological(a: SeasonRecord, b: SeasonRecord): number {
+  const aCur = a.status === "current" ? 1 : 0;
+  const bCur = b.status === "current" ? 1 : 0;
+  if (aCur !== bCur) return bCur - aCur;
+
+  const ay = seasonSortYear(a);
+  const by = seasonSortYear(b);
+  if (ay === null && by !== null) return 1;
+  if (by === null && ay !== null) return -1;
+  if (ay !== null && by !== null && ay !== by) return by - ay;
+
+  // Same year (or both missing) — prefer valid startDate desc.
+  const ad = a.startDate ?? "";
+  const bd = b.startDate ?? "";
+  if (ad && bd && ad !== bd) return bd.localeCompare(ad);
+  if (ad && !bd) return -1;
+  if (bd && !ad) return 1;
+
+  const labelCmp = (b.label ?? "").localeCompare(a.label ?? "");
+  if (labelCmp !== 0) return labelCmp;
+  return a.id.localeCompare(b.id);
+}
+
+/** Return a new array sorted chronologically without mutating the input. */
+export function sortSeasonsChronological(seasons: readonly SeasonRecord[]): SeasonRecord[] {
+  return [...seasons].sort(compareSeasonsChronological);
+}
+
 /** Client-side sort helper for a set of seasons already filtered/authorized
- *  on the server. Current always leads, then archived by start_date desc. */
+ *  on the server. Current always leads, then archived in descending
+ *  chronological order (year → date → label → id). */
 export function filterPublicSeasons(seasons: readonly SeasonRecord[]): SeasonRecord[] {
-  const current = seasons.filter((s) => s.status === "current");
-  const archived = seasons
-    .filter((s) => s.status === "archived" && s.publicVisible)
-    .sort((a, b) => (b.startDate ?? b.label).localeCompare(a.startDate ?? a.label));
-  return [...current, ...archived];
+  const visible = seasons.filter(
+    (s) => s.status === "current" || (s.status === "archived" && s.publicVisible),
+  );
+  return sortSeasonsChronological(visible);
 }
 
 // ---------------- Career profile aggregation ----------------
