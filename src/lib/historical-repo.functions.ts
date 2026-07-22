@@ -1374,7 +1374,8 @@ export const getHistoricalCareerContributions = createServerFn({ method: "GET" }
 
     const rows: HistoricalCareerContribution[] = [];
     const advancedContributions: CareerAdvancedContribution[] = [];
-    if (!snaps.error && snaps.data) {
+    const recordContributions: CareerRecordContribution[] = [];
+
       for (const row of (snaps.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>)) {
         const meta = seasonMeta.get(row.season_id);
         if (!meta) continue;
