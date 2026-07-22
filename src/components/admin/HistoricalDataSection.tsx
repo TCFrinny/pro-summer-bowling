@@ -349,6 +349,7 @@ function WeekScheduleEditor({
                   rosterOptions={rosterOptions}
                   allOptions={allOptions}
                   sortedLanes={sortedLanes}
+                  pointSystem={pointSystem}
                   onChanged={() => {
                     qc.invalidateQueries({ queryKey: ["admin", "historical", "schedule", week.id] });
                     onChanged();
