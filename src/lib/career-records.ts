@@ -12,13 +12,20 @@
  *                      of games rolled. Includes point overrides and
  *                      substitute weeks credited to the scheduled roster.
  *
- * Contributions are per-season, per-role, per-identity (roster seat, sub
- * seat, or historical participant ref). The aggregator sums each bucket
- * independently and treats `null` as "unavailable" — never zero.
+ * Rules:
+ *   - PERSONAL follows who actually rolled the games. A rostered bowler
+ *     substituted-for gets NO personal outcome that week. The substitute
+ *     does. Absent bowlers get no personal outcome.
+ *   - A bowler facing an absent opponent DOES get personal outcomes when
+ *     the opponent has official absent scores AND the game is complete.
+ *   - Missing games are `null`, never numeric zero.
+ *   - Snapshot-derived contributions supersede summary-only contributions
+ *     for the same season+role+identity via `mergeCareerRecordContributions`.
  *
- * No DB access, no schema changes. Extractors take already-shaped
- * snapshots and derive the three records from stable public fields.
+ * No DB access, no schema changes.
  */
+
+import type { PublicSnapshot } from "./mock-data";
 
 export type WLT = { wins: number; losses: number; ties: number };
 export type WL = { wins: number; losses: number };
@@ -27,9 +34,13 @@ export interface CareerRecords {
   gameRecord: WLT | null;
   setRecord: WLT | null;
   overallRecord: WL | null;
-  /** Diagnostics: number of contributions that provided each bucket. */
+  /** How many contributions supplied each bucket. */
   contributingSeasonsPersonal: number;
   contributingSeasonsOverall: number;
+  /** Aggregate diagnostic counts — enable trivial balance checks. */
+  personalGamesTotal: number;
+  personalSetsTotal: number;
+  creditedMatchesTotal: number;
 }
 
 /** One record contribution for a single season+role+identity.
@@ -39,7 +50,9 @@ export interface CareerRecordContribution {
   seasonId: string;
   seasonLabel?: string;
   role: "rostered" | "substitute";
-  /** Optional identity used only for de-duplication or debugging. */
+  /** Seasonal identity — roster seat id, substitute id, or historical
+   *  participant_ref. Used for merge deduplication and for unlinked
+   *  historical identity display. */
   identityRef?: string;
   // Personal — from every completed game/set the person actually rolled.
   gameW: number | null;
@@ -48,9 +61,21 @@ export interface CareerRecordContribution {
   setW: number | null;
   setL: number | null;
   setT: number | null;
-  // Roster-credit only. Half-points allowed.
+  /** Diagnostic — number of personal completed games contributing to
+   *  gameW/L/T. Always equals gameW+gameL+gameT when non-null. */
+  personalGames: number | null;
+  /** Diagnostic — number of personal completed 3-game sets contributing
+   *  to setW/L/T. Always equals setW+setL+setT when non-null. */
+  personalSets: number | null;
+  // Roster-credit only. Half-points allowed. Substitute rows must leave null.
   pointsWon: number | null;
   pointsLost: number | null;
+  /** Optional — matches for which points were credited to this rostered
+   *  identity. Enables the "points won + points lost = pointSystem * N"
+   *  balance invariant when the season's point system is known. */
+  creditedMatches: number | null;
+  /** Higher wins per-bucket on merge. Snapshot = 2, summary = 1. */
+  priority?: number;
 }
 
 export function emptyContribution(base: Pick<CareerRecordContribution, "seasonId" | "role"> & Partial<CareerRecordContribution>): CareerRecordContribution {
@@ -59,7 +84,10 @@ export function emptyContribution(base: Pick<CareerRecordContribution, "seasonId
     identityRef: undefined,
     gameW: null, gameL: null, gameT: null,
     setW: null, setL: null, setT: null,
+    personalGames: null, personalSets: null,
     pointsWon: null, pointsLost: null,
+    creditedMatches: null,
+    priority: 1,
     ...base,
   };
 }
@@ -81,6 +109,7 @@ export function aggregateCareerRecords(
   let pW: number | null = null, pL: number | null = null;
   let personalSeasons = 0;
   let overallSeasons = 0;
+  let pGames = 0, pSets = 0, credMatches = 0;
   for (const c of contribs) {
     const hasPersonal =
       c.gameW != null || c.gameL != null || c.gameT != null ||
@@ -91,6 +120,9 @@ export function aggregateCareerRecords(
     gW = addNullable(gW, c.gameW); gL = addNullable(gL, c.gameL); gT = addNullable(gT, c.gameT);
     sW = addNullable(sW, c.setW); sL = addNullable(sL, c.setL); sT = addNullable(sT, c.setT);
     pW = addNullable(pW, c.pointsWon); pL = addNullable(pL, c.pointsLost);
+    pGames += c.personalGames ?? 0;
+    pSets += c.personalSets ?? 0;
+    credMatches += c.creditedMatches ?? 0;
   }
   const gameRecord: WLT | null =
     gW != null || gL != null || gT != null
@@ -106,7 +138,65 @@ export function aggregateCareerRecords(
     gameRecord, setRecord, overallRecord,
     contributingSeasonsPersonal: personalSeasons,
     contributingSeasonsOverall: overallSeasons,
+    personalGamesTotal: pGames,
+    personalSetsTotal: pSets,
+    creditedMatchesTotal: credMatches,
   };
+}
+
+/** Group contributions by seasonId+role+identityRef. When multiple
+ *  contributions exist for the same key, produce ONE merged contribution
+ *  that:
+ *    - Takes personal buckets from the highest-priority contrib whose
+ *      personal buckets are non-null.
+ *    - Takes overall buckets from the highest-priority contrib whose
+ *      overall buckets are non-null.
+ *  Snapshot contributions carry priority=2 by convention; summary=1.
+ *  Contributions with a null identityRef are keyed by seasonId+role
+ *  alone (best-effort). */
+export function mergeCareerRecordContributions(
+  contribs: readonly CareerRecordContribution[],
+): CareerRecordContribution[] {
+  const groups = new Map<string, CareerRecordContribution[]>();
+  for (const c of contribs) {
+    const key = `${c.seasonId}|${c.role}|${c.identityRef ?? ""}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(c);
+    else groups.set(key, [c]);
+  }
+  const out: CareerRecordContribution[] = [];
+  for (const arr of groups.values()) {
+    if (arr.length === 1) { out.push(arr[0]); continue; }
+    const sorted = [...arr].sort((a, b) => (b.priority ?? 1) - (a.priority ?? 1));
+    const base = { ...sorted[0] };
+    // Fill personal from highest-priority contrib that has personal.
+    if (base.gameW == null && base.gameL == null && base.gameT == null &&
+        base.setW == null && base.setL == null && base.setT == null) {
+      for (const c of sorted) {
+        if (c.gameW != null || c.gameL != null || c.gameT != null ||
+            c.setW != null || c.setL != null || c.setT != null) {
+          base.gameW = c.gameW; base.gameL = c.gameL; base.gameT = c.gameT;
+          base.setW = c.setW; base.setL = c.setL; base.setT = c.setT;
+          base.personalGames = c.personalGames;
+          base.personalSets = c.personalSets;
+          break;
+        }
+      }
+    }
+    // Fill overall from highest-priority contrib that has overall.
+    if (base.pointsWon == null && base.pointsLost == null) {
+      for (const c of sorted) {
+        if (c.pointsWon != null || c.pointsLost != null) {
+          base.pointsWon = c.pointsWon;
+          base.pointsLost = c.pointsLost;
+          base.creditedMatches = c.creditedMatches;
+          break;
+        }
+      }
+    }
+    out.push(base);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +204,6 @@ export function aggregateCareerRecords(
 // ---------------------------------------------------------------------------
 
 function formatHalf(n: number): string {
-  // Trim trailing ".0" but preserve ".5"
   if (Number.isInteger(n)) return String(n);
   return n.toFixed(1);
 }
@@ -129,52 +218,8 @@ export function formatWL(r: WL | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Extractor 1 — current-season snapshot: rostered bowler
+// Personal-outcome helpers
 // ---------------------------------------------------------------------------
-
-interface CurrentSnapshotShape {
-  bowlersById?: Record<string, {
-    points?: number | null;
-    pointsLost?: number | null;
-    id?: string;
-  }>;
-  history?: Record<string, Array<CurrentHistoryRowShape>>;
-}
-
-interface CurrentHistoryRowShape {
-  matchId: string;
-  isSub?: boolean;
-  absent?: boolean;
-  scoreOnly?: boolean;
-  pairCompleted?: [boolean, boolean, boolean];
-  handicapGames?: [number, number, number];
-  handicapTotal?: number;
-  opponentHandicapTotal?: number;
-  scores?: [number, number, number];
-  // Score-only rows don't carry opponent per-game handicap totals.
-}
-
-/** History rows on the CURRENT snapshot expose `handicapGames[i]` (self)
- *  and `handicapTotal`+`opponentHandicapTotal`. Per-game opponent handicap
- *  totals are recoverable by looking up the opponent's own history row for
- *  the same matchId. This helper builds a map keyed by matchId. */
-function buildOpponentHandicapGamesByMatchId(snap: CurrentSnapshotShape): Map<string, [number, number, number]> {
-  const out = new Map<string, [number, number, number]>();
-  if (!snap.history) return out;
-  for (const rows of Object.values(snap.history)) {
-    if (!Array.isArray(rows)) continue;
-    for (const r of rows) {
-      if (!r || typeof r !== "object") continue;
-      if (Array.isArray(r.handicapGames) && r.handicapGames.length === 3) {
-        // Multiple identities may share a matchId; last write wins, which
-        // is fine because both sides carry equivalent per-game handicap
-        // totals for their side. We index by matchId + side later.
-        out.set(r.matchId, r.handicapGames);
-      }
-    }
-  }
-  return out;
-}
 
 function judge(a: number, b: number): "W" | "L" | "T" {
   return a > b ? "W" : a < b ? "L" : "T";
@@ -190,22 +235,16 @@ function newPersonal(): PersonalCounts {
   return { gameW: 0, gameL: 0, gameT: 0, setW: 0, setL: 0, setT: 0, personalGames: 0, personalSets: 0 };
 }
 
-/** Given self and opponent per-game handicap totals plus optional pair
- *  completion mask (score-only), append per-game and per-set outcomes to
- *  the personal accumulator.
- *
- *  Rules:
- *  - A game contributes only when it is completed on both sides. We
- *    infer completion from the pair mask (score-only) or from both sides
- *    having non-null handicap game totals.
- *  - A set contributes only when all three games are completed. */
+/** Credit per-game and per-set outcomes into `acc` when the pairing is
+ *  complete on both sides. `pairMask` (score-only rows) forces games to
+ *  be skipped when either side did not complete the game. */
 function creditGameSetHandicap(
   acc: PersonalCounts,
   selfHcpGames: readonly (number | null | undefined)[],
   oppHcpGames: readonly (number | null | undefined)[],
   pairMask: readonly boolean[] | null,
 ): void {
-  const completed = [false, false, false];
+  const completed: [boolean, boolean, boolean] = [false, false, false];
   for (let i = 0; i < 3; i++) {
     const s = selfHcpGames[i];
     const o = oppHcpGames[i];
@@ -230,140 +269,136 @@ function creditGameSetHandicap(
 }
 
 function personalToContrib(
-  base: Pick<CareerRecordContribution, "seasonId" | "role" | "seasonLabel" | "identityRef">,
+  base: Pick<CareerRecordContribution, "seasonId" | "role" | "seasonLabel" | "identityRef" | "priority">,
   personal: PersonalCounts | null,
-  overall: { pointsWon: number | null; pointsLost: number | null },
+  overall: { pointsWon: number | null; pointsLost: number | null; creditedMatches?: number | null },
 ): CareerRecordContribution {
   const c = emptyContribution(base);
   if (personal && personal.personalGames > 0) {
     c.gameW = personal.gameW; c.gameL = personal.gameL; c.gameT = personal.gameT;
+    c.personalGames = personal.personalGames;
   }
   if (personal && personal.personalSets > 0) {
     c.setW = personal.setW; c.setL = personal.setL; c.setT = personal.setT;
+    c.personalSets = personal.personalSets;
   }
   c.pointsWon = overall.pointsWon;
   c.pointsLost = overall.pointsLost;
+  c.creditedMatches = overall.creditedMatches ?? null;
   return c;
 }
 
+// ---------------------------------------------------------------------------
+// Current-season snapshot extractor
+// ---------------------------------------------------------------------------
+
 /** Extract personal record + roster-credit overall record for a rostered
- *  bowler on the CURRENT-season snapshot. */
+ *  bowler on the CURRENT-season snapshot. Iterates `matchesByWeek` for
+ *  the participation identity carried on each MatchResult — never scans
+ *  history rows. Skips any week not in `publishedWeeks`. */
 export function extractCurrentRosterRecordContribution(
-  snapshot: unknown,
+  snapshot: PublicSnapshot,
   rosterId: string,
+  publishedWeeks: ReadonlySet<number>,
   seasonId: string,
   seasonLabel?: string,
 ): CareerRecordContribution {
-  const base = { seasonId, seasonLabel, role: "rostered" as const, identityRef: rosterId };
-  const snap = (snapshot && typeof snapshot === "object" ? snapshot : null) as CurrentSnapshotShape | null;
-  if (!snap) return emptyContribution(base);
-
-  const bb = snap.bowlersById?.[rosterId];
+  const base = { seasonId, seasonLabel, role: "rostered" as const, identityRef: rosterId, priority: 2 };
+  const bb = snapshot.bowlersById?.[rosterId];
   const overall = {
     pointsWon: typeof bb?.points === "number" ? bb.points : null,
     pointsLost: typeof bb?.pointsLost === "number" ? bb.pointsLost : null,
+    creditedMatches: typeof bb?.matchesPlayed === "number" ? bb.matchesPlayed : null,
   };
-
-  const rows = snap.history?.[rosterId];
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return personalToContrib(base, null, overall);
-  }
-  const oppLookup = buildOpponentHandicapGamesByMatchId(snap);
   const acc = newPersonal();
-  for (const r of rows) {
-    if (!r || typeof r !== "object") continue;
-    if (r.absent) continue;
-    if (r.isSub) continue; // personal credit for a sub goes to the sub, not the roster seat
-    if (!Array.isArray(r.handicapGames) || r.handicapGames.length !== 3) continue;
-    // Find opponent's per-game handicap totals from their own history row.
-    // The map above indexes by matchId with no side awareness, but the
-    // opponent's row on the same matchId carries the opponent's own
-    // handicap games — exactly what we need.
-    const oppRow = findOpponentRow(snap, r.matchId, rosterId);
-    if (!oppRow || !Array.isArray(oppRow.handicapGames) || oppRow.handicapGames.length !== 3) {
-      // Fall back to the map (may be self if only one identity has this id — skip in that case).
-      const oppFromMap = oppLookup.get(r.matchId);
-      if (!oppFromMap) continue;
-      creditGameSetHandicap(acc, r.handicapGames, oppFromMap, r.scoreOnly && Array.isArray(r.pairCompleted) ? r.pairCompleted : null);
-      continue;
+  for (const [wkStr, matches] of Object.entries(snapshot.matchesByWeek ?? {})) {
+    const wk = Number(wkStr);
+    if (!publishedWeeks.has(wk)) continue;
+    for (const m of matches) {
+      if (m.status !== "completed" || !m.result) continue;
+      const r = m.result;
+      const isA = r.scheduledA === rosterId;
+      const isB = r.scheduledB === rosterId;
+      if (!isA && !isB) continue;
+      const partSelf = isA ? r.participationA : r.participationB;
+      const partOpp = isA ? r.participationB : r.participationA;
+      // Personal outcomes only when this rostered bowler actually rolled.
+      if (partSelf.status !== "rostered") continue;
+      // Opponent must have a scorable side.
+      const oppHasScores = partOpp.status !== "absent" || !!partOpp.absentScores;
+      if (!oppHasScores) continue;
+      const selfHcp = isA ? r.handicapGamesA : r.handicapGamesB;
+      const oppHcp = isA ? r.handicapGamesB : r.handicapGamesA;
+      const mask = r.scoreOnly && r.pairCompleted ? r.pairCompleted : null;
+      creditGameSetHandicap(acc, selfHcp, oppHcp, mask);
     }
-    creditGameSetHandicap(
-      acc,
-      r.handicapGames,
-      oppRow.handicapGames,
-      r.scoreOnly && Array.isArray(r.pairCompleted) ? r.pairCompleted : null,
-    );
   }
   return personalToContrib(base, acc, overall);
 }
 
-function findOpponentRow(
-  snap: CurrentSnapshotShape,
-  matchId: string,
-  selfId: string,
-): CurrentHistoryRowShape | null {
-  if (!snap.history) return null;
-  for (const [id, rows] of Object.entries(snap.history)) {
-    if (id === selfId) continue;
-    if (!Array.isArray(rows)) continue;
-    for (const r of rows) {
-      if (r && typeof r === "object" && r.matchId === matchId) return r;
-    }
-  }
-  return null;
-}
-
-/** Extract personal record for a CURRENT-season substitute. Substitutes
- *  never carry overall (roster-credit) points. */
+/** Extract personal record for a CURRENT-season substitute identity.
+ *  Substitutes never carry Overall (roster-credit) points. Compares
+ *  against the OPPOSING side's handicap game totals, taken directly
+ *  from the MatchResult — never against the sub's own side. */
 export function extractCurrentSubstituteRecordContribution(
-  snapshot: unknown,
+  snapshot: PublicSnapshot,
   subId: string,
+  publishedWeeks: ReadonlySet<number>,
   seasonId: string,
   seasonLabel?: string,
 ): CareerRecordContribution {
-  const base = { seasonId, seasonLabel, role: "substitute" as const, identityRef: subId };
-  const snap = (snapshot && typeof snapshot === "object" ? snapshot : null) as
-    | (CurrentSnapshotShape & { substituteProfiles?: Record<string, { weeks?: SubWeekShape[] }> })
-    | null;
-  if (!snap?.substituteProfiles) return emptyContribution(base);
-  const profile = snap.substituteProfiles[subId];
-  if (!profile || !Array.isArray(profile.weeks) || profile.weeks.length === 0) {
-    return emptyContribution(base);
-  }
+  const base = { seasonId, seasonLabel, role: "substitute" as const, identityRef: subId, priority: 2 };
   const acc = newPersonal();
-  for (const w of profile.weeks) {
-    if (!w || typeof w !== "object") continue;
-    // The sub's own week row carries `scores`, `scratchTotal`, `handicapTotal`
-    // and `handicapAtMatch`, but NOT per-game handicap totals or the
-    // opponent's totals. Reconstruct per-game handicap totals from
-    // `scores` + `handicapAtMatch`.
-    const scores = Array.isArray(w.scores) && w.scores.length === 3 ? w.scores : null;
-    const hcp = typeof w.handicapAtMatch === "number" ? w.handicapAtMatch : null;
-    if (!scores || hcp == null) continue;
-    const selfHcpGames: [number, number, number] = [scores[0] + hcp, scores[1] + hcp, scores[2] + hcp];
-    // Opponent's own history row for the same matchId gives opponent per-game handicap.
-    const oppRow = findOpponentRow(snap, w.matchId, "__none__");
-    if (!oppRow || !Array.isArray(oppRow.handicapGames)) continue;
-    const mask = w.scoreOnly && Array.isArray(w.pairCompleted) ? w.pairCompleted : null;
-    creditGameSetHandicap(acc, selfHcpGames, oppRow.handicapGames, mask);
+  for (const [wkStr, matches] of Object.entries(snapshot.matchesByWeek ?? {})) {
+    const wk = Number(wkStr);
+    if (!publishedWeeks.has(wk)) continue;
+    for (const m of matches) {
+      if (m.status !== "completed" || !m.result) continue;
+      const r = m.result;
+      // Identify the side this sub rolled for.
+      const isA = r.participationA.status === "substitute" && r.participationA.actualId === subId;
+      const isB = r.participationB.status === "substitute" && r.participationB.actualId === subId;
+      if (!isA && !isB) continue;
+      const partOpp = isA ? r.participationB : r.participationA;
+      const oppHasScores = partOpp.status !== "absent" || !!partOpp.absentScores;
+      if (!oppHasScores) continue;
+      const selfHcp = isA ? r.handicapGamesA : r.handicapGamesB;
+      const oppHcp = isA ? r.handicapGamesB : r.handicapGamesA;
+      const mask = r.scoreOnly && r.pairCompleted ? r.pairCompleted : null;
+      creditGameSetHandicap(acc, selfHcp, oppHcp, mask);
+    }
   }
-  return personalToContrib(base, acc, { pointsWon: null, pointsLost: null });
+  return personalToContrib(base, acc, { pointsWon: null, pointsLost: null, creditedMatches: null });
 }
 
-interface SubWeekShape {
-  matchId: string;
-  scores?: [number, number, number];
-  handicapAtMatch?: number;
-  scoreOnly?: boolean;
-  pairCompleted?: [boolean, boolean, boolean];
+/** Convenience — extract every roster and substitute identity linked to
+ *  `personId` from the current-season snapshot. Enforces the published-
+ *  week set. Never touches local demo state. */
+export function extractCurrentPersonRecordContributions(
+  snapshot: PublicSnapshot,
+  personId: string,
+  publishedWeeks: ReadonlySet<number>,
+  seasonId: string,
+  seasonLabel?: string,
+): CareerRecordContribution[] {
+  const out: CareerRecordContribution[] = [];
+  for (const b of snapshot.bowlers ?? []) {
+    if (b.personId === personId) {
+      out.push(extractCurrentRosterRecordContribution(snapshot, b.id, publishedWeeks, seasonId, seasonLabel));
+    }
+  }
+  for (const s of snapshot.substitutes ?? []) {
+    if (s.personId === personId) {
+      out.push(extractCurrentSubstituteRecordContribution(snapshot, s.id, publishedWeeks, seasonId, seasonLabel));
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
-// Extractor 2 — historical snapshot participant
+// Historical extractors
 // ---------------------------------------------------------------------------
 
-/** Minimal duck-typed match / week / standings shapes so this module
- *  stays independent of the historical-snapshot module. */
 interface HistoricalMatchLike {
   actualA: string;
   actualB: string;
@@ -373,12 +408,11 @@ interface HistoricalMatchLike {
   hasGameDataB?: boolean;
   handicapGamesA: [number, number, number];
   handicapGamesB: [number, number, number];
-  handicapTotalA: number;
-  handicapTotalB: number;
 }
-interface HistoricalWeekLike { matches?: HistoricalMatchLike[] }
+interface HistoricalWeekLike { published?: boolean; matches?: HistoricalMatchLike[] }
 interface HistoricalStandingLike {
   participantRef: string;
+  matchesPlayed?: number | null;
   points?: number | null;
   pointsLost?: number | null;
 }
@@ -393,10 +427,12 @@ export function extractHistoricalRecordContribution(input: {
 }): CareerRecordContribution {
   const base = {
     seasonId: input.seasonId, seasonLabel: input.seasonLabel,
-    role: input.role, identityRef: input.participantRef,
+    role: input.role, identityRef: input.participantRef, priority: 2,
   };
   const acc = newPersonal();
   for (const w of input.weeks ?? []) {
+    // Loader has already filtered to published weeks, but re-gate defensively.
+    if (w.published === false) continue;
     for (const m of w.matches ?? []) {
       const isA = m.actualA === input.participantRef;
       const isB = m.actualB === input.participantRef;
@@ -412,13 +448,14 @@ export function extractHistoricalRecordContribution(input: {
       creditGameSetHandicap(acc, self, opp, null);
     }
   }
-  let overall = { pointsWon: null as number | null, pointsLost: null as number | null };
+  let overall = { pointsWon: null as number | null, pointsLost: null as number | null, creditedMatches: null as number | null };
   if (input.role === "rostered") {
     const st = (input.standings ?? []).find((s) => s.participantRef === input.participantRef);
     if (st) {
       overall = {
         pointsWon: typeof st.points === "number" ? st.points : null,
         pointsLost: typeof st.pointsLost === "number" ? st.pointsLost : null,
+        creditedMatches: typeof st.matchesPlayed === "number" ? st.matchesPlayed : null,
       };
     }
   }
@@ -427,7 +464,8 @@ export function extractHistoricalRecordContribution(input: {
 
 /** Summary-only historical row: no per-game data, so personal record is
  *  unavailable. Roster credit only when the summary carries explicit
- *  points and/or points_lost. */
+ *  points and/or points_lost. Priority=1 so a snapshot contribution for
+ *  the same identity wins under merge. */
 export function extractHistoricalSummaryRecordContribution(input: {
   seasonId: string;
   seasonLabel?: string;
@@ -438,7 +476,7 @@ export function extractHistoricalSummaryRecordContribution(input: {
 }): CareerRecordContribution {
   const base = {
     seasonId: input.seasonId, seasonLabel: input.seasonLabel,
-    role: input.role, identityRef: input.participantRef,
+    role: input.role, identityRef: input.participantRef, priority: 1,
   };
   const c = emptyContribution(base);
   if (input.role === "rostered") {
@@ -456,6 +494,18 @@ export function assertCareerRecordInvariants(
   contribs: readonly CareerRecordContribution[],
   aggregated: CareerRecords,
 ): void {
+  // 1. Per-contribution self-balance.
+  for (const c of contribs) {
+    if (c.personalGames != null) {
+      const s = (c.gameW ?? 0) + (c.gameL ?? 0) + (c.gameT ?? 0);
+      if (s !== c.personalGames) throw new Error(`invariant: W+L+T (${s}) != personalGames (${c.personalGames})`);
+    }
+    if (c.personalSets != null) {
+      const s = (c.setW ?? 0) + (c.setL ?? 0) + (c.setT ?? 0);
+      if (s !== c.personalSets) throw new Error(`invariant: setW+setL+setT (${s}) != personalSets (${c.personalSets})`);
+    }
+  }
+  // 2. Aggregate sums equal per-contribution sums (linear aggregator).
   let gw = 0, gl = 0, gt = 0, sw = 0, sl = 0, st = 0, pw = 0, pl = 0;
   let hasP = false, hasO = false;
   for (const c of contribs) {
@@ -477,8 +527,25 @@ export function assertCareerRecordInvariants(
   }
   if (hasO) {
     if (!aggregated.overallRecord) throw new Error("invariant: overall present but null");
-    // Half-safe comparison
     if (Math.abs(aggregated.overallRecord.wins - pw) > 1e-9) throw new Error(`pW ${aggregated.overallRecord.wins} != ${pw}`);
     if (Math.abs(aggregated.overallRecord.losses - pl) > 1e-9) throw new Error(`pL ${aggregated.overallRecord.losses} != ${pl}`);
+  }
+}
+
+/** For a rostered contribution with a known credited-match count and
+ *  seasonal point system, verify pointsWon + pointsLost = pointSystem * N.
+ *  Overrides are independent per side, so this only guarantees the SUM,
+ *  not the split. */
+export function assertOverallPointSystemBalance(
+  contrib: CareerRecordContribution,
+  pointSystem: number,
+): void {
+  if (contrib.role !== "rostered") return;
+  if (contrib.pointsWon == null || contrib.pointsLost == null) return;
+  if (contrib.creditedMatches == null) return;
+  const sum = contrib.pointsWon + contrib.pointsLost;
+  const expected = pointSystem * contrib.creditedMatches;
+  if (Math.abs(sum - expected) > 1e-9) {
+    throw new Error(`overall balance: pW+pL (${sum}) != pointSystem*N (${expected})`);
   }
 }

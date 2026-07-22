@@ -18,11 +18,10 @@ import {
 } from "@/lib/career-advanced";
 import {
   aggregateCareerRecords,
-  emptyContribution,
-  extractCurrentRosterRecordContribution,
-  extractCurrentSubstituteRecordContribution,
+  extractCurrentPersonRecordContributions,
   formatWL,
   formatWLT,
+  mergeCareerRecordContributions,
   type CareerRecordContribution,
 } from "@/lib/career-records";
 import { RatingsSection } from "@/components/ratings/RatingsSection";
@@ -30,6 +29,7 @@ import { careerRatingQuality, combineAliasRatings, computeCareerRatings, compute
 import { ratingGamesFromCurrentSeason, ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
 import { useCurrentPublicSnapshot } from "@/lib/public-snapshot";
 import { useMemo } from "react";
+
 
 
 
@@ -188,25 +188,16 @@ function CareerBody({
   const snap = useCurrentPublicSnapshot();
   const currentRecordContribs = useMemo<CareerRecordContribution[]>(() => {
     if (!snap) return [];
-    const out: CareerRecordContribution[] = [];
-    for (const b of snap.bowlers) {
-      if (b.personId === personId) {
-        out.push(extractCurrentRosterRecordContribution(snap, b.id, "current", "2026 Summer"));
-      }
-    }
-    for (const s of snap.substitutes ?? []) {
-      if (s.personId === personId) {
-        out.push(extractCurrentSubstituteRecordContribution(snap, s.id, "current", "2026 Summer"));
-      }
-    }
-    return out;
+    const publishedWeeks = new Set(snap.weeks.filter((w) => w.published).map((w) => w.week));
+    return extractCurrentPersonRecordContributions(snap, personId, publishedWeeks, "current", "2026 Summer");
   }, [snap, personId]);
   const records = useMemo(
-    () => aggregateCareerRecords([...currentRecordContribs, ...historicalRecordContribs]),
+    () => aggregateCareerRecords(
+      mergeCareerRecordContributions([...currentRecordContribs, ...historicalRecordContribs]),
+    ),
     [currentRecordContribs, historicalRecordContribs],
   );
-  // silence unused warning for emptyContribution import when only reading formatters
-  void emptyContribution;
+
   if (sorted.length === 0) {
     return <EmptyState title="No public seasons yet" description="This person has no public rostered or substitute record." />;
   }
