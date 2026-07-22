@@ -724,8 +724,8 @@ function ResultEntryForm({
       <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border pt-2">
         <label><input type="checkbox" checked={ovr} onChange={(e) => setOvr(e.target.checked)} /> Override</label>
         {ovr && <>
-          <input type="number" step={0.5} placeholder="pts A" value={ovrA} onChange={(e) => setOvrA(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
-          <input type="number" step={0.5} placeholder="pts B" value={ovrB} onChange={(e) => setOvrB(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
+          <input type="number" min={0} max={pointSystem} step={0.5} placeholder="pts A" value={ovrA} onChange={(e) => setOvrA(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
+          <input type="number" min={0} max={pointSystem} step={0.5} placeholder="pts B" value={ovrB} onChange={(e) => setOvrB(e.target.value)} className="w-16 rounded border border-border bg-background px-1" />
           <input type="text" placeholder="reason" value={ovrReason} onChange={(e) => setOvrReason(e.target.value)} className="flex-1 rounded border border-border bg-background px-1" />
         </>}
         <button onClick={save} disabled={busy} className="ml-auto rounded bg-primary px-2 py-0.5 text-primary-foreground disabled:opacity-60">
