@@ -371,6 +371,14 @@ export function buildHistoricalSeasonContribs(
     aliasesByKey.set(key, arr);
   };
 
+  // Summary rows are indexed by ref so participant metadata rows whose
+  // weekly personal data is missing can fill from summary WITHOUT the
+  // later loop double-counting them.
+  const summaryByRef = new Map(
+    (snap.summaryRecords ?? []).map((r) => [r.participantRef, r] as const),
+  );
+  const filledFromSummary = new Set<string>();
+
   for (const p of snap.participants ?? []) {
     const identity = p.personId
       ? idPerson(p.personId, p.displayName)
@@ -378,10 +386,17 @@ export function buildHistoricalSeasonContribs(
     const c = ensure(identity);
     const stat = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref);
     const standing = (snap.standings ?? []).find((s) => s.participantRef === p.ref);
-    const games = stat?.games ?? standing?.games ?? null;
-    const pinfall = stat?.scratchPinfall ?? standing?.scratchPinfall ?? null;
-    const hg = stat?.highGame ?? standing?.highGame ?? null;
-    const hs = stat?.highSet ?? standing?.highSet ?? null;
+    const summary = summaryByRef.get(p.ref);
+    // Snapshot-derived buckets win when present; only fall back to summary
+    // when weekly data is unavailable. Never mix the two for the same
+    // bucket — that would double-count.
+    const games = stat?.games ?? standing?.games ?? summary?.games ?? null;
+    const pinfall = stat?.scratchPinfall ?? standing?.scratchPinfall ?? summary?.scratchPinfall ?? null;
+    const hg = stat?.highGame ?? standing?.highGame ?? summary?.highGame ?? null;
+    const hs = stat?.highSet ?? standing?.highSet ?? summary?.highSet ?? null;
+    const usedSummary =
+      summary != null && stat?.games == null && standing?.games == null && summary.games != null;
+    if (usedSummary) filledFromSummary.add(p.ref);
     if (games != null) c.games += games;
     if (pinfall != null) c.scratchPinfall += pinfall;
     if (hg != null) c.highGame = Math.max(c.highGame ?? 0, hg);
@@ -415,7 +430,11 @@ export function buildHistoricalSeasonContribs(
   }
 
   for (const s of snap.summaryRecords ?? []) {
-    if ((snap.participants ?? []).some((p) => p.ref === s.participantRef)) continue;
+    // Skip if the participant loop already consumed this ref's summary
+    // (either via metadata alone or as the source that filled empty
+    // buckets). Otherwise no-metadata summary rows still contribute.
+    const inParticipants = (snap.participants ?? []).some((p) => p.ref === s.participantRef);
+    if (inParticipants) continue;
     const identity = s.personId
       ? idPerson(s.personId, s.displayName)
       : idHistorical(seasonId, s.participantRef, s.displayName);
@@ -424,9 +443,14 @@ export function buildHistoricalSeasonContribs(
     if (s.scratchPinfall != null) c.scratchPinfall += s.scratchPinfall;
     if (s.highGame != null) c.highGame = Math.max(c.highGame ?? 0, s.highGame);
     if (s.highSet != null) c.highSet = Math.max(c.highSet ?? 0, s.highSet);
+    // Only rostered summary rows contribute Overall Wins. Substitute
+    // summary rows never receive league-point credit.
     if (s.role === "rostered" && s.points != null) c.overallWins += s.points;
     if (s.isChampion) c.championship = true;
   }
+  // Reference filledFromSummary once so the diagnostic set is preserved
+  // for future assertions (kept intentionally to prevent regressions).
+  void filledFromSummary;
 
   for (const [key, aliases] of aliasesByKey.entries()) {
     const c = contribByKey.get(key);
