@@ -217,6 +217,7 @@ truthy(!supportsPerGameScores("summary_only"), "no per-game scores in summary-on
       games: 45, scratchPinfall: 5000, average: 111.1, highGame: 210, highSet: 580,
       points: 210, pointsLost: 105, finalFinish: 1, isChampion: true,
     }],
+    pointSystem: 7,
   });
   eq(standings.length, 1, "one row");
   truthy(standings[0].fromSummaryOnly, "flagged summary-only");
