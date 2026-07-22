@@ -139,7 +139,7 @@ truthy(!supportsPerGameScores("summary_only"), "no per-game scores in summary-on
     { ref: "P2", displayName: "P2", role: "rostered", personId: null },
     { ref: "X",  displayName: "X",  role: "substitute", personId: null },
   ];
-  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords: [] });
+  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords: [], pointSystem: 7 });
   const p1 = standings.find((r) => r.participantRef === "P1")!;
   const p2 = standings.find((r) => r.participantRef === "P2")!;
   const x  = standings.find((r) => r.participantRef === "X");

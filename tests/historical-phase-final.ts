@@ -203,7 +203,7 @@ function makeMatch(overrides: Partial<HistoricalMatch>): HistoricalMatch {
     { ref: "PD", displayName: "PD", role: "rostered" as const },
     { ref: "SUB1", displayName: "SubOne", role: "substitute" as const },
   ];
-  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords: [] });
+  const standings = buildHistoricalStandings({ participants, weeks, summaryRecords: [], pointSystem: 7 });
   const personalStats = buildHistoricalParticipantStats({ participants, weeks });
 
   // STANDINGS: scheduled bowler receives ALL points and handicap-pinfall credit.
@@ -317,7 +317,7 @@ function makeMatch(overrides: Partial<HistoricalMatch>): HistoricalMatch {
     version: 1, builtAt: 0, seasonId: "s", seasonLabel: "S", pointSystem: 7,
     totalWeeks: 2, participants,
     weeks: [publishedWeek, draftWeek],
-    standings: buildHistoricalStandings({ participants, weeks: [publishedWeek, draftWeek], summaryRecords: [] }),
+    standings: buildHistoricalStandings({ participants, weeks: [publishedWeek, draftWeek], summaryRecords: [], pointSystem: 7 }),
     participantStats: buildHistoricalParticipantStats({ participants, weeks: [publishedWeek, draftWeek] }),
     summaryOnly: false, summaryRecords: [],
   };
@@ -358,7 +358,7 @@ function makeMatch(overrides: Partial<HistoricalMatch>): HistoricalMatch {
     { ref: "FL", displayName: "FL", role: "rostered" as const },
     { ref: "GS", displayName: "GS", role: "rostered" as const },
   ];
-  const st = buildHistoricalStandings({ participants, weeks: [week], summaryRecords: [] });
+  const st = buildHistoricalStandings({ participants, weeks: [week], summaryRecords: [], pointSystem: 7 });
   const ps = buildHistoricalParticipantStats({ participants, weeks: [week] });
   const fl = st.find((r) => r.participantRef === "FL")!;
   const gs = st.find((r) => r.participantRef === "GS")!;
