@@ -4,12 +4,14 @@
 import {
   aggregateCareerRecords,
   emptyContribution,
+  extractCurrentRosterRecordContribution,
   extractHistoricalRecordContribution,
   extractHistoricalSummaryRecordContribution,
   formatWL,
   formatWLT,
   type CareerRecordContribution,
 } from "../src/lib/career-records";
+import type { Match, MatchResult, PublicSnapshot } from "../src/lib/mock-data";
 
 function assert(cond: unknown, msg: string) {
   if (!cond) throw new Error("career-records: " + msg);
