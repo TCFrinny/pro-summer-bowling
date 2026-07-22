@@ -380,6 +380,9 @@ export function buildHistoricalParticipantStats(input: {
   return rows;
 }
 
+/** Snap a value to the nearest 0.5 to absorb tiny floating-point noise. */
+function halfRound(x: number): number { return Math.round(x * 2) / 2; }
+
 /** Build standings by aggregating computed weekly matches. Roster-only.
  *  Personal scratch stats attribute to the ACTUAL bowler (self on scheduled
  *  side); substitutes contribute their scratch to their own personal
