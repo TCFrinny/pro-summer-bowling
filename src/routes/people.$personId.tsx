@@ -292,19 +292,19 @@ function CareerBody({
 function CareerAdvancedCards({
   totals,
   totalsBasic,
+  records,
 }: {
   totals: CareerAdvancedTotals;
   totalsBasic: ReturnType<typeof aggregateCareerTotals>;
+  records: ReturnType<typeof aggregateCareerRecords>;
 }) {
   const dash = (v: number | null | undefined) => (v == null ? "—" : v);
   const fixed = (v: number | null, digits = 1) => (v == null ? "—" : v.toFixed(digits));
   const pct = (v: number | null) => (v == null ? "—" : `${v.toFixed(1)}%`);
   const loc = (v: number | null | undefined) =>
     v == null ? "—" : v.toLocaleString();
-  const record =
-    totals.pointsCredited != null || totals.pointsLost != null
-      ? formatRecord(totals.pointsCredited ?? 0, totals.pointsLost ?? 0)
-      : "—";
+  // Retain legacy scratch record for fallback only when new records are unavailable.
+  void formatRecord;
   const poa = (() => {
     const v = totals.careerPOA;
     if (v == null) return "—";
@@ -315,7 +315,9 @@ function CareerAdvancedCards({
   })();
   return (
     <section className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
-      <Stat label="Record (W - L)" value={record} />
+      <Stat label="Game W-L-T" value={formatWLT(records.gameRecord)} />
+      <Stat label="Set W-L-T" value={formatWLT(records.setRecord)} />
+      <Stat label="Overall W-L" value={formatWL(records.overallRecord)} />
       <Stat label="Scratch Pinfall" value={loc(totalsBasic.totalScratchPinfall || null)} />
       <Stat label="Handicap Pinfall" value={loc(totals.handicapPinfall)} />
       <Stat label="High Game" value={dash(totalsBasic.highGame)} />
@@ -343,6 +345,7 @@ function CareerAdvancedCards({
     </section>
   );
 }
+
 
 
 function Stat({ label, value }: { label: string; value: string | number }) {
