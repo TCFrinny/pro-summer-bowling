@@ -552,15 +552,16 @@ export function buildLeaderboard(
     return nameCmp(a.id.displayName, b.id.displayName);
   });
 
-  // Competition ranking; include every row tied at rank <= limit.
+  // Competition ranking on the PRIMARY metric only. Rows with equal
+  // primary values share the same rank even when their samples differ
+  // (sample is a within-rank sort tiebreaker, not part of the rank key).
   const entries: LeaderboardEntry[] = [];
   let rank = 0;
-  let prevKey: string | null = null;
+  let prevV: number | null = null;
   for (let i = 0; i < eligible.length; i++) {
     const cur = eligible[i];
-    const key = `${cur.v}|${cur.sample}`;
-    if (prevKey !== key) rank = i + 1;
-    prevKey = key;
+    if (prevV === null || cur.v !== prevV) rank = i + 1;
+    prevV = cur.v;
     if (rank > limit) break;
     entries.push({
       rank,
