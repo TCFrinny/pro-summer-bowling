@@ -203,4 +203,241 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   }
 }
 
+// ---------------------------------------------------------------------------
+// 10. Competition ranking must key on PRIMARY value only. Two rows with
+//     identical primary but different samples share a rank; larger sample
+//     sorts first within the rank; tied-at-rank-10 inclusion keeps every
+//     row equal on primary even when their samples differ.
+// ---------------------------------------------------------------------------
+{
+  // A and B both average 200 exactly with different game samples. They
+  // MUST share rank 1.
+  const rows = aggregateSeasonContributions([
+    base(idPerson("a", "Anna"), { games: 20, scratchPinfall: 4000, poaGames: 20, poaSum: 0 }),
+    base(idPerson("b", "Bob"),  { games: 10, scratchPinfall: 2000, poaGames: 10, poaSum: 0 }),
+  ]);
+  const avg = buildLeaderboard(rows, "scratchAverage");
+  assert(avg.entries[0].rank === 1 && avg.entries[1].rank === 1,
+    "equal primary → same rank regardless of sample");
+  assert(avg.entries[0].identity.key === "person:a", "larger sample sorts first within rank");
+}
+{
+  // Nine unique leaders (200, 199, …, 192). Three at 10th share exact
+  // primary but have DIFFERENT samples — all three must still appear at
+  // rank 10.
+  const contribs: SeasonContribution[] = [];
+  for (let i = 0; i < 9; i++) {
+    contribs.push(base(idPerson(`p${i}`, `P${String.fromCharCode(65 + i)}`),
+      { framesRolled: 100, opens: 10 + i, strikes: 20, spares: 30 }));
+  }
+  contribs.push(base(idPerson("t1", "TA"), { framesRolled: 100, opens: 30, strikes: 20, spares: 30 }));
+  contribs.push(base(idPerson("t2", "TB"), { framesRolled: 120, opens: 36, strikes: 24, spares: 36 }));
+  contribs.push(base(idPerson("t3", "TC"), { framesRolled: 200, opens: 60, strikes: 40, spares: 60 }));
+  const rows = aggregateSeasonContributions(contribs);
+  const board = buildLeaderboard(rows, "openPct", 10);
+  const tied = board.entries.filter((e) => e.rank === 10);
+  assert(tied.length === 3, `tied-at-10 inclusion regardless of sample; got ${tied.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// 11. Aggregate ratings equal `computeCareerRatings` for the same
+//     contributions (game-weighted per-season with the shared helper).
+// ---------------------------------------------------------------------------
+{
+  const { computeCareerRatings } = await import("../src/lib/ratings");
+  const p = idPerson("r1", "R1");
+  const rows = aggregateSeasonContributions([
+    base(p, { offense: 105.0, defense: 98.0, actualRatingGames: 20, opponentRatingGames: 20, fullLinescoreGames: 15 }),
+    base(p, { offense: 112.4, defense: 101.7, actualRatingGames: 30, opponentRatingGames: 25, fullLinescoreGames: 30 }),
+  ]);
+  assert(rows.length === 1, "single identity");
+  const cr = computeCareerRatings("r1", [
+    { seasonId: "s1", offense: 105.0, defense: 98.0, actualGames: 20, opponentGames: 20, fullLinescoreGames: 15 },
+    { seasonId: "s2", offense: 112.4, defense: 101.7, actualGames: 30, opponentGames: 25, fullLinescoreGames: 30 },
+  ]);
+  assert(rows[0].offense === cr.offensiveRating, `offense parity ${rows[0].offense} vs ${cr.offensiveRating}`);
+  assert(rows[0].defense === cr.matchupDefense, `defense parity ${rows[0].defense} vs ${cr.matchupDefense}`);
+  assert(rows[0].twoWay === cr.twoWayRating, `two-way parity ${rows[0].twoWay} vs ${cr.twoWayRating}`);
+  assert(rows[0].actualRatingGames === cr.totals.actualGames, "actual games parity");
+  assert(rows[0].opponentRatingGames === cr.totals.opponentGames, "opponent games parity");
+}
+
+// ---------------------------------------------------------------------------
+// 12. Identity routing (hrefKind) — current-roster / current-sub / historical
+//     / permanent-person all map to the correct public route.
+// ---------------------------------------------------------------------------
+{
+  const {
+    idPerson: idP, idCurrentRoster, idCurrentSub, idHistorical,
+  } = await import("../src/lib/leaderboards-contrib");
+  const person = idP("p-1", "P");
+  const roster = idCurrentRoster("b07", "R");
+  const sub = idCurrentSub("s03", "S");
+  const hist = idHistorical("2024", "part-1", "H");
+  assert(person.hrefKind === "person" && person.personId === "p-1", "person identity kind");
+  assert(roster.hrefKind === "current-roster" && roster.unlinkedParticipantRef === "b07"
+    && roster.unlinkedSeasonId === null, "current-roster carries bowler id, no season");
+  assert(sub.hrefKind === "current-sub" && sub.unlinkedParticipantRef === "s03"
+    && sub.unlinkedSeasonId === null, "current-sub carries substitute id, no season");
+  assert(hist.hrefKind === "historical" && hist.unlinkedSeasonId === "2024"
+    && hist.unlinkedParticipantRef === "part-1", "historical carries season + ref");
+}
+
+// ---------------------------------------------------------------------------
+// 13. Current-season builder walks ONLY published `matchesByWeek`. A
+//     bowler and a substitute each rolled twice — once in a published
+//     week, once in an unpublished week. Every current contribution
+//     (personal games, POA, high game, frames, overall points, ratings
+//     sample) must reflect the published week only.
+// ---------------------------------------------------------------------------
+{
+  const { buildCurrentSeasonContribs } = await import("../src/lib/leaderboards-contrib");
+  // Minimal synthetic PublicSnapshot with two weeks. Only week 1 is
+  // published.
+  const b = {
+    id: "b01", name: "Rostered", entryAverage: 160, handicap: 0, scratchAverage: 0,
+    points: 0, pointsLost: 0, gamePoints: 0, setPoints: 0, scratchPinfall: 0,
+    handicapPinfall: 0, highGame: 999, highSet: 999, matchesPlayed: 0, gamesPlayed: 0,
+    actualGamesRolled: 6, actualScratchPinfall: 1200, movement: 0,
+  };
+  const s = { id: "s01", name: "Sub", entryAverage: 150, handicap: 0, personId: null };
+  function ls(scores: [number, number, number], entryAverage: number) {
+    return {
+      scheduledId: b.id, actualId: null, actualName: "", isSub: false,
+      entryAverage, handicap: 0,
+      games: [0, 1, 2].map((i) => ({
+        frames: [], strikes: 2, spares: 3, opens: 5, openPinsLeft: 20,
+        scratchTotal: scores[i], scratchByFrame: [], marks: 5,
+        segments: { first5: 100, last5: 100, bigOpening: 0, bigFinish: 0,
+          clutchMarks: 1, clutchOpportunities: 2 },
+      })) as any,
+      scratchSet: scores[0] + scores[1] + scores[2],
+      handicapGames: scores, handicapSet: scores[0] + scores[1] + scores[2],
+      strikes: 6, spares: 9, opens: 15, marks: 15, openPinsLeft: 60, framesRolled: 30,
+      segments: { first5: 300, last5: 300, bigOpening: 0, bigFinish: 0,
+        clutchMarks: 3, clutchOpportunities: 6 },
+    };
+  }
+  function makeMatch(week: number, sideAisSub: boolean, scoresA: [number, number, number], scoresB: [number, number, number]) {
+    return {
+      id: `m-${week}`, week, lanePair: "1-2" as const, slot: 1, status: "completed" as const,
+      bowlerA: b.id, bowlerB: "b02",
+      result: {
+        scheduledA: b.id, scheduledB: "b02",
+        scheduledNameA: b.name, scheduledNameB: "Opp",
+        actualA: sideAisSub ? s.id : b.id, actualB: "b02",
+        actualNameA: sideAisSub ? s.name : b.name, actualNameB: "Opp",
+        isSubA: sideAisSub, isSubB: false,
+        participationA: {
+          scheduledId: b.id,
+          status: sideAisSub ? "substitute" : "rostered",
+          actualId: sideAisSub ? s.id : b.id, actualName: sideAisSub ? s.name : b.name,
+        },
+        participationB: { scheduledId: "b02", status: "rostered", actualId: "b02", actualName: "Opp" },
+        entryAverageA: sideAisSub ? s.entryAverage : b.entryAverage, entryAverageB: 160,
+        handicapA: 0, handicapB: 0,
+        linescoreA: ls(scoresA, sideAisSub ? s.entryAverage : b.entryAverage) as any,
+        linescoreB: ls(scoresB, 160) as any,
+        gamesA: scoresA, gamesB: scoresB,
+        handicapGamesA: scoresA, handicapGamesB: scoresB,
+        scratchTotalA: scoresA[0] + scoresA[1] + scoresA[2],
+        scratchTotalB: scoresB[0] + scoresB[1] + scoresB[2],
+        handicapTotalA: scoresA[0] + scoresA[1] + scoresA[2],
+        handicapTotalB: scoresB[0] + scoresB[1] + scoresB[2],
+        gameAwardsA: [2, 2, 2] as any, gameAwardsB: [0, 0, 0] as any,
+        gamePointsA: 6, gamePointsB: 0, setPointA: 1 as any, setPointB: 0 as any,
+        totalPointsA: 7, totalPointsB: 0, pointsOverride: null,
+        winner: "A" as const,
+      },
+    };
+  }
+  // Week 1: rostered rolls scores [200,200,200]; opp [100,100,100].
+  const w1 = makeMatch(1, false, [200, 200, 200], [100, 100, 100]);
+  // Week 2 (UNPUBLISHED): substitute rolls for scheduled bowler with
+  // extreme scores that would leak into personal/high/POA if not gated.
+  const w2 = makeMatch(2, true, [280, 280, 280], [100, 100, 100]);
+  const snapshot = {
+    builtAt: 0,
+    bowlers: [b as any],
+    bowlersById: { [b.id]: b as any, b02: { ...b, id: "b02", name: "Opp" } as any },
+    weeks: [
+      { week: 1, date: "", completed: true, published: true },
+      { week: 2, date: "", completed: true, published: false },
+    ],
+    matchesByWeek: { 1: [w1 as any], 2: [w2 as any] },
+    standings: [], history: {}, extras: {},
+    seasonBoards: { standard: {}, advanced: {} } as any,
+    weekBoards: {}, seasonLanes: [], weekLanes: {},
+    elimination: {} as any,
+    substitutes: [s as any],
+    substituteProfiles: {
+      [s.id]: { gamesRolled: 3, scratchPinfall: 840, highGame: 280, highSet: 840, weeks: [] } as any,
+    },
+  } as any;
+  const rows = buildCurrentSeasonContribs({ seasonId: "cur", championPersonId: null, snapshot });
+  const bRow = rows.find((r) => r.identity.key === "current-roster:b01")!;
+  assert(bRow, "rostered contribution present");
+  assert(bRow.games === 3, `rostered games must equal published-week games only (got ${bRow.games})`);
+  assert(bRow.scratchPinfall === 600, `rostered pinfall (got ${bRow.scratchPinfall})`);
+  assert(bRow.highGame === 200, `rostered high game excludes unpublished 280 (got ${bRow.highGame})`);
+  assert(bRow.highSet === 600, `rostered high set excludes unpublished 840 (got ${bRow.highSet})`);
+  assert(bRow.framesRolled === 30, `rostered frames from week 1 only (got ${bRow.framesRolled})`);
+  assert(bRow.poaGames === 3 && bRow.poaSum === (200 - 160) * 3,
+    `rostered POA covers only published games (got ${bRow.poaGames}/${bRow.poaSum})`);
+  // Substitute personal must ONLY reflect the unpublished week -> empty.
+  const sRow = rows.find((r) => r.identity.key === "current-sub:s01");
+  assert(!sRow || sRow.games === 0, "substitute personal excluded because their only week was unpublished");
+  // Overall roster credit — 7 pts (week 1) only. Unpublished week 2 also
+  // awarded 7 to A, but that must NOT be counted.
+  assert(bRow.overallWins === 7, `overall points from published matches only (got ${bRow.overallWins})`);
+  // Ratings sample only counts published games.
+  assert(bRow.actualRatingGames === 3, `rating games from published only (got ${bRow.actualRatingGames})`);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Public season selector — only archived + public_visible seasons pass.
+// ---------------------------------------------------------------------------
+{
+  const { selectPublicHistoricalSeasonIds } = await import("../src/lib/leaderboards-contrib");
+  const ids = selectPublicHistoricalSeasonIds([
+    { id: "cur", status: "current", isCurrent: true, publicVisible: true },
+    { id: "arch-pub", status: "archived", isCurrent: false, publicVisible: true },
+    { id: "arch-priv", status: "archived", isCurrent: false, publicVisible: false },
+    { id: "draft", status: "draft", isCurrent: false, publicVisible: true },
+  ]);
+  assert(ids.length === 1 && ids[0] === "arch-pub",
+    "only archived+public_visible seasons appear on the public leaderboard");
+}
+
+// ---------------------------------------------------------------------------
+// 15. Historical builder consumes an already-filtered snapshot. Feeding a
+//     snapshot with unpublished weeks through `filterPublicHistoricalSnapshot`
+//     first strips them, so no unpublished data reaches contributions.
+// ---------------------------------------------------------------------------
+{
+  const {
+    buildHistoricalSeasonContribs,
+  } = await import("../src/lib/leaderboards-contrib");
+  const { filterPublicHistoricalSnapshot } = await import("../src/lib/historical-snapshot");
+  const snap = {
+    version: 1, builtAt: 0, seasonId: "2024", seasonLabel: "2024",
+    pointSystem: 7 as const, totalWeeks: 2,
+    participants: [
+      { ref: "p1", displayName: "H1", role: "rostered" as const, personId: null },
+    ],
+    weeks: [
+      { weekNumber: 1, date: null, published: true, completed: true, matches: [], schedule: [] },
+      { weekNumber: 2, date: null, published: false, completed: true, matches: [], schedule: [] },
+    ],
+    standings: [], summaryOnly: false, summaryRecords: [],
+    participantStats: [],
+  } as any;
+  const filtered = filterPublicHistoricalSnapshot(snap);
+  assert(filtered.weeks.length === 1 && filtered.weeks[0].published === true,
+    "filter strips unpublished weeks before contribution build");
+  const rows = buildHistoricalSeasonContribs("2024", filtered);
+  // Nothing to aggregate (no matches); participant appears with zeros.
+  assert(rows.length === 1 && rows[0].games === 0, "no leaked unpublished data");
+}
+
 console.log("leaderboards tests OK");
