@@ -196,10 +196,10 @@ function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels, pointSystem }: {
 }
 
 function WeekRow({
-  week, seasonId, expanded, onToggle, lanePairLabels, onChanged,
+  week, seasonId, expanded, onToggle, lanePairLabels, pointSystem, onChanged,
 }: {
   week: HistoricalWeekRow; seasonId: string; expanded: boolean; onToggle: () => void;
-  lanePairLabels: string[]; onChanged: () => void;
+  lanePairLabels: string[]; pointSystem: 4 | 7; onChanged: () => void;
 }) {
   const [date, setDate] = useState(week.date ?? "");
   const [pub, setPub] = useState(week.published);
