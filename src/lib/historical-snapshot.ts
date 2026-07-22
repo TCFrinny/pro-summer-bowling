@@ -547,6 +547,7 @@ export function filterPublicHistoricalSnapshot(snap: HistoricalSnapshot): Histor
     participants: snap.participants,
     weeks: publishedWeeks,
     summaryRecords: snap.summaryRecords,
+    pointSystem: snap.pointSystem,
   });
   const participantStats = buildHistoricalParticipantStats({
     participants: snap.participants,
