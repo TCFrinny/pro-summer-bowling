@@ -3,11 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { AppShell, PageHeader, EmptyState } from "@/components/layout/AppShell";
 import { listPublicSeasons } from "@/lib/history-repo.functions";
 import { filterPublicSeasons } from "@/lib/season-history";
+import { AllTimeLeaderboards } from "@/components/AllTimeLeaderboards";
 import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/seasons/")({
   component: SeasonsPage,
 });
+
 
 function SeasonsPage() {
   // listPublicSeasons already filters draft / archived-private on the SERVER.
@@ -36,9 +38,11 @@ function SeasonsPage() {
           legacyOnly={!q.data.available}
         />
       )}
+      <AllTimeLeaderboards />
     </AppShell>
   );
 }
+
 
 function SeasonsList({
   seasons,

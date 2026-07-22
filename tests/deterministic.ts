@@ -40,6 +40,7 @@ import "./career-advanced";
 import "./career-records";
 import "./ratings";
 import "./champion-and-rebuild";
+import "./leaderboards";
 
 
 
