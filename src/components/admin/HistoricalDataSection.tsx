@@ -509,9 +509,10 @@ type Status = "rostered" | "substitute" | "absent";
 type DetailMode = "game_scores" | "full_linescore";
 
 function ResultEntryForm({
-  seasonId, weekId, slot, weekPublished, rosterOptions, allOptions, onSaved,
+  seasonId, weekId, slot, weekPublished, pointSystem, rosterOptions, allOptions, onSaved,
 }: {
   seasonId: string; weekId: string; slot: HistoricalSlotRow; weekPublished: boolean;
+  pointSystem: 4 | 7;
   rosterOptions: ParticipantRow[]; allOptions: ParticipantRow[]; onSaved: () => void;
 }) {
   const existing = useQuery({
