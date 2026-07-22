@@ -141,7 +141,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 
 // ---------- Weeks + per-week schedule + per-slot result ----------
 
-function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels }: { seasonId: string; totalWeeksHint: number | null; lanePairLabels: string[] }) {
+function WeeksBlock({ seasonId, totalWeeksHint, lanePairLabels, pointSystem }: { seasonId: string; totalWeeksHint: number | null; lanePairLabels: string[]; pointSystem: 4 | 7 }) {
   const qc = useQueryClient();
   const weeks = useQuery({
     queryKey: ["admin", "historical", "weeks", seasonId],
