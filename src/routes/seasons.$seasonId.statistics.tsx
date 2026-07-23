@@ -9,6 +9,9 @@ import {
   leaderboardOffense, leaderboardDefense, leaderboardTwoWay,
 } from "@/lib/ratings";
 import { ratingGamesFromHistoricalSnapshot } from "@/lib/ratings-extract";
+import {
+  HIGH_GAME_MILESTONE, HIGH_SET_MILESTONE, mergeMilestoneRows,
+} from "@/lib/leaderboard-milestone";
 
 export const Route = createFileRoute("/seasons/$seasonId/statistics")({
   component: StatsPage,
