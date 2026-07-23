@@ -117,6 +117,10 @@ export interface SeasonContribution {
   scratchPinfall: number;
   highGame: number | null;
   highSet: number | null;
+  /** Provenance for the exact High Game / High Set performance credited
+   *  above. Present whenever `highGame`/`highSet` is set. */
+  highGameProvenance?: HighScoreProvenance | null;
+  highSetProvenance?: HighScoreProvenance | null;
   poaSum: number | null;    // sum(gameScore - entryAvg) across ALL personal games
   poaGames: number | null;  // sample for POA
 
