@@ -397,6 +397,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     sample: (r) => r.games,
     eligible: (r) => r.highGame != null,
     format: int, formatSample: int,
+    milestoneThreshold: HIGH_GAME_MILESTONE,
   },
   {
     id: "highSet", group: "scoring", label: "High Set",
@@ -406,6 +407,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     sample: (r) => r.games,
     eligible: (r) => r.highSet != null,
     format: int, formatSample: int,
+    milestoneThreshold: HIGH_SET_MILESTONE,
   },
   {
     id: "careerPOA", group: "scoring", label: "Career POA",
