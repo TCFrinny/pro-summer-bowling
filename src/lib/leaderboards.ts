@@ -466,6 +466,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     eligible: (r) => r.highGame != null,
     format: int, formatSample: int,
     milestoneThreshold: HIGH_GAME_MILESTONE,
+    provenanceOf: (r) => r.highGameProvenance,
   },
   {
     id: "highSet", group: "scoring", label: "High Set",
