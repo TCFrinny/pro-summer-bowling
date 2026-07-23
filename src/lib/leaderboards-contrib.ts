@@ -90,6 +90,16 @@ export function idHistorical(
     hrefKind: LeaderboardIdentityKind.Historical,
   };
 }
+/** Extract the first four-digit year from a season label. Returns null
+ *  when no year is present (undated legacy labels). */
+export function extractYearFromLabel(label: string | null | undefined): number | null {
+  if (!label) return null;
+  const m = /(\d{4})/.exec(label);
+  if (!m) return null;
+  const y = Number(m[1]);
+  return Number.isFinite(y) ? y : null;
+}
+
 
 function emptyContribution(identity: LeaderboardIdentity): SeasonContribution {
   return {
