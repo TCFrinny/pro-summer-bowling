@@ -31,6 +31,7 @@
  */
 
 import { computeCareerRatings, type CareerSeasonContribution } from "./ratings";
+import { HIGH_GAME_MILESTONE, HIGH_SET_MILESTONE } from "./leaderboard-milestone";
 
 // ---------------------------------------------------------------------------
 // Identity + input contribution shape
