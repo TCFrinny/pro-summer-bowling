@@ -117,6 +117,10 @@ interface PersonalAgg {
   scratchPinfall: number;
   highGame: number | null;
   highSet: number | null;
+  /** Week number of the earliest occurrence of the current `highGame`. */
+  highGameWeek: number | null;
+  /** Week number of the earliest occurrence of the current `highSet`. */
+  highSetWeek: number | null;
   poaSum: number;
   poaGames: number;
   framesRolled: number;
@@ -133,11 +137,31 @@ interface PersonalAgg {
 function emptyPersonal(): PersonalAgg {
   return {
     games: 0, scratchPinfall: 0, highGame: null, highSet: null,
+    highGameWeek: null, highSetWeek: null,
     poaSum: 0, poaGames: 0,
     framesRolled: 0, strikes: 0, spares: 0, opens: 0, openPinsLeft: 0,
     clutchMarks: 0, clutchOpportunities: 0, hasFrames: false,
     overallWins: 0, overallHasCredit: false,
   };
+}
+
+/** Track a candidate game score against the current highGame with the
+ *  earliest week wins on tie. */
+function updateHighGame(agg: PersonalAgg, score: number, week: number): void {
+  if (agg.highGame == null || score > agg.highGame) {
+    agg.highGame = score;
+    agg.highGameWeek = week;
+  } else if (score === agg.highGame) {
+    if (agg.highGameWeek == null || week < agg.highGameWeek) agg.highGameWeek = week;
+  }
+}
+function updateHighSet(agg: PersonalAgg, total: number, week: number): void {
+  if (agg.highSet == null || total > agg.highSet) {
+    agg.highSet = total;
+    agg.highSetWeek = week;
+  } else if (total === agg.highSet) {
+    if (agg.highSetWeek == null || week < agg.highSetWeek) agg.highSetWeek = week;
+  }
 }
 
 export interface CurrentPublishedAggregates {
