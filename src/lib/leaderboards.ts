@@ -370,6 +370,8 @@ export interface CategoryDef {
    * Used for duckpin milestones (High Game >=200, High Set >=500).
    */
   milestoneThreshold?: number;
+  /** Optional provenance extractor used ONLY for High Game / High Set. */
+  provenanceOf?: (r: AllTimeRow) => HighScoreProvenance | null | undefined;
 }
 
 const int = (v: number) => v.toLocaleString();
