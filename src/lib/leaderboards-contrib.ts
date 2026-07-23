@@ -127,9 +127,9 @@ interface PersonalAgg {
   scratchPinfall: number;
   highGame: number | null;
   highSet: number | null;
-  /** Week number of the earliest occurrence of the current `highGame`. */
+  /** Week number of the MOST RECENT occurrence of the current `highGame`. */
   highGameWeek: number | null;
-  /** Week number of the earliest occurrence of the current `highSet`. */
+  /** Week number of the MOST RECENT occurrence of the current `highSet`. */
   highSetWeek: number | null;
   poaSum: number;
   poaGames: number;
@@ -155,14 +155,14 @@ function emptyPersonal(): PersonalAgg {
   };
 }
 
-/** Track a candidate game score against the current highGame with the
- *  earliest week wins on tie. */
+/** Track a candidate game score against the current highGame; the LATER
+ *  (higher week number) occurrence wins when an equal best repeats. */
 function updateHighGame(agg: PersonalAgg, score: number, week: number): void {
   if (agg.highGame == null || score > agg.highGame) {
     agg.highGame = score;
     agg.highGameWeek = week;
   } else if (score === agg.highGame) {
-    if (agg.highGameWeek == null || week < agg.highGameWeek) agg.highGameWeek = week;
+    if (agg.highGameWeek == null || week > agg.highGameWeek) agg.highGameWeek = week;
   }
 }
 function updateHighSet(agg: PersonalAgg, total: number, week: number): void {
@@ -170,9 +170,10 @@ function updateHighSet(agg: PersonalAgg, total: number, week: number): void {
     agg.highSet = total;
     agg.highSetWeek = week;
   } else if (total === agg.highSet) {
-    if (agg.highSetWeek == null || week < agg.highSetWeek) agg.highSetWeek = week;
+    if (agg.highSetWeek == null || week > agg.highSetWeek) agg.highSetWeek = week;
   }
 }
+
 
 export interface CurrentPublishedAggregates {
   roster: Map<BowlerId, PersonalAgg>;
@@ -414,7 +415,7 @@ export function buildHistoricalSeasonContribs(
   const prov = (value: number, week: number | null): HighScoreProvenance => ({
     seasonId, seasonLabel, seasonSortYear, week, value,
   });
-  // Walk weekly matches ONCE to derive per-participant earliest-occurrence
+  // Walk weekly matches ONCE to derive per-participant MOST-RECENT-occurrence
   // week for High Game / High Set. Summary-only participants (no weekly
   // data) receive null-week provenance downstream.
   interface WkBest {
@@ -429,12 +430,13 @@ export function buildHistoricalSeasonContribs(
   };
   const trackHG = (w: WkBest, score: number, wk: number) => {
     if (w.hg == null || score > w.hg) { w.hg = score; w.hgWeek = wk; }
-    else if (score === w.hg && (w.hgWeek == null || wk < w.hgWeek)) w.hgWeek = wk;
+    else if (score === w.hg && (w.hgWeek == null || wk > w.hgWeek)) w.hgWeek = wk;
   };
   const trackHS = (w: WkBest, total: number, wk: number) => {
     if (w.hs == null || total > w.hs) { w.hs = total; w.hsWeek = wk; }
-    else if (total === w.hs && (w.hsWeek == null || wk < w.hsWeek)) w.hsWeek = wk;
+    else if (total === w.hs && (w.hsWeek == null || wk > w.hsWeek)) w.hsWeek = wk;
   };
+
   for (const week of snap.weeks ?? []) {
     for (const m of week.matches ?? []) {
       const wk = m.weekNumber ?? week.weekNumber;
