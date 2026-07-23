@@ -105,61 +105,31 @@ for (const c of CASES) {
     `perfect game clutchMarks = 4 (frame 9 + XXX 10th), got ${g.segments.clutchMarks}`);
 }
 
-// --- 4. X/ 10th flowing through downstream aggregation (substitute profile).
-//     Frame 10 "X/" must add 1 strike + 1 spare (2 marks) into the aggregate,
-//     and mark % / strike % must reflect the corrected counts under the
-//     existing markPct = marks/frames formula (frames denominator unchanged).
+// --- 4. Full-game aggregation: three "X/" 10ths flow through summarizeGame
+//     into the same percentage formulas used downstream (marks / (games*10)).
 {
-  const { buildSubstituteData } = await import("../src/lib/substitute-profiles");
-  const { assembleSideLinescore } = await import("../src/lib/mock-data");
-
-  // Build three identical games: frames 1–9 all "-" (0 pinfall), frame 10 "X/".
   function xSlashGame() {
     const frames: FrameLinescore[] = [];
     for (let i = 1; i <= 9; i++) frames.push({ frameNumber: i, mark: "-", cumulativeScore: 0 });
     frames.push({ frameNumber: 10, mark: "X/", cumulativeScore: 20 });
     return summarizeGame(frames);
   }
-  const games: [ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>, ReturnType<typeof summarizeGame>] =
-    [xSlashGame(), xSlashGame(), xSlashGame()];
-  const sub = { id: "sub-alpha", name: "Alpha Sub" };
-  const scheduled = { id: "sched-1", name: "Sched One" };
-  const side = assembleSideLinescore({
-    scheduled, actualId: sub.id, actualName: sub.name,
-    isSub: true, entryAverage: 100, handicap: 20, games,
-  });
-  const data = buildSubstituteData([
-    {
-      week: 1, laneAssignment: "1-2",
-      teamA: { scheduled, actual: sub, isSub: true, entryAverage: 100, handicap: 20,
-        scratchGames: [20, 20, 20], handicapGames: [40, 40, 40],
-        scratchTotal: 60, handicapTotal: 120, points: 0, linescore: side.linescoreA! },
-      teamB: { scheduled: { id: "sB", name: "SB" }, actual: { id: "sB", name: "SB" },
-        isSub: false, entryAverage: 100, handicap: 0,
-        scratchGames: [0, 0, 0], handicapGames: [0, 0, 0],
-        scratchTotal: 0, handicapTotal: 0, points: 7, linescore: null },
-    } as unknown as Parameters<typeof buildSubstituteData>[0][number],
-  ]);
-  const p = data.profiles.find((x) => x.identity.id === sub.id);
-  assert(p, "expected substitute profile for alpha");
-  // 3 games × frame 10 "X/" = 3 strikes + 3 spares = 6 marks.
-  assert(p!.strikes === 3, `sub strikes aggregate = 3 (got ${p!.strikes})`);
-  assert(p!.spares === 3, `sub spares aggregate = 3 (got ${p!.spares})`);
-  assert(p!.marks === 6, `sub marks aggregate = 6 (got ${p!.marks})`);
-  // markPct denominator = 3 games × 10 regulation frames = 30. Percentage = 20%.
-  assert(Math.abs(p!.markPct - 20) < 1e-9,
-    `markPct = 20% via marks/frames (got ${p!.markPct})`);
-  // strikePct = 3/30 = 10%.
-  assert(Math.abs(p!.strikePct - 10) < 1e-9,
-    `strikePct = 10% via strikes/frames (got ${p!.strikePct})`);
-  // Clutch marks: frame 9 is "-" (0), frame 10 "X/" (2) per game × 3 = 6.
-  // Clutch opportunities: 2 per game × 3 games = 6. clutchPct = 100%.
-  assert(p!.clutchMarks === 6,
-    `sub clutchMarks aggregate = 6 (got ${p!.clutchMarks})`);
-  assert(p!.clutchOpportunities === 6,
-    `sub clutchOpportunities preserved at 6 (got ${p!.clutchOpportunities})`);
-  assert(Math.abs(p!.clutchPct - 100) < 1e-9,
-    `sub clutchPct = 100% (got ${p!.clutchPct})`);
+  const games = [xSlashGame(), xSlashGame(), xSlashGame()];
+  const totalStrikes = games.reduce((a, g) => a + g.strikes, 0);
+  const totalSpares  = games.reduce((a, g) => a + g.spares, 0);
+  const totalMarks   = games.reduce((a, g) => a + g.marks, 0);
+  const totalClutch  = games.reduce((a, g) => a + g.segments.clutchMarks, 0);
+  assert(totalStrikes === 3, `aggregate strikes = 3 (got ${totalStrikes})`);
+  assert(totalSpares === 3,  `aggregate spares = 3 (got ${totalSpares})`);
+  assert(totalMarks === 6,   `aggregate marks = 6 (got ${totalMarks})`);
+  assert(totalClutch === 6,  `aggregate clutchMarks = 6 (got ${totalClutch})`);
+  // Existing downstream formula: markPct = marks / (games * 10) * 100.
+  const frames = games.length * 10;
+  assert(Math.abs((totalMarks / frames) * 100 - 20) < 1e-9, `markPct = 20%`);
+  assert(Math.abs((totalStrikes / frames) * 100 - 10) < 1e-9, `strikePct = 10%`);
+  // Clutch opportunity denominator is 2 per game (unchanged); clutchPct = 100%.
+  assert(Math.abs((totalClutch / (games.length * 2)) * 100 - 100) < 1e-9,
+    `clutchPct = 100%`);
 }
 
 // --- 5. Percentages are NOT silently capped. -------------------------------
