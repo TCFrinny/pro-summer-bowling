@@ -270,16 +270,21 @@ export function buildCurrentPublishedAggregates(
 
 export interface CurrentSeasonInput {
   seasonId: string;
+  seasonLabel: string;
+  seasonSortYear: number | null;
   championPersonId: string | null;
   snapshot: PublicSnapshot;
 }
 
 export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonContribution[] {
-  const { seasonId, championPersonId, snapshot } = input;
+  const { seasonId, seasonLabel, seasonSortYear, championPersonId, snapshot } = input;
   const publishedWeeks = new Set<number>(
     (snapshot.weeks ?? []).filter((w) => w.published).map((w) => w.week),
   );
   const { roster: rosterAgg, sub: subAgg } = buildCurrentPublishedAggregates(snapshot, publishedWeeks);
+  const prov = (value: number, week: number | null): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
 
   // Ratings — restrict to published weeks.
   const ratingRows = ratingGamesFromCurrentSeason(seasonId, snapshot.matchesByWeek, publishedWeeks);
