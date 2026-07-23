@@ -586,7 +586,14 @@ export function buildLeaderboard(
     const cur = eligible[i];
     if (prevV === null || cur.v !== prevV) rank = i + 1;
     prevV = cur.v;
-    if (rank > limit) break;
+    if (rank > limit) {
+      // Milestone override: keep including qualifying rows past the cap.
+      // Eligible is sorted desc by primary, so once we drop below the
+      // threshold we can stop.
+      if (cat.milestoneThreshold == null) break;
+      if (cat.direction !== "desc") break;
+      if (cur.v < cat.milestoneThreshold) break;
+    }
     entries.push({
       rank,
       identity: cur.id,
