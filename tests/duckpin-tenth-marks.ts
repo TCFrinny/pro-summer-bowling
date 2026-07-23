@@ -111,7 +111,7 @@ for (const c of CASES) {
 //     existing markPct = marks/frames formula (frames denominator unchanged).
 {
   const { buildSubstituteData } = await import("../src/lib/substitute-profiles");
-  const { assembleSideLinescore } = await import("../src/lib/live-scoring");
+  const { assembleSideLinescore } = await import("../src/lib/mock-data");
 
   // Build three identical games: frames 1–9 all "-" (0 pinfall), frame 10 "X/".
   function xSlashGame() {
