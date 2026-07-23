@@ -612,6 +612,8 @@ export interface LeaderboardEntry {
   primaryDisplay: string;
   sample: number;
   sampleDisplay: string;
+  /** Present only on High Game / High Set entries. */
+  provenance?: HighScoreProvenance | null;
 }
 
 export interface LeaderboardResult {
