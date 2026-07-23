@@ -8,6 +8,7 @@ import {
   type SeasonContribution,
   type LeaderboardIdentity,
   type AllTimeRow,
+  type HighScoreProvenance,
 } from "../src/lib/leaderboards";
 import { readFileSync } from "node:fs";
 
