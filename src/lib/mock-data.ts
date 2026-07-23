@@ -41,6 +41,11 @@ import {
   type SubstituteIdentity,
   type SubstituteProfile,
 } from "./substitute-profiles";
+import {
+  HIGH_GAME_MILESTONE,
+  HIGH_SET_MILESTONE,
+  mergeMilestoneRows,
+} from "./leaderboard-milestone";
 
 export type {
   SubstituteIdentity,
@@ -1350,11 +1355,23 @@ export function buildSnapshot(input: {
     }));
     const standard: StandardLeaderboards = {
       scope,
-      scratchHighGame: topN(scratchGames, (x) => x.scratch, 5),
-      scratchHighSeries: topN(scratchSets, (x) => x.scratchSet, 5),
+      scratchHighGame: mergeMilestoneRows(
+        topN(scratchGames, (x) => x.scratch, 5), scratchGames,
+        (x) => x.scratch, HIGH_GAME_MILESTONE,
+      ),
+      scratchHighSeries: mergeMilestoneRows(
+        topN(scratchSets, (x) => x.scratchSet, 5), scratchSets,
+        (x) => x.scratchSet, HIGH_SET_MILESTONE,
+      ),
       topScratchAverages: topN(averages, (x) => x.scratchAverage, 10),
-      hcpHighGame: topN(hcpGames, (x) => x.handicap, 5),
-      hcpHighSeries: topN(hcpSets, (x) => x.handicapSet, 5),
+      hcpHighGame: mergeMilestoneRows(
+        topN(hcpGames, (x) => x.handicap, 5), hcpGames,
+        (x) => x.handicap, HIGH_GAME_MILESTONE,
+      ),
+      hcpHighSeries: mergeMilestoneRows(
+        topN(hcpSets, (x) => x.handicapSet, 5), hcpSets,
+        (x) => x.handicapSet, HIGH_SET_MILESTONE,
+      ),
       topTotalPoints: topN([...creditedSeason.values()], (x) => x.points, 10),
       mostStrikes: topN(volume, (x) => x.strikes, 10),
       mostSpares: topN(volume, (x) => x.spares, 10),

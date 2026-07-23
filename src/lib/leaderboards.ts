@@ -31,6 +31,7 @@
  */
 
 import { computeCareerRatings, type CareerSeasonContribution } from "./ratings";
+import { HIGH_GAME_MILESTONE, HIGH_SET_MILESTONE } from "./leaderboard-milestone";
 
 // ---------------------------------------------------------------------------
 // Identity + input contribution shape
@@ -298,6 +299,12 @@ export interface CategoryDef {
   format: (v: number) => string;
   /** Sample formatter. */
   formatSample: (v: number) => string;
+  /**
+   * When set, every row whose primary value meets/exceeds this threshold
+   * is always included, even when it falls outside the normal top-N cap.
+   * Used for duckpin milestones (High Game >=200, High Set >=500).
+   */
+  milestoneThreshold?: number;
 }
 
 const int = (v: number) => v.toLocaleString();
@@ -391,6 +398,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     sample: (r) => r.games,
     eligible: (r) => r.highGame != null,
     format: int, formatSample: int,
+    milestoneThreshold: HIGH_GAME_MILESTONE,
   },
   {
     id: "highSet", group: "scoring", label: "High Set",
@@ -400,6 +408,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     sample: (r) => r.games,
     eligible: (r) => r.highSet != null,
     format: int, formatSample: int,
+    milestoneThreshold: HIGH_SET_MILESTONE,
   },
   {
     id: "careerPOA", group: "scoring", label: "Career POA",
@@ -577,7 +586,14 @@ export function buildLeaderboard(
     const cur = eligible[i];
     if (prevV === null || cur.v !== prevV) rank = i + 1;
     prevV = cur.v;
-    if (rank > limit) break;
+    if (rank > limit) {
+      // Milestone override: keep including qualifying rows past the cap.
+      // Eligible is sorted desc by primary, so once we drop below the
+      // threshold we can stop.
+      if (cat.milestoneThreshold == null) break;
+      if (cat.direction !== "desc") break;
+      if (cur.v < cat.milestoneThreshold) break;
+    }
     entries.push({
       rank,
       identity: cur.id,

@@ -440,4 +440,145 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   assert(rows.length === 1 && rows[0].games === 0, "no leaked unpublished data");
 }
 
-console.log("leaderboards tests OK");
+// ---------------------------------------------------------------------------
+// 16. Duckpin High Game / High Set milestone rule — every 200+ game and
+//     every 500+ set is always displayed, even when it falls outside the
+//     top-10 rank cap. Non-milestone categories remain capped. Boundary
+//     values 200/500 qualify; 199/499 do not qualify by the milestone
+//     rule alone. Merging keeps existing top-10 order and never duplicates
+//     rows that are already inside the cap.
+// ---------------------------------------------------------------------------
+{
+  const {
+    HIGH_GAME_MILESTONE, HIGH_SET_MILESTONE, mergeMilestoneRows,
+  } = await import("../src/lib/leaderboard-milestone");
+  assert(HIGH_GAME_MILESTONE === 200 && HIGH_SET_MILESTONE === 500,
+    "duckpin milestone thresholds fixed at 200 / 500");
+
+  // (1) More than 10 bowlers with 200+ games → all qualifying rows show.
+  {
+    const contribs: SeasonContribution[] = [];
+    // 15 unique bowlers with high games from 214 down to 200.
+    for (let i = 0; i < 15; i++) {
+      contribs.push(base(idPerson(`p${i}`, `P${String.fromCharCode(65 + i)}`),
+        { games: 30, scratchPinfall: 30 * (150 + i), highGame: 214 - i, highSet: 400 }));
+    }
+    // Two below-milestone rows that would normally take rank 11+.
+    contribs.push(base(idPerson("lo1", "Lo1"), { games: 30, highGame: 190 }));
+    contribs.push(base(idPerson("lo2", "Lo2"), { games: 30, highGame: 180 }));
+    const rows = aggregateSeasonContributions(contribs);
+    const board = buildLeaderboard(rows, "highGame", 10);
+    // Every 200+ row is present (15 of them), sub-200 excluded.
+    assert(board.entries.length === 15,
+      `all 200+ high game rows displayed (got ${board.entries.length})`);
+    assert(board.entries.every((e) => e.primary >= 200), "no sub-200 leaks past top 10");
+    assert(board.entries[0].primary === 214 && board.entries[14].primary === 200,
+      "existing descending order preserved");
+  }
+  // (2) More than 10 bowlers with 500+ sets → all qualifying rows show.
+  {
+    const contribs: SeasonContribution[] = [];
+    for (let i = 0; i < 13; i++) {
+      contribs.push(base(idPerson(`s${i}`, `S${String.fromCharCode(65 + i)}`),
+        { games: 30, highSet: 520 - i }));
+    }
+    contribs.push(base(idPerson("lo", "Lo"), { games: 30, highSet: 480 }));
+    const rows = aggregateSeasonContributions(contribs);
+    const board = buildLeaderboard(rows, "highSet", 10);
+    assert(board.entries.length === 13,
+      `all 500+ high set rows displayed (got ${board.entries.length})`);
+    assert(board.entries.every((e) => e.primary >= 500), "sub-500 excluded from milestone board");
+  }
+  // (3) Normal top-10 plus milestone qualifiers outside the top-10 merge
+  //     without duplicates and remain correctly sorted.
+  {
+    const contribs: SeasonContribution[] = [];
+    // Top 9 non-milestone rows (highGame 190..182).
+    for (let i = 0; i < 9; i++) {
+      contribs.push(base(idPerson(`n${i}`, `N${String.fromCharCode(65 + i)}`),
+        { games: 30, highGame: 190 - i }));
+    }
+    // 10th slot at 181, then five 200+ rows tied on samples but low
+    // enough (in raw order) that they would fall outside the top-10 if
+    // NOT resorted by the leaderboard's descending order.
+    contribs.push(base(idPerson("n9", "NJ"), { games: 30, highGame: 181 }));
+    for (let i = 0; i < 5; i++) {
+      contribs.push(base(idPerson(`m${i}`, `M${String.fromCharCode(65 + i)}`),
+        { games: 30, highGame: 200 + i }));
+    }
+    const rows = aggregateSeasonContributions(contribs);
+    const board = buildLeaderboard(rows, "highGame", 10);
+    // buildLeaderboard already sorts desc, so the 5 milestone rows take
+    // ranks 1..5, then non-milestone 190..181 at 6..10. All rows appear;
+    // no duplicates.
+    const keys = board.entries.map((e) => e.identity.key);
+    assert(new Set(keys).size === keys.length, "no duplicate rows after milestone merge");
+    // First 5 are the 200+ rows (204, 203, 202, 201, 200).
+    assert(board.entries.slice(0, 5).every((e) => e.primary >= 200),
+      "200+ rows take the top ranks by natural desc sort");
+    // 5 milestone rows + top 5 non-milestone (rank 6..10). Rows 11..15
+    // (highGame 185..181) are below both the cap AND the milestone.
+    assert(board.entries.length === 10,
+      `cap holds when all extras fit inside top 10 (got ${board.entries.length})`);
+    // Confirm the sub-milestone tail is correctly excluded and no dup.
+    assert(!keys.includes("person:n9"),
+      "sub-milestone rank-11+ rows are excluded when non-qualifying");
+  }
+  // (4) A non-milestone category (scratchPinfall) remains capped at 10.
+  {
+    const contribs: SeasonContribution[] = [];
+    for (let i = 0; i < 15; i++) {
+      contribs.push(base(idPerson(`p${i}`, `P${String.fromCharCode(65 + i)}`),
+        { games: 30, scratchPinfall: 10_000 - i }));
+    }
+    const rows = aggregateSeasonContributions(contribs);
+    const board = buildLeaderboard(rows, "scratchPinfall", 10);
+    assert(board.entries.length === 10,
+      `non-milestone board stays capped at 10 (got ${board.entries.length})`);
+  }
+  // (5) Boundary values — 200/500 qualify; 199/499 do not by the milestone
+  //     rule alone.
+  {
+    const contribs: SeasonContribution[] = [];
+    for (let i = 0; i < 10; i++) {
+      contribs.push(base(idPerson(`p${i}`, `P${String.fromCharCode(65 + i)}`),
+        { games: 30, highGame: 300 - i, highSet: 600 - i }));
+    }
+    // Ranks 11+: 200 exactly (qualifies), 199 exactly (does not).
+    contribs.push(base(idPerson("edge200", "Edge200"), { games: 30, highGame: 200 }));
+    contribs.push(base(idPerson("edge199", "Edge199"), { games: 30, highGame: 199 }));
+    contribs.push(base(idPerson("edge500", "Edge500"), { games: 30, highSet: 500 }));
+    contribs.push(base(idPerson("edge499", "Edge499"), { games: 30, highSet: 499 }));
+    const rows = aggregateSeasonContributions(contribs);
+    const g = buildLeaderboard(rows, "highGame", 10);
+    const gKeys = new Set(g.entries.map((e) => e.identity.key));
+    assert(gKeys.has("person:edge200"), "200 exactly qualifies via milestone");
+    assert(!gKeys.has("person:edge199"), "199 excluded by milestone boundary");
+    const s = buildLeaderboard(rows, "highSet", 10);
+    const sKeys = new Set(s.entries.map((e) => e.identity.key));
+    assert(sKeys.has("person:edge500"), "500 exactly qualifies via milestone");
+    assert(!sKeys.has("person:edge499"), "499 excluded by milestone boundary");
+  }
+  // (6) mergeMilestoneRows — dedup + append + descending order of extras;
+  //     base list is left in its given order.
+  {
+    type R = { name: string; v: number };
+    const all: R[] = [
+      { name: "A", v: 260 }, { name: "B", v: 240 }, { name: "C", v: 230 },
+      { name: "D", v: 220 }, { name: "E", v: 210 }, { name: "F", v: 205 },
+      { name: "G", v: 199 }, { name: "H", v: 150 },
+    ];
+    const base = all.slice(0, 3); // A, B, C — normal top 3
+    const merged = mergeMilestoneRows(base, all, (r) => r.v, HIGH_GAME_MILESTONE);
+    // No duplicates: A/B/C only appear once even though they are 200+.
+    assert(merged.length === 6, `expected 6 merged rows, got ${merged.length}`);
+    assert(merged.slice(0, 3).map((r) => r.name).join("") === "ABC",
+      "base order preserved");
+    assert(merged.slice(3).map((r) => r.name).join("") === "DEF",
+      "milestone extras appended in descending order");
+    assert(!merged.some((r) => r.name === "G"), "199 excluded from milestone extras");
+  }
+}
+
+console.log("leaderboards milestone tests OK");
+
