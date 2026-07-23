@@ -76,10 +76,10 @@ function LeaderboardsPage() {
       </PageHeader>
 
       <Section title="Scratch Leaders (Actual — Roster Only)">
-        <Board title="High Game (Top 5)">
+        <Board title="High Game (Top 5 · all 200+)">
           <GameTable rows={boards.scratchHighGame} field="scratch" />
         </Board>
-        <Board title="High Series (Top 5)">
+        <Board title="High Series (Top 5 · all 500+)">
           <SetTable rows={boards.scratchHighSeries} field="scratchSet" />
         </Board>
         <Board title="Top Averages (Scratch)">
@@ -88,10 +88,10 @@ function LeaderboardsPage() {
       </Section>
 
       <Section title="Points / HCP Leaders (Credited — Scheduled Bowler)">
-        <Board title="High Game (HCP)">
+        <Board title="High Game (HCP · Top 5 · all 200+)">
           <GameTable rows={boards.hcpHighGame} field="handicap" />
         </Board>
-        <Board title="High Series (HCP)">
+        <Board title="High Series (HCP · Top 5 · all 500+)">
           <SetTable rows={boards.hcpHighSeries} field="handicapSet" />
         </Board>
         <Board title="Top Total Points">
