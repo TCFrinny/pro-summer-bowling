@@ -226,6 +226,7 @@ export function aggregateSeasonContributions(
         gameWins: 0, setWins: 0, overallWins: 0,
         games: 0, scratchPinfall: 0,
         highGame: null, highSet: null,
+        highGameProv: null, highSetProv: null,
         poaSum: 0, poaGames: 0,
         strikes: 0, spares: 0, opens: 0,
         framesRolled: 0, openPinsLeft: 0,
