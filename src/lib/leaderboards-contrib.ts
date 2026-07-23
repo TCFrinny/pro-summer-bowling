@@ -309,8 +309,24 @@ export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonCon
     if (!agg) return;
     c.games += agg.games;
     c.scratchPinfall += agg.scratchPinfall;
-    if (agg.highGame != null) c.highGame = Math.max(c.highGame ?? 0, agg.highGame);
-    if (agg.highSet != null) c.highSet = Math.max(c.highSet ?? 0, agg.highSet);
+    if (agg.highGame != null) {
+      const p = prov(agg.highGame, agg.highGameWeek);
+      if (c.highGame == null || agg.highGame > c.highGame) {
+        c.highGame = agg.highGame;
+        c.highGameProvenance = p;
+      } else if (agg.highGame === c.highGame) {
+        c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+      }
+    }
+    if (agg.highSet != null) {
+      const p = prov(agg.highSet, agg.highSetWeek);
+      if (c.highSet == null || agg.highSet > c.highSet) {
+        c.highSet = agg.highSet;
+        c.highSetProvenance = p;
+      } else if (agg.highSet === c.highSet) {
+        c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+      }
+    }
     if (agg.poaGames > 0) {
       c.poaSum = (c.poaSum ?? 0) + agg.poaSum;
       c.poaGames = (c.poaGames ?? 0) + agg.poaGames;
