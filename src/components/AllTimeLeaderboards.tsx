@@ -128,7 +128,10 @@ export function AllTimeLeaderboards() {
                   </tr>
                 </thead>
                 <tbody>
-                  {board.entries.map((e, i) => (
+                  {board.entries.map((e, i) => {
+                    const showProv =
+                      (activeCat.id === "highGame" || activeCat.id === "highSet") && !!e.provenance;
+                    return (
                     <tr
                       key={`${e.identity.key}-${i}`}
                       className="border-t border-border/60"
@@ -136,6 +139,15 @@ export function AllTimeLeaderboards() {
                       <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{e.rank}</td>
                       <td className="px-2 py-1.5">
                         <NameLink identity={e.identity} />
+                        {showProv && e.provenance && (
+                          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                            {e.provenance.seasonLabel}
+                            {" · "}
+                            {e.provenance.week != null
+                              ? `Week ${e.provenance.week}`
+                              : "Week unavailable"}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 text-right font-medium tabular-nums">
                         {e.primaryDisplay}
@@ -144,7 +156,8 @@ export function AllTimeLeaderboards() {
                         {e.sampleDisplay}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

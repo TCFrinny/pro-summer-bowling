@@ -24,6 +24,7 @@ import type { PublicSnapshot } from "@/lib/mock-data";
 import {
   buildCurrentSeasonContribs,
   buildHistoricalSeasonContribs,
+  extractYearFromLabel,
   selectPublicHistoricalSeasonIds,
   type SeasonMetaLite,
 } from "@/lib/leaderboards-contrib";
@@ -100,6 +101,8 @@ export const getAllTimeLeaderboards = createServerFn({ method: "GET" })
         if (snap && Array.isArray(snap.bowlers) && snap.matchesByWeek) {
           const contribs = buildCurrentSeasonContribs({
             seasonId: currentSeason.id,
+            seasonLabel: currentSeason.label,
+            seasonSortYear: extractYearFromLabel(currentSeason.label),
             championPersonId: currentSeason.championPersonId,
             snapshot: snap,
           });

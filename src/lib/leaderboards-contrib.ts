@@ -36,6 +36,8 @@ import {
 } from "./historical-snapshot";
 import {
   LeaderboardIdentityKind,
+  pickEarlierProvenance,
+  type HighScoreProvenance,
   type LeaderboardIdentity,
   type SeasonContribution,
 } from "./leaderboards";
@@ -88,6 +90,16 @@ export function idHistorical(
     hrefKind: LeaderboardIdentityKind.Historical,
   };
 }
+/** Extract the first four-digit year from a season label. Returns null
+ *  when no year is present (undated legacy labels). */
+export function extractYearFromLabel(label: string | null | undefined): number | null {
+  if (!label) return null;
+  const m = /(\d{4})/.exec(label);
+  if (!m) return null;
+  const y = Number(m[1]);
+  return Number.isFinite(y) ? y : null;
+}
+
 
 function emptyContribution(identity: LeaderboardIdentity): SeasonContribution {
   return {
@@ -115,6 +127,10 @@ interface PersonalAgg {
   scratchPinfall: number;
   highGame: number | null;
   highSet: number | null;
+  /** Week number of the earliest occurrence of the current `highGame`. */
+  highGameWeek: number | null;
+  /** Week number of the earliest occurrence of the current `highSet`. */
+  highSetWeek: number | null;
   poaSum: number;
   poaGames: number;
   framesRolled: number;
@@ -131,11 +147,31 @@ interface PersonalAgg {
 function emptyPersonal(): PersonalAgg {
   return {
     games: 0, scratchPinfall: 0, highGame: null, highSet: null,
+    highGameWeek: null, highSetWeek: null,
     poaSum: 0, poaGames: 0,
     framesRolled: 0, strikes: 0, spares: 0, opens: 0, openPinsLeft: 0,
     clutchMarks: 0, clutchOpportunities: 0, hasFrames: false,
     overallWins: 0, overallHasCredit: false,
   };
+}
+
+/** Track a candidate game score against the current highGame with the
+ *  earliest week wins on tie. */
+function updateHighGame(agg: PersonalAgg, score: number, week: number): void {
+  if (agg.highGame == null || score > agg.highGame) {
+    agg.highGame = score;
+    agg.highGameWeek = week;
+  } else if (score === agg.highGame) {
+    if (agg.highGameWeek == null || week < agg.highGameWeek) agg.highGameWeek = week;
+  }
+}
+function updateHighSet(agg: PersonalAgg, total: number, week: number): void {
+  if (agg.highSet == null || total > agg.highSet) {
+    agg.highSet = total;
+    agg.highSetWeek = week;
+  } else if (total === agg.highSet) {
+    if (agg.highSetWeek == null || week < agg.highSetWeek) agg.highSetWeek = week;
+  }
 }
 
 export interface CurrentPublishedAggregates {
@@ -198,7 +234,7 @@ export function buildCurrentPublishedAggregates(
           for (const g of games as readonly GameLinescore[]) {
             agg.games += 1;
             agg.scratchPinfall += g.scratchTotal;
-            agg.highGame = Math.max(agg.highGame ?? 0, g.scratchTotal);
+            updateHighGame(agg, g.scratchTotal, wk);
             if (typeof entryAvg === "number") {
               agg.poaSum += g.scratchTotal - entryAvg;
               agg.poaGames += 1;
@@ -213,7 +249,7 @@ export function buildCurrentPublishedAggregates(
             agg.hasFrames = true;
             setSum += g.scratchTotal;
           }
-          agg.highSet = Math.max(agg.highSet ?? 0, setSum);
+          if (games.length === 3) updateHighSet(agg, setSum, wk);
         } else {
           let played = 0, setSum = 0;
           for (let i = 0; i < 3; i++) {
@@ -222,7 +258,7 @@ export function buildCurrentPublishedAggregates(
             if (typeof s !== "number") continue;
             agg.games += 1;
             agg.scratchPinfall += s;
-            agg.highGame = Math.max(agg.highGame ?? 0, s);
+            updateHighGame(agg, s, wk);
             if (typeof entryAvg === "number") {
               agg.poaSum += s - entryAvg;
               agg.poaGames += 1;
@@ -230,7 +266,7 @@ export function buildCurrentPublishedAggregates(
             played += 1;
             setSum += s;
           }
-          if (played === 3) agg.highSet = Math.max(agg.highSet ?? 0, setSum);
+          if (played === 3) updateHighSet(agg, setSum, wk);
         }
       }
     }
@@ -244,16 +280,21 @@ export function buildCurrentPublishedAggregates(
 
 export interface CurrentSeasonInput {
   seasonId: string;
+  seasonLabel: string;
+  seasonSortYear: number | null;
   championPersonId: string | null;
   snapshot: PublicSnapshot;
 }
 
 export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonContribution[] {
-  const { seasonId, championPersonId, snapshot } = input;
+  const { seasonId, seasonLabel, seasonSortYear, championPersonId, snapshot } = input;
   const publishedWeeks = new Set<number>(
     (snapshot.weeks ?? []).filter((w) => w.published).map((w) => w.week),
   );
   const { roster: rosterAgg, sub: subAgg } = buildCurrentPublishedAggregates(snapshot, publishedWeeks);
+  const prov = (value: number, week: number | null): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
 
   // Ratings — restrict to published weeks.
   const ratingRows = ratingGamesFromCurrentSeason(seasonId, snapshot.matchesByWeek, publishedWeeks);
@@ -278,8 +319,24 @@ export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonCon
     if (!agg) return;
     c.games += agg.games;
     c.scratchPinfall += agg.scratchPinfall;
-    if (agg.highGame != null) c.highGame = Math.max(c.highGame ?? 0, agg.highGame);
-    if (agg.highSet != null) c.highSet = Math.max(c.highSet ?? 0, agg.highSet);
+    if (agg.highGame != null) {
+      const p = prov(agg.highGame, agg.highGameWeek);
+      if (c.highGame == null || agg.highGame > c.highGame) {
+        c.highGame = agg.highGame;
+        c.highGameProvenance = p;
+      } else if (agg.highGame === c.highGame) {
+        c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+      }
+    }
+    if (agg.highSet != null) {
+      const p = prov(agg.highSet, agg.highSetWeek);
+      if (c.highSet == null || agg.highSet > c.highSet) {
+        c.highSet = agg.highSet;
+        c.highSetProvenance = p;
+      } else if (agg.highSet === c.highSet) {
+        c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+      }
+    }
     if (agg.poaGames > 0) {
       c.poaSum = (c.poaSum ?? 0) + agg.poaSum;
       c.poaGames = (c.poaGames ?? 0) + agg.poaGames;
@@ -352,6 +409,48 @@ export function buildHistoricalSeasonContribs(
   seasonId: string,
   snap: HistoricalSnapshot,
 ): SeasonContribution[] {
+  const seasonLabel = snap.seasonLabel;
+  const seasonSortYear = extractYearFromLabel(seasonLabel);
+  const prov = (value: number, week: number | null): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
+  // Walk weekly matches ONCE to derive per-participant earliest-occurrence
+  // week for High Game / High Set. Summary-only participants (no weekly
+  // data) receive null-week provenance downstream.
+  interface WkBest {
+    hg: number | null; hgWeek: number | null;
+    hs: number | null; hsWeek: number | null;
+  }
+  const weeklyByRef = new Map<string, WkBest>();
+  const ensureWk = (ref: string): WkBest => {
+    let w = weeklyByRef.get(ref);
+    if (!w) { w = { hg: null, hgWeek: null, hs: null, hsWeek: null }; weeklyByRef.set(ref, w); }
+    return w;
+  };
+  const trackHG = (w: WkBest, score: number, wk: number) => {
+    if (w.hg == null || score > w.hg) { w.hg = score; w.hgWeek = wk; }
+    else if (score === w.hg && (w.hgWeek == null || wk < w.hgWeek)) w.hgWeek = wk;
+  };
+  const trackHS = (w: WkBest, total: number, wk: number) => {
+    if (w.hs == null || total > w.hs) { w.hs = total; w.hsWeek = wk; }
+    else if (total === w.hs && (w.hsWeek == null || wk < w.hsWeek)) w.hsWeek = wk;
+  };
+  for (const week of snap.weeks ?? []) {
+    for (const m of week.matches ?? []) {
+      const wk = m.weekNumber ?? week.weekNumber;
+      if (!m.absentA && m.scratchGamesA) {
+        const w = ensureWk(m.actualA);
+        for (const s of m.scratchGamesA) trackHG(w, s, wk);
+        trackHS(w, m.scratchTotalA, wk);
+      }
+      if (!m.absentB && m.scratchGamesB) {
+        const w = ensureWk(m.actualB);
+        for (const s of m.scratchGamesB) trackHG(w, s, wk);
+        trackHS(w, m.scratchTotalB, wk);
+      }
+    }
+  }
+
   const champion = deriveHistoricalChampion(snap);
   const ratingRows = ratingGamesFromHistoricalSnapshot(snap);
   const seasonRatings = computeSeasonRatings(ratingRows);
@@ -371,6 +470,28 @@ export function buildHistoricalSeasonContribs(
     aliasesByKey.set(key, arr);
   };
 
+  const applyHighGame = (c: SeasonContribution, ref: string, value: number) => {
+    const wk = weeklyByRef.get(ref);
+    // Prefer the tracked week when the tracked best matches this value.
+    const week = wk && wk.hg === value ? wk.hgWeek : null;
+    const p = prov(value, week);
+    if (c.highGame == null || value > c.highGame) {
+      c.highGame = value; c.highGameProvenance = p;
+    } else if (value === c.highGame) {
+      c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+    }
+  };
+  const applyHighSet = (c: SeasonContribution, ref: string, value: number) => {
+    const wk = weeklyByRef.get(ref);
+    const week = wk && wk.hs === value ? wk.hsWeek : null;
+    const p = prov(value, week);
+    if (c.highSet == null || value > c.highSet) {
+      c.highSet = value; c.highSetProvenance = p;
+    } else if (value === c.highSet) {
+      c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+    }
+  };
+
   // Summary rows are indexed by ref so participant metadata rows whose
   // weekly personal data is missing can fill from summary WITHOUT the
   // later loop double-counting them.
@@ -387,9 +508,6 @@ export function buildHistoricalSeasonContribs(
     const stat = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref);
     const standing = (snap.standings ?? []).find((s) => s.participantRef === p.ref);
     const summary = summaryByRef.get(p.ref);
-    // Snapshot-derived buckets win when present; only fall back to summary
-    // when weekly data is unavailable. Never mix the two for the same
-    // bucket — that would double-count.
     const games = stat?.games ?? standing?.games ?? summary?.games ?? null;
     const pinfall = stat?.scratchPinfall ?? standing?.scratchPinfall ?? summary?.scratchPinfall ?? null;
     const hg = stat?.highGame ?? standing?.highGame ?? summary?.highGame ?? null;
@@ -399,8 +517,8 @@ export function buildHistoricalSeasonContribs(
     if (usedSummary) filledFromSummary.add(p.ref);
     if (games != null) c.games += games;
     if (pinfall != null) c.scratchPinfall += pinfall;
-    if (hg != null) c.highGame = Math.max(c.highGame ?? 0, hg);
-    if (hs != null) c.highSet = Math.max(c.highSet ?? 0, hs);
+    if (hg != null) applyHighGame(c, p.ref, hg);
+    if (hs != null) applyHighSet(c, p.ref, hs);
     const rec = extractHistoricalRecordContribution({
       seasonId, role: p.role, participantRef: p.ref,
       weeks: snap.weeks, standings: snap.standings,
@@ -441,8 +559,8 @@ export function buildHistoricalSeasonContribs(
     const c = ensure(identity);
     if (s.games != null) c.games += s.games;
     if (s.scratchPinfall != null) c.scratchPinfall += s.scratchPinfall;
-    if (s.highGame != null) c.highGame = Math.max(c.highGame ?? 0, s.highGame);
-    if (s.highSet != null) c.highSet = Math.max(c.highSet ?? 0, s.highSet);
+    if (s.highGame != null) applyHighGame(c, s.participantRef, s.highGame);
+    if (s.highSet != null) applyHighSet(c, s.participantRef, s.highSet);
     // Only rostered summary rows contribute Overall Wins. Substitute
     // summary rows never receive league-point credit.
     if (s.role === "rostered" && s.points != null) c.overallWins += s.points;

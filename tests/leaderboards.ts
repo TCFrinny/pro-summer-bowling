@@ -374,7 +374,7 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
       [s.id]: { gamesRolled: 3, scratchPinfall: 840, highGame: 280, highSet: 840, weeks: [] } as any,
     },
   } as any;
-  const rows = buildCurrentSeasonContribs({ seasonId: "cur", championPersonId: null, snapshot });
+  const rows = buildCurrentSeasonContribs({ seasonId: "cur", seasonLabel: "2026 Summer", seasonSortYear: 2026, championPersonId: null, snapshot });
   const bRow = rows.find((r) => r.identity.key === "current-roster:b01")!;
   assert(bRow, "rostered contribution present");
   assert(bRow.games === 3, `rostered games must equal published-week games only (got ${bRow.games})`);
@@ -580,5 +580,53 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   }
 }
 
+// -----------------------------------------------------------------------
+// Provenance for High Game / High Set — season + week attribution.
+// -----------------------------------------------------------------------
+{
+  const p = (id: string, name: string) => idPerson(id, name);
+  const alice = p("alice", "Alice");
+  const bob = p("bob", "Bob");
+  // Alice: 240 in season 2024 week 5, and 240 again in season 2025 week 2
+  // -> earliest documented is 2024 wk 5.
+  // Bob: 260 in season 2025 (unknown week; summary-only) -> Week unavailable.
+  const contribs: SeasonContribution[] = [
+    base(alice, {
+      highGame: 240, highSet: 620,
+      highGameProvenance: { seasonId: "s24", seasonLabel: "2024", seasonSortYear: 2024, week: 5, value: 240 },
+      highSetProvenance: { seasonId: "s24", seasonLabel: "2024", seasonSortYear: 2024, week: 5, value: 620 },
+      games: 30,
+    }),
+    base(alice, {
+      highGame: 240, highSet: 620,
+      highGameProvenance: { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 2, value: 240 },
+      highSetProvenance: { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 2, value: 620 },
+      games: 30,
+    }),
+    base(bob, {
+      highGame: 260, highSet: 700,
+      highGameProvenance: { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: null, value: 260 },
+      highSetProvenance: { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: null, value: 700 },
+      games: 15,
+    }),
+  ];
+  const rows = aggregateSeasonContributions(contribs);
+  const aRow = rows.find((r) => r.identity.personId === "alice");
+  const bRow = rows.find((r) => r.identity.personId === "bob");
+  assert(aRow?.highGameProvenance?.seasonId === "s24", "Alice ties on 240 → earliest season");
+  assert(aRow?.highGameProvenance?.week === 5, "Alice ties → earliest week 5");
+  assert(aRow?.highSetProvenance?.seasonId === "s24", "Alice hi-set ties → earliest season");
+  assert(bRow?.highGameProvenance?.seasonId === "s25", "Bob single occurrence season");
+  assert(bRow?.highGameProvenance?.week === null, "Bob has undocumented week");
+
+  // buildLeaderboard exposes provenance on highGame/highSet entries only.
+  const hg = buildLeaderboard(rows, "highGame", 10);
+  const bobHG = hg.entries.find((e) => e.identity.personId === "bob");
+  assert(bobHG?.provenance?.week === null, "Bob HG entry has null week provenance");
+  const games = buildLeaderboard(rows, "games", 10);
+  assert(games.entries.every((e) => e.provenance === undefined), "non-HG categories omit provenance");
+}
+
 console.log("leaderboards milestone tests OK");
+
 

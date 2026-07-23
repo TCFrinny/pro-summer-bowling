@@ -60,6 +60,44 @@ export interface LeaderboardIdentity {
   hrefKind?: LeaderboardIdentityKind;
 }
 
+/**
+ * Provenance of a specific High Game / High Set performance. Attached only
+ * to High Game and High Set entries on the All-Time Leaderboards.
+ *
+ * `week` is null for older summary-only historical data where the exact
+ * week is not documented — UI renders "Week unavailable". `seasonSortYear`
+ * is the four-digit year (or null) used for the deterministic
+ * "earliest documented occurrence" tie-break when the same value was
+ * achieved multiple times: lower year wins, then lower week; null week and
+ * null year sort AFTER known values so a documented week always beats an
+ * undocumented one on tie.
+ */
+export interface HighScoreProvenance {
+  seasonId: string;
+  seasonLabel: string;
+  seasonSortYear: number | null;
+  week: number | null;
+  value: number;
+}
+
+/** True when `a` is the earlier documented occurrence at the same value.
+ *  Undefined `a` means "no incumbent yet", so `b` wins. */
+export function pickEarlierProvenance(
+  a: HighScoreProvenance | null | undefined,
+  b: HighScoreProvenance,
+): HighScoreProvenance {
+  if (!a) return b;
+  // year: null sorts LAST
+  const ay = a.seasonSortYear ?? Number.POSITIVE_INFINITY;
+  const by = b.seasonSortYear ?? Number.POSITIVE_INFINITY;
+  if (ay !== by) return ay < by ? a : b;
+  const aw = a.week ?? Number.POSITIVE_INFINITY;
+  const bw = b.week ?? Number.POSITIVE_INFINITY;
+  if (aw !== bw) return aw < bw ? a : b;
+  // Deterministic final tie-break so the choice is stable across runs.
+  return a.seasonId <= b.seasonId ? a : b;
+}
+
 /** A per-season contribution for a single identity. Missing measurements
  *  MUST be `null` (never 0). */
 export interface SeasonContribution {
@@ -79,6 +117,10 @@ export interface SeasonContribution {
   scratchPinfall: number;
   highGame: number | null;
   highSet: number | null;
+  /** Provenance for the exact High Game / High Set performance credited
+   *  above. Present whenever `highGame`/`highSet` is set. */
+  highGameProvenance?: HighScoreProvenance | null;
+  highSetProvenance?: HighScoreProvenance | null;
   poaSum: number | null;    // sum(gameScore - entryAvg) across ALL personal games
   poaGames: number | null;  // sample for POA
 
@@ -115,6 +157,10 @@ export interface AllTimeRow {
   scratchAverage: number | null;
   highGame: number | null;
   highSet: number | null;
+  /** Provenance of the career-best High Game / High Set. Selected as the
+   *  earliest documented occurrence across all contributing seasons. */
+  highGameProvenance: HighScoreProvenance | null;
+  highSetProvenance: HighScoreProvenance | null;
   poaSum: number;
   poaGames: number;
   careerPOA: number | null;
@@ -156,6 +202,8 @@ export function aggregateSeasonContributions(
     gameWins: number; setWins: number; overallWins: number;
     games: number; scratchPinfall: number;
     highGame: number | null; highSet: number | null;
+    highGameProv: HighScoreProvenance | null;
+    highSetProv: HighScoreProvenance | null;
     poaSum: number; poaGames: number;
     strikes: number; spares: number; opens: number;
     framesRolled: number; openPinsLeft: number;
@@ -178,6 +226,7 @@ export function aggregateSeasonContributions(
         gameWins: 0, setWins: 0, overallWins: 0,
         games: 0, scratchPinfall: 0,
         highGame: null, highSet: null,
+        highGameProv: null, highSetProv: null,
         poaSum: 0, poaGames: 0,
         strikes: 0, spares: 0, opens: 0,
         framesRolled: 0, openPinsLeft: 0,
@@ -193,8 +242,22 @@ export function aggregateSeasonContributions(
     a.overallWins += c.overallWins;
     a.games += c.games;
     a.scratchPinfall += c.scratchPinfall;
-    if (c.highGame != null) a.highGame = Math.max(a.highGame ?? 0, c.highGame);
-    if (c.highSet != null) a.highSet = Math.max(a.highSet ?? 0, c.highSet);
+    if (c.highGame != null) {
+      if (a.highGame == null || c.highGame > a.highGame) {
+        a.highGame = c.highGame;
+        a.highGameProv = c.highGameProvenance ?? null;
+      } else if (c.highGame === a.highGame && c.highGameProvenance) {
+        a.highGameProv = pickEarlierProvenance(a.highGameProv, c.highGameProvenance);
+      }
+    }
+    if (c.highSet != null) {
+      if (a.highSet == null || c.highSet > a.highSet) {
+        a.highSet = c.highSet;
+        a.highSetProv = c.highSetProvenance ?? null;
+      } else if (c.highSet === a.highSet && c.highSetProvenance) {
+        a.highSetProv = pickEarlierProvenance(a.highSetProv, c.highSetProvenance);
+      }
+    }
     if (c.poaSum != null && c.poaGames != null) {
       a.poaSum += c.poaSum; a.poaGames += c.poaGames;
     }
@@ -242,6 +305,8 @@ export function aggregateSeasonContributions(
       scratchAverage: a.games > 0 ? Number((a.scratchPinfall / a.games).toFixed(3)) : null,
       highGame: a.highGame,
       highSet: a.highSet,
+      highGameProvenance: a.highGame != null ? a.highGameProv : null,
+      highSetProvenance: a.highSet != null ? a.highSetProv : null,
       poaSum: a.poaSum,
       poaGames: a.poaGames,
       careerPOA: a.poaGames > 0 ? Number((a.poaSum / a.poaGames).toFixed(3)) : null,
@@ -305,6 +370,8 @@ export interface CategoryDef {
    * Used for duckpin milestones (High Game >=200, High Set >=500).
    */
   milestoneThreshold?: number;
+  /** Optional provenance extractor used ONLY for High Game / High Set. */
+  provenanceOf?: (r: AllTimeRow) => HighScoreProvenance | null | undefined;
 }
 
 const int = (v: number) => v.toLocaleString();
@@ -399,6 +466,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     eligible: (r) => r.highGame != null,
     format: int, formatSample: int,
     milestoneThreshold: HIGH_GAME_MILESTONE,
+    provenanceOf: (r) => r.highGameProvenance,
   },
   {
     id: "highSet", group: "scoring", label: "High Set",
@@ -409,6 +477,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     eligible: (r) => r.highSet != null,
     format: int, formatSample: int,
     milestoneThreshold: HIGH_SET_MILESTONE,
+    provenanceOf: (r) => r.highSetProvenance,
   },
   {
     id: "careerPOA", group: "scoring", label: "Career POA",
@@ -543,6 +612,8 @@ export interface LeaderboardEntry {
   primaryDisplay: string;
   sample: number;
   sampleDisplay: string;
+  /** Present only on High Game / High Set entries. */
+  provenance?: HighScoreProvenance | null;
 }
 
 export interface LeaderboardResult {
@@ -561,13 +632,21 @@ export function buildLeaderboard(
   limit = 10,
 ): LeaderboardResult {
   const cat = findCategory(categoryId);
-  interface Ranked { id: LeaderboardIdentity; v: number; sample: number }
+  interface Ranked {
+    id: LeaderboardIdentity;
+    v: number;
+    sample: number;
+    provenance?: HighScoreProvenance | null;
+  }
   const eligible: Ranked[] = [];
   for (const r of rows) {
     if (!cat.eligible(r)) continue;
     const v = cat.primary(r);
     if (v == null) continue;
-    eligible.push({ id: r.identity, v, sample: cat.sample(r) });
+    eligible.push({
+      id: r.identity, v, sample: cat.sample(r),
+      provenance: cat.provenanceOf ? cat.provenanceOf(r) ?? null : undefined,
+    });
   }
   eligible.sort((a, b) => {
     if (a.v !== b.v) return cat.direction === "desc" ? b.v - a.v : a.v - b.v;
@@ -601,6 +680,7 @@ export function buildLeaderboard(
       primaryDisplay: cat.format(cur.v),
       sample: cur.sample,
       sampleDisplay: cat.formatSample(cur.sample),
+      provenance: cur.provenance,
     });
   }
   return { category: cat, entries };
