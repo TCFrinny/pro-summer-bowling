@@ -24,6 +24,7 @@ import type { PublicSnapshot } from "@/lib/mock-data";
 import {
   buildCurrentSeasonContribs,
   buildHistoricalSeasonContribs,
+  extractYearFromLabel,
   selectPublicHistoricalSeasonIds,
   type SeasonMetaLite,
 } from "@/lib/leaderboards-contrib";
