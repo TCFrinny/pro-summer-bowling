@@ -39,8 +39,10 @@ function StatsPage() {
   if (!snap) return <EmptyState title="Statistics unavailable" description="No cached snapshot." />;
   const rows = snap.standings.filter((r) => r.games != null && r.games > 0);
   const byAvg = [...rows].sort((a, b) => (b.scratchAverage ?? 0) - (a.scratchAverage ?? 0)).slice(0, 10);
-  const byHigh = [...rows].filter((r) => r.highGame != null).sort((a, b) => (b.highGame ?? 0) - (a.highGame ?? 0)).slice(0, 10);
-  const bySet = [...rows].filter((r) => r.highSet != null).sort((a, b) => (b.highSet ?? 0) - (a.highSet ?? 0)).slice(0, 10);
+  const sortedHigh = [...rows].filter((r) => r.highGame != null).sort((a, b) => (b.highGame ?? 0) - (a.highGame ?? 0));
+  const byHigh = mergeMilestoneRows(sortedHigh.slice(0, 10), sortedHigh, (r) => r.highGame ?? 0, HIGH_GAME_MILESTONE);
+  const sortedSet = [...rows].filter((r) => r.highSet != null).sort((a, b) => (b.highSet ?? 0) - (a.highSet ?? 0));
+  const bySet = mergeMilestoneRows(sortedSet.slice(0, 10), sortedSet, (r) => r.highSet ?? 0, HIGH_SET_MILESTONE);
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
