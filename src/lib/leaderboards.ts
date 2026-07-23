@@ -632,13 +632,21 @@ export function buildLeaderboard(
   limit = 10,
 ): LeaderboardResult {
   const cat = findCategory(categoryId);
-  interface Ranked { id: LeaderboardIdentity; v: number; sample: number }
+  interface Ranked {
+    id: LeaderboardIdentity;
+    v: number;
+    sample: number;
+    provenance?: HighScoreProvenance | null;
+  }
   const eligible: Ranked[] = [];
   for (const r of rows) {
     if (!cat.eligible(r)) continue;
     const v = cat.primary(r);
     if (v == null) continue;
-    eligible.push({ id: r.identity, v, sample: cat.sample(r) });
+    eligible.push({
+      id: r.identity, v, sample: cat.sample(r),
+      provenance: cat.provenanceOf ? cat.provenanceOf(r) ?? null : undefined,
+    });
   }
   eligible.sort((a, b) => {
     if (a.v !== b.v) return cat.direction === "desc" ? b.v - a.v : a.v - b.v;
