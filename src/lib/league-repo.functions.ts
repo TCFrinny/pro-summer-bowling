@@ -210,8 +210,8 @@ export const listRosterAndSubs = createServerFn({ method: "GET" })
       loadRosterRows(context, seasonId),
       loadSubRows(context, seasonId),
     ]);
-    rostered.sort((a, b) => a.id.localeCompare(b.id));
-    subs.sort((a, b) => a.id.localeCompare(b.id));
+    rostered.sort(comparePersonOptions);
+    subs.sort(comparePersonOptions);
     return { seasonId, rostered, subs };
   });
 
