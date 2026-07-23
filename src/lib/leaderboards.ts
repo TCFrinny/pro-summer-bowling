@@ -60,6 +60,44 @@ export interface LeaderboardIdentity {
   hrefKind?: LeaderboardIdentityKind;
 }
 
+/**
+ * Provenance of a specific High Game / High Set performance. Attached only
+ * to High Game and High Set entries on the All-Time Leaderboards.
+ *
+ * `week` is null for older summary-only historical data where the exact
+ * week is not documented — UI renders "Week unavailable". `seasonSortYear`
+ * is the four-digit year (or null) used for the deterministic
+ * "earliest documented occurrence" tie-break when the same value was
+ * achieved multiple times: lower year wins, then lower week; null week and
+ * null year sort AFTER known values so a documented week always beats an
+ * undocumented one on tie.
+ */
+export interface HighScoreProvenance {
+  seasonId: string;
+  seasonLabel: string;
+  seasonSortYear: number | null;
+  week: number | null;
+  value: number;
+}
+
+/** True when `a` is the earlier documented occurrence at the same value.
+ *  Undefined `a` means "no incumbent yet", so `b` wins. */
+export function pickEarlierProvenance(
+  a: HighScoreProvenance | null | undefined,
+  b: HighScoreProvenance,
+): HighScoreProvenance {
+  if (!a) return b;
+  // year: null sorts LAST
+  const ay = a.seasonSortYear ?? Number.POSITIVE_INFINITY;
+  const by = b.seasonSortYear ?? Number.POSITIVE_INFINITY;
+  if (ay !== by) return ay < by ? a : b;
+  const aw = a.week ?? Number.POSITIVE_INFINITY;
+  const bw = b.week ?? Number.POSITIVE_INFINITY;
+  if (aw !== bw) return aw < bw ? a : b;
+  // Deterministic final tie-break so the choice is stable across runs.
+  return a.seasonId <= b.seasonId ? a : b;
+}
+
 /** A per-season contribution for a single identity. Missing measurements
  *  MUST be `null` (never 0). */
 export interface SeasonContribution {
