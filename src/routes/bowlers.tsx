@@ -4,6 +4,7 @@ import { BOWLERS, getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
+import { sortPersonOptions } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/bowlers")({
   head: () => ({
