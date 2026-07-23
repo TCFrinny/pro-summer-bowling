@@ -549,8 +549,8 @@ export function buildHistoricalSeasonContribs(
     const c = ensure(identity);
     if (s.games != null) c.games += s.games;
     if (s.scratchPinfall != null) c.scratchPinfall += s.scratchPinfall;
-    if (s.highGame != null) c.highGame = Math.max(c.highGame ?? 0, s.highGame);
-    if (s.highSet != null) c.highSet = Math.max(c.highSet ?? 0, s.highSet);
+    if (s.highGame != null) applyHighGame(c, s.participantRef, s.highGame);
+    if (s.highSet != null) applyHighSet(c, s.participantRef, s.highSet);
     // Only rostered summary rows contribute Overall Wins. Substitute
     // summary rows never receive league-point credit.
     if (s.role === "rostered" && s.points != null) c.overallWins += s.points;
