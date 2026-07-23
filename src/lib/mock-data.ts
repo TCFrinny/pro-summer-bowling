@@ -41,6 +41,11 @@ import {
   type SubstituteIdentity,
   type SubstituteProfile,
 } from "./substitute-profiles";
+import {
+  HIGH_GAME_MILESTONE,
+  HIGH_SET_MILESTONE,
+  mergeMilestoneRows,
+} from "./leaderboard-milestone";
 
 export type {
   SubstituteIdentity,
