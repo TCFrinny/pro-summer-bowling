@@ -157,6 +157,10 @@ export interface AllTimeRow {
   scratchAverage: number | null;
   highGame: number | null;
   highSet: number | null;
+  /** Provenance of the career-best High Game / High Set. Selected as the
+   *  earliest documented occurrence across all contributing seasons. */
+  highGameProvenance: HighScoreProvenance | null;
+  highSetProvenance: HighScoreProvenance | null;
   poaSum: number;
   poaGames: number;
   careerPOA: number | null;
