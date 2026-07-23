@@ -738,7 +738,73 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   }
 }
 
+// -----------------------------------------------------------------------
+// v2.0.5 correction: same-season repeat picks LATER week; HG/HS ignores
+// sample size and goes straight to alphabetical after provenance recency.
+// -----------------------------------------------------------------------
+{
+  // Same bowler, same season, HG in wk 2 and wk 8 → wk 8 displayed.
+  {
+    const alice = idPerson("alice", "Alice");
+    const prov = (w: number, v: number): HighScoreProvenance =>
+      ({ seasonId: "s26", seasonLabel: "2026 Summer", seasonSortYear: 2026, week: w, value: v });
+    const rows = aggregateSeasonContributions([
+      base(alice, { highGame: 240, highGameProvenance: prov(2, 240) }),
+      base(alice, { highGame: 240, highGameProvenance: prov(8, 240) }),
+    ]);
+    const a = rows.find((r) => r.identity.personId === "alice");
+    assert(a?.highGameProvenance?.week === 8, "same-season HG repeat → later week 8");
+  }
+  // Same bowler, same season, HS in wk 3 and wk 9 → wk 9 displayed.
+  {
+    const bob = idPerson("bob", "Bob");
+    const prov = (w: number, v: number): HighScoreProvenance =>
+      ({ seasonId: "s26", seasonLabel: "2026 Summer", seasonSortYear: 2026, week: w, value: v });
+    const rows = aggregateSeasonContributions([
+      base(bob, { highSet: 610, highSetProvenance: prov(3, 610) }),
+      base(bob, { highSet: 610, highSetProvenance: prov(9, 610) }),
+    ]);
+    const b = rows.find((r) => r.identity.personId === "bob");
+    assert(b?.highSetProvenance?.week === 9, "same-season HS repeat → later week 9");
+  }
+  // Two different bowlers, identical score AND identical provenance,
+  // different game samples → ordered alphabetically, NOT by sample size.
+  {
+    const provSame = { seasonId: "s26", seasonLabel: "2026 Summer", seasonSortYear: 2026, week: 4 };
+    const rows = aggregateSeasonContributions([
+      base(idPerson("z", "Zed"), {
+        highGame: 246, games: 60,
+        highGameProvenance: { ...provSame, value: 246 },
+      }),
+      base(idPerson("a", "Ann"), {
+        highGame: 246, games: 10,
+        highGameProvenance: { ...provSame, value: 246 },
+      }),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries[0].identity.displayName === "Ann",
+      "HG identical provenance → alphabetical wins over sample");
+    assert(hg.entries[0].rank === 1 && hg.entries[1].rank === 1, "tied 246s share rank");
+  }
+  // Non-HG/HS category (e.g., topAverage) retains sample-size secondary
+  // ordering when primary values tie.
+  {
+    // Two people, same average, different samples → higher-sample first.
+    const rows = aggregateSeasonContributions([
+      base(idPerson("a", "Ann"), { games: 20, scratchPinfall: 20 * 150 }),
+      base(idPerson("b", "Bea"), { games: 60, scratchPinfall: 60 * 150 }),
+    ]);
+    const lb = buildLeaderboard(rows, "topAverage", 10);
+    // Both average 150; sample-size tiebreak must put Bea (60 games) first.
+    assert(lb.entries.length >= 2, "topAverage has both rows");
+    assert(lb.entries[0].identity.personId === "b",
+      "non-HG/HS retains sample-size secondary ordering");
+    assert(lb.entries[0].rank === 1 && lb.entries[1].rank === 1, "tied avgs share rank");
+  }
+}
+
 console.log("leaderboards milestone tests OK");
+
 
 
 
