@@ -5,6 +5,7 @@
  * which throw on any regression. Run with `bun run test:deterministic`.
  */
 import "../src/lib/frame-input";
+import "./duckpin-tenth-marks";
 import "../src/lib/league-store";
 import "../src/lib/person-sort";
 import "./person-sort";
