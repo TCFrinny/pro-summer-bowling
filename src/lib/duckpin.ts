@@ -6,11 +6,19 @@
  * cumulative scratch total through that frame. This mirrors what an admin will
  * actually type in: 10 marks and 10 cumulative totals per game.
  *
- * Classification (used for strikes/spares/opens counts and derived %):
+ * Frame classification (used for `opens` counting and openPinsLeft):
  *   frames 1–9 : mark === "X" → strike, "/" → spare, "-" → open
- *   frame 10   : classify by the INITIAL mark character. Bonus marks in the
- *                10th are display notation only — they never inflate frame,
- *                strike, spare, or denominator counts.
+ *   frame 10   : classify by the INITIAL mark character. The tenth is still
+ *                exactly ONE regulation frame; it contributes at most one to
+ *                the frame-classification totals (strikeFrames / spareFrames /
+ *                opens) and to the frame denominator.
+ *
+ * Symbol-level counting (used for `strikes`, `spares`, `marks`, `clutchMarks`):
+ *   Every "X" and "/" symbol in a frame's mark string counts. Tenth-frame
+ *   bonus balls therefore inflate strike / spare / total-mark counts. For
+ *   example: "X/" = 1 strike + 1 spare (2 marks); "XX" = 2 strikes; "XXX"
+ *   = 3 strikes; "/X" = 1 strike + 1 spare. Frames 1–9 always contribute at
+ *   most one symbol per frame by construction.
  *
  * Pins Lost (no ball data required):
  *   Duckpin bowlers get THREE balls per frame. An OPEN frame is any frame
@@ -29,8 +37,10 @@ export interface FrameLinescore {
    *   frames 1–9 : "X" | "/" | "-"
    *   frame 10   : one of the seven allowed saved combos —
    *                "XXX" | "XX" | "X/" | "/X" | "X" | "/" | "-"
-   * Only the LEADING character is used to classify the tenth as one
-   * regulation strike / spare / open frame (max one mark).
+   * `classifyFrame` uses only the LEADING character (each frame is a
+   * single regulation frame); `countFrameMarks` counts EVERY "X" and "/"
+   * symbol so tenth-frame bonuses correctly inflate strike / spare /
+   * mark totals.
    */
   mark: string;
   /** Running cumulative scratch total through this frame. Non-negative, non-decreasing. */
@@ -48,24 +58,31 @@ export interface GameSegments {
   bigOpening: number;
   /** Final score minus cumulative through frame 7. */
   bigFinish: number;
-  /** Marked (strike or spare) regulation frames among frames 9 and 10. */
+  /**
+   * Total marks (strikes + spares) counted symbol-by-symbol in frames
+   * 9 and 10. A tenth of "XXX" contributes 3; "X/" contributes 2.
+   */
   clutchMarks: number;
 }
 
 export interface GameLinescore {
   frames: FrameLinescore[]; // length 10
   scratchTotal: number;
+  /**
+   * Symbol counts (see file header). Every "X" and "/" in every frame's
+   * mark string is counted, so tenth-frame bonus marks contribute here.
+   */
   strikes: number;
   spares: number;
-  opens: number;
-  marks: number;
+  opens: number; // frame classification (still per-frame; sum of strike-frames + spare-frames + opens === 10)
+  marks: number; // strikes + spares (symbol-level total)
   /** Sum(10 - openPinfall) over open frames — derived from cumulative diffs. */
   openPinsLeft: number;
   segments: GameSegments;
 }
 
 // ---------------------------------------------------------------------------
-// Classification
+// Classification (per frame — leading-character only, always <=1 mark).
 // ---------------------------------------------------------------------------
 
 export function classifyFrame(frameNumber: number, mark: string): FrameClass {
@@ -77,6 +94,29 @@ export function classifyFrame(frameNumber: number, mark: string): FrameClass {
     return "open";
   }
   return "open";
+}
+
+// ---------------------------------------------------------------------------
+// Symbol counting (per frame — counts every "X" and "/" in the mark string).
+// Frames 1–9 always have at most one symbol; the tenth may carry up to 3.
+// ---------------------------------------------------------------------------
+
+export function countFrameMarks(
+  frameNumber: number,
+  mark: string,
+): { strikes: number; spares: number } {
+  if (frameNumber >= 1 && frameNumber <= 9) {
+    if (mark === "X") return { strikes: 1, spares: 0 };
+    if (mark === "/") return { strikes: 0, spares: 1 };
+    return { strikes: 0, spares: 0 };
+  }
+  let s = 0, p = 0;
+  for (let i = 0; i < mark.length; i++) {
+    const ch = mark.charAt(i);
+    if (ch === "X") s++;
+    else if (ch === "/") p++;
+  }
+  return { strikes: s, spares: p };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,15 +152,20 @@ export function summarizeGame(frames: FrameLinescore[]): GameLinescore {
   for (let i = 0; i < 10; i++) {
     const f = frames[i];
     const cls = classifyFrame(f.frameNumber, f.mark);
-    if (cls === "strike") strikes++;
-    else if (cls === "spare") spares++;
-    else {
+    const { strikes: fs, spares: fp } = countFrameMarks(f.frameNumber, f.mark);
+    strikes += fs;
+    spares += fp;
+    if (cls === "open") {
       opens++;
       const prev = i === 0 ? 0 : frames[i - 1].cumulativeScore;
       const diff = f.cumulativeScore - prev;
       openPinsLeft += Math.max(0, 10 - diff);
     }
-    if ((i === 8 || i === 9) && cls !== "open") clutch++;
+    // Clutch marks: every "X" and "/" symbol in frames 9 and 10 counts,
+    // so a tenth of "XXX" contributes 3 clutch marks. Clutch OPPORTUNITY
+    // denominators (2 per completed game) are managed by the aggregators
+    // that consume this value and are intentionally unchanged.
+    if (i === 8 || i === 9) clutch += fs + fp;
   }
   const final = frames[9].cumulativeScore;
   const cum5 = frames[4].cumulativeScore;
@@ -153,6 +198,7 @@ export function validateGame(g: GameLinescore, ctx: string): void {
   check(g.frames.length === 10, `expected 10 frames, got ${g.frames.length}`);
   let prev = 0;
   let strikes = 0, spares = 0, opens = 0;
+  let strikeFrames = 0, spareFrames = 0;
   for (let i = 0; i < 10; i++) {
     const f = g.frames[i];
     check(f.frameNumber === i + 1, `frame ${i + 1} numbered ${f.frameNumber}`);
@@ -168,9 +214,12 @@ export function validateGame(g: GameLinescore, ctx: string): void {
         `frame 10: illegal mark "${f.mark}"`);
     }
     const cls = classifyFrame(f.frameNumber, f.mark);
-    if (cls === "strike") strikes++;
-    else if (cls === "spare") spares++;
+    if (cls === "strike") strikeFrames++;
+    else if (cls === "spare") spareFrames++;
     else opens++;
+    const { strikes: fs, spares: fp } = countFrameMarks(f.frameNumber, f.mark);
+    strikes += fs;
+    spares += fp;
     const diff = f.cumulativeScore - prev;
     if (i < 9) {
       if (cls === "open") {
@@ -202,7 +251,8 @@ export function validateGame(g: GameLinescore, ctx: string): void {
   check(strikes === g.strikes, `strike count mismatch`);
   check(spares === g.spares, `spare count mismatch`);
   check(opens === g.opens, `open count mismatch`);
-  check(strikes + spares + opens === 10, `classifications must total 10`);
+  check(strikeFrames + spareFrames + opens === 10,
+    `frame classifications must total 10`);
   // Segment reconciliation.
   const s = g.segments;
   check(s.first5 + s.last5 === g.scratchTotal,

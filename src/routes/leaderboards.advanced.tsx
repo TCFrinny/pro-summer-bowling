@@ -162,10 +162,13 @@ function AdvancedLeaderboardsPage() {
 
       <p className="mt-6 text-[11px] text-muted-foreground">
         Every metric derives from the saved 10 marks + 10 cumulative totals per
-        game — no ball-level data is stored. Regulation frames only: tenth-frame
-        bonus marks never inflate the denominator. Substitute performances are
-        excluded from roster-only boards. Season First 5 / Last 5 / Big Opening
-        / Big Finish rank by average PINS PER 3-GAME MATCH personally rolled.
+        game — no ball-level data is stored. The frame denominator counts the
+        10 regulation frames per game; every "X" and "/" symbol counts toward
+        strike, spare, mark, and clutch totals, so a tenth-frame "X/", "XX",
+        or "XXX" contributes multiple marks (percentages can exceed 100%).
+        Substitute performances are excluded from roster-only boards. Season
+        First 5 / Last 5 / Big Opening / Big Finish rank by average PINS PER
+        3-GAME MATCH personally rolled.
       </p>
     </AppShell>
   );
