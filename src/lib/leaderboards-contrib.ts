@@ -415,7 +415,7 @@ export function buildHistoricalSeasonContribs(
   const prov = (value: number, week: number | null): HighScoreProvenance => ({
     seasonId, seasonLabel, seasonSortYear, week, value,
   });
-  // Walk weekly matches ONCE to derive per-participant earliest-occurrence
+  // Walk weekly matches ONCE to derive per-participant MOST-RECENT-occurrence
   // week for High Game / High Set. Summary-only participants (no weekly
   // data) receive null-week provenance downstream.
   interface WkBest {
@@ -430,12 +430,13 @@ export function buildHistoricalSeasonContribs(
   };
   const trackHG = (w: WkBest, score: number, wk: number) => {
     if (w.hg == null || score > w.hg) { w.hg = score; w.hgWeek = wk; }
-    else if (score === w.hg && (w.hgWeek == null || wk < w.hgWeek)) w.hgWeek = wk;
+    else if (score === w.hg && (w.hgWeek == null || wk > w.hgWeek)) w.hgWeek = wk;
   };
   const trackHS = (w: WkBest, total: number, wk: number) => {
     if (w.hs == null || total > w.hs) { w.hs = total; w.hsWeek = wk; }
-    else if (total === w.hs && (w.hsWeek == null || wk < w.hsWeek)) w.hsWeek = wk;
+    else if (total === w.hs && (w.hsWeek == null || wk > w.hsWeek)) w.hsWeek = wk;
   };
+
   for (const week of snap.weeks ?? []) {
     for (const m of week.matches ?? []) {
       const wk = m.weekNumber ?? week.weekNumber;
