@@ -672,17 +672,21 @@ export function buildLeaderboard(
   }
   eligible.sort((a, b) => {
     if (a.v !== b.v) return cat.direction === "desc" ? b.v - a.v : a.v - b.v;
-    // High Game / High Set: within a tied score, order by most-recent
-    // provenance (newer year → higher week → documented beats undocumented).
-    // This affects visual order only; rank is assigned from `v` alone.
     if (cat.provenanceOf) {
+      // High Game / High Set: within a tied score, order by most-recent
+      // provenance (newer year → higher week → documented beats
+      // undocumented). Then go DIRECTLY to alphabetical name — sample size
+      // is not a High Game/High Set tie-breaker. Rank is assigned from
+      // primary `v` only, so recency changes only visual order.
       const p = provenanceRecencyCmp(a.provenance, b.provenance);
       if (p !== 0) return p;
+      return nameCmp(a.id.displayName, b.id.displayName);
     }
-    // Larger eligible sample second (always).
+    // Other categories: larger eligible sample first, then alphabetical.
     if (a.sample !== b.sample) return b.sample - a.sample;
     return nameCmp(a.id.displayName, b.id.displayName);
   });
+
 
 
   // Competition ranking on the PRIMARY metric only. Rows with equal
