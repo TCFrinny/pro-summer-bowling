@@ -28,6 +28,7 @@ import {
   type RosteredRow,
   type SubRow,
 } from "@/lib/roster-adapter";
+import { comparePersonOptions } from "@/lib/person-sort";
 import { computeHandicap } from "@/lib/mock-data";
 import { rebuildAndSaveSnapshot } from "@/lib/snapshot-builder.server";
 
