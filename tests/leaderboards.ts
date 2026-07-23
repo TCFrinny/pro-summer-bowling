@@ -7,6 +7,7 @@ import {
   buildLeaderboard,
   type SeasonContribution,
   type LeaderboardIdentity,
+  type AllTimeRow,
 } from "../src/lib/leaderboards";
 import { readFileSync } from "node:fs";
 
@@ -582,14 +583,16 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
 
 // -----------------------------------------------------------------------
 // Provenance for High Game / High Set — season + week attribution.
+// Semantics: MOST RECENT documented occurrence wins per bowler.
+// Visual ordering: within tied score, more recent provenance appears first;
+// rank still compares primary score only.
 // -----------------------------------------------------------------------
 {
   const p = (id: string, name: string) => idPerson(id, name);
   const alice = p("alice", "Alice");
   const bob = p("bob", "Bob");
-  // Alice: 240 in season 2024 week 5, and 240 again in season 2025 week 2
-  // -> earliest documented is 2024 wk 5.
-  // Bob: 260 in season 2025 (unknown week; summary-only) -> Week unavailable.
+  // Alice: 240 in 2024 wk 5, and 240 again in 2025 wk 2 -> most recent is
+  // 2025 wk 2. Bob: 260 in 2025 (unknown week) -> Week unavailable.
   const contribs: SeasonContribution[] = [
     base(alice, {
       highGame: 240, highSet: 620,
@@ -613,10 +616,10 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   const rows = aggregateSeasonContributions(contribs);
   const aRow = rows.find((r) => r.identity.personId === "alice");
   const bRow = rows.find((r) => r.identity.personId === "bob");
-  assert(aRow?.highGameProvenance?.seasonId === "s24", "Alice ties on 240 → earliest season");
-  assert(aRow?.highGameProvenance?.week === 5, "Alice ties → earliest week 5");
-  assert(aRow?.highSetProvenance?.seasonId === "s24", "Alice hi-set ties → earliest season");
-  assert(bRow?.highGameProvenance?.seasonId === "s25", "Bob single occurrence season");
+  // (3) Same bowler repeats identical career-best: MOST RECENT wins.
+  assert(aRow?.highGameProvenance?.seasonId === "s25", "Alice ties on 240 → most recent (2025)");
+  assert(aRow?.highGameProvenance?.week === 2, "Alice ties → 2025 wk 2");
+  assert(aRow?.highSetProvenance?.seasonId === "s25", "Alice hi-set ties → most recent (2025)");
   assert(bRow?.highGameProvenance?.week === null, "Bob has undocumented week");
 
   // buildLeaderboard exposes provenance on highGame/highSet entries only.
@@ -627,6 +630,115 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   assert(games.entries.every((e) => e.provenance === undefined), "non-HG categories omit provenance");
 }
 
+// -----------------------------------------------------------------------
+// Recency ordering for High Game / High Set at tied scores.
+// -----------------------------------------------------------------------
+{
+  const mk = (personId: string, name: string, prov: { seasonId: string; seasonLabel: string; seasonSortYear: number | null; week: number | null }, hg: number, games = 20): SeasonContribution =>
+    base(idPerson(personId, name), {
+      highGame: hg, highSet: hg + 200, games,
+      highGameProvenance: { ...prov, value: hg },
+      highSetProvenance: { ...prov, value: hg + 200 },
+    });
+
+  // (1) Equal HG scores: newer season first, both rank 1.
+  // (7) Next lower score receives correct competition rank.
+  {
+    const rows = aggregateSeasonContributions([
+      mk("a", "Ann", { seasonId: "s24", seasonLabel: "2024", seasonSortYear: 2024, week: 3 }, 246),
+      mk("b", "Bea", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 1 }, 246),
+      mk("c", "Cid", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 4 }, 230),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries[0].identity.personId === "b", "newer 2025 first at tie");
+    assert(hg.entries[1].identity.personId === "a", "older 2024 second at tie");
+    assert(hg.entries[0].rank === 1 && hg.entries[1].rank === 1, "tied 246s share rank 1");
+    assert(hg.entries[2].rank === 3, "next lower score ranks 3");
+  }
+
+  // (2) Equal HS in same season: later week first, same rank.
+  {
+    const rows = aggregateSeasonContributions([
+      mk("a", "Ann", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 3 }, 540 - 200),
+      mk("b", "Bea", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 8 }, 540 - 200),
+    ]);
+    const hs = buildLeaderboard(rows, "highSet", 10);
+    assert(hs.entries[0].identity.personId === "b", "later week first");
+    assert(hs.entries[0].rank === 1 && hs.entries[1].rank === 1, "tied sets share rank");
+  }
+
+  // (4) Documented week beats "Week unavailable" at same score/season.
+  {
+    const rows = aggregateSeasonContributions([
+      mk("a", "Ann", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: null }, 240),
+      mk("b", "Bea", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 4 }, 240),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries[0].identity.personId === "b", "documented week sorts ahead of unavailable");
+  }
+
+  // (5) Unknown year sorts after documented year.
+  {
+    const rows = aggregateSeasonContributions([
+      mk("a", "Ann", { seasonId: "sx", seasonLabel: "Legacy", seasonSortYear: null, week: null }, 240),
+      mk("b", "Bea", { seasonId: "s24", seasonLabel: "2024", seasonSortYear: 2024, week: 1 }, 240),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries[0].identity.personId === "b", "documented year sorts before unknown year");
+  }
+
+  // (6) Alphabetical tie-break when score AND provenance identical.
+  {
+    const rows = aggregateSeasonContributions([
+      mk("z", "Zed", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 4 }, 240),
+      mk("a", "Ann", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 4 }, 240),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries[0].identity.displayName === "Ann", "alphabetical final tie-break");
+  }
+
+  // (8) 200+ milestone inclusion unchanged (>10 rows kept when qualifying).
+  {
+    const rows: AllTimeRow[] = [];
+    // helper import from top of file scope
+    // Build 12 rows: 11 all with 205, one with 199. Expect 11 kept (all 200+),
+    // 199 dropped because rank 12 > limit 10 AND under threshold.
+    const contribs: SeasonContribution[] = [];
+    for (let i = 0; i < 11; i++) {
+      contribs.push(mk(`p${i}`, `P${String.fromCharCode(65 + i)}`,
+        { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: i + 1 }, 205));
+    }
+    contribs.push(mk("x", "Xed", { seasonId: "s25", seasonLabel: "2025", seasonSortYear: 2025, week: 1 }, 199));
+    rows.push(...aggregateSeasonContributions(contribs));
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries.length === 11, `milestone kept all 11 qualifying 205s, got ${hg.entries.length}`);
+    assert(!hg.entries.some((e) => e.identity.displayName === "Xed"), "sub-milestone score not in extras");
+  }
+
+  // (9) Non-HG/HS category retains prior ordering (no provenance sort).
+  {
+    const rows = aggregateSeasonContributions([
+      base(idPerson("a", "Ann"), { games: 40, scratchPinfall: 4800 }),
+      base(idPerson("b", "Bea"), { games: 60, scratchPinfall: 7200 }),
+    ]);
+    const g = buildLeaderboard(rows, "games", 10);
+    assert(g.entries[0].identity.personId === "b", "games leader by primary value only");
+    assert(g.entries.every((e) => e.provenance === undefined), "no provenance on non-HG/HS");
+  }
+
+  // (10) Old rows without provenance don't crash.
+  {
+    const rows = aggregateSeasonContributions([
+      base(idPerson("a", "Ann"), { highGame: 230 }),
+      base(idPerson("b", "Bea"), { highGame: 230 }),
+    ]);
+    const hg = buildLeaderboard(rows, "highGame", 10);
+    assert(hg.entries.length === 2, "runs without provenance");
+    assert(hg.entries[0].rank === 1 && hg.entries[1].rank === 1, "shared rank without provenance");
+  }
+}
+
 console.log("leaderboards milestone tests OK");
+
 
 
