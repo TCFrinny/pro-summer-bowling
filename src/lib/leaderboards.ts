@@ -680,6 +680,7 @@ export function buildLeaderboard(
       primaryDisplay: cat.format(cur.v),
       sample: cur.sample,
       sampleDisplay: cat.formatSample(cur.sample),
+      provenance: cur.provenance,
     });
   }
   return { category: cat, entries };
