@@ -795,9 +795,9 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
       base(idPerson("a", "Ann"), { games: 20, scratchPinfall: 20 * 150 }),
       base(idPerson("b", "Bea"), { games: 60, scratchPinfall: 60 * 150 }),
     ]);
-    const lb = buildLeaderboard(rows, "topAverage", 10);
+    const lb = buildLeaderboard(rows, "scratchAverage", 10);
     // Both average 150; sample-size tiebreak must put Bea (60 games) first.
-    assert(lb.entries.length >= 2, "topAverage has both rows");
+    assert(lb.entries.length >= 2, "scratchAverage has both rows");
     assert(lb.entries[0].identity.personId === "b",
       "non-HG/HS retains sample-size secondary ordering");
     assert(lb.entries[0].rank === 1 && lb.entries[1].rank === 1, "tied avgs share rank");
