@@ -198,6 +198,7 @@ export function validateGame(g: GameLinescore, ctx: string): void {
   check(g.frames.length === 10, `expected 10 frames, got ${g.frames.length}`);
   let prev = 0;
   let strikes = 0, spares = 0, opens = 0;
+  let strikeFrames = 0, spareFrames = 0;
   for (let i = 0; i < 10; i++) {
     const f = g.frames[i];
     check(f.frameNumber === i + 1, `frame ${i + 1} numbered ${f.frameNumber}`);
@@ -213,9 +214,12 @@ export function validateGame(g: GameLinescore, ctx: string): void {
         `frame 10: illegal mark "${f.mark}"`);
     }
     const cls = classifyFrame(f.frameNumber, f.mark);
-    if (cls === "strike") strikes++;
-    else if (cls === "spare") spares++;
+    if (cls === "strike") strikeFrames++;
+    else if (cls === "spare") spareFrames++;
     else opens++;
+    const { strikes: fs, spares: fp } = countFrameMarks(f.frameNumber, f.mark);
+    strikes += fs;
+    spares += fp;
     const diff = f.cumulativeScore - prev;
     if (i < 9) {
       if (cls === "open") {
@@ -247,7 +251,8 @@ export function validateGame(g: GameLinescore, ctx: string): void {
   check(strikes === g.strikes, `strike count mismatch`);
   check(spares === g.spares, `spare count mismatch`);
   check(opens === g.opens, `open count mismatch`);
-  check(strikes + spares + opens === 10, `classifications must total 10`);
+  check(strikeFrames + spareFrames + opens === 10,
+    `frame classifications must total 10`);
   // Segment reconciliation.
   const s = g.segments;
   check(s.first5 + s.last5 === g.scratchTotal,
