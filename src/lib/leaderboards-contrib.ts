@@ -224,7 +224,7 @@ export function buildCurrentPublishedAggregates(
           for (const g of games as readonly GameLinescore[]) {
             agg.games += 1;
             agg.scratchPinfall += g.scratchTotal;
-            agg.highGame = Math.max(agg.highGame ?? 0, g.scratchTotal);
+            updateHighGame(agg, g.scratchTotal, wk);
             if (typeof entryAvg === "number") {
               agg.poaSum += g.scratchTotal - entryAvg;
               agg.poaGames += 1;
@@ -239,7 +239,7 @@ export function buildCurrentPublishedAggregates(
             agg.hasFrames = true;
             setSum += g.scratchTotal;
           }
-          agg.highSet = Math.max(agg.highSet ?? 0, setSum);
+          if (games.length === 3) updateHighSet(agg, setSum, wk);
         } else {
           let played = 0, setSum = 0;
           for (let i = 0; i < 3; i++) {
@@ -248,7 +248,7 @@ export function buildCurrentPublishedAggregates(
             if (typeof s !== "number") continue;
             agg.games += 1;
             agg.scratchPinfall += s;
-            agg.highGame = Math.max(agg.highGame ?? 0, s);
+            updateHighGame(agg, s, wk);
             if (typeof entryAvg === "number") {
               agg.poaSum += s - entryAvg;
               agg.poaGames += 1;
@@ -256,7 +256,7 @@ export function buildCurrentPublishedAggregates(
             played += 1;
             setSum += s;
           }
-          if (played === 3) agg.highSet = Math.max(agg.highSet ?? 0, setSum);
+          if (played === 3) updateHighSet(agg, setSum, wk);
         }
       }
     }
