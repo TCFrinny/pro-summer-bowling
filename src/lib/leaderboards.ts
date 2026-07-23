@@ -298,6 +298,12 @@ export interface CategoryDef {
   format: (v: number) => string;
   /** Sample formatter. */
   formatSample: (v: number) => string;
+  /**
+   * When set, every row whose primary value meets/exceeds this threshold
+   * is always included, even when it falls outside the normal top-N cap.
+   * Used for duckpin milestones (High Game >=200, High Set >=500).
+   */
+  milestoneThreshold?: number;
 }
 
 const int = (v: number) => v.toLocaleString();
