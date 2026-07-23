@@ -152,15 +152,20 @@ export function summarizeGame(frames: FrameLinescore[]): GameLinescore {
   for (let i = 0; i < 10; i++) {
     const f = frames[i];
     const cls = classifyFrame(f.frameNumber, f.mark);
-    if (cls === "strike") strikes++;
-    else if (cls === "spare") spares++;
-    else {
+    const { strikes: fs, spares: fp } = countFrameMarks(f.frameNumber, f.mark);
+    strikes += fs;
+    spares += fp;
+    if (cls === "open") {
       opens++;
       const prev = i === 0 ? 0 : frames[i - 1].cumulativeScore;
       const diff = f.cumulativeScore - prev;
       openPinsLeft += Math.max(0, 10 - diff);
     }
-    if ((i === 8 || i === 9) && cls !== "open") clutch++;
+    // Clutch marks: every "X" and "/" symbol in frames 9 and 10 counts,
+    // so a tenth of "XXX" contributes 3 clutch marks. Clutch OPPORTUNITY
+    // denominators (2 per completed game) are managed by the aggregators
+    // that consume this value and are intentionally unchanged.
+    if (i === 8 || i === 9) clutch += fs + fp;
   }
   const final = frames[9].cumulativeScore;
   const cum5 = frames[4].cumulativeScore;
