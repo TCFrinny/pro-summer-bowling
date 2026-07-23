@@ -242,8 +242,22 @@ export function aggregateSeasonContributions(
     a.overallWins += c.overallWins;
     a.games += c.games;
     a.scratchPinfall += c.scratchPinfall;
-    if (c.highGame != null) a.highGame = Math.max(a.highGame ?? 0, c.highGame);
-    if (c.highSet != null) a.highSet = Math.max(a.highSet ?? 0, c.highSet);
+    if (c.highGame != null) {
+      if (a.highGame == null || c.highGame > a.highGame) {
+        a.highGame = c.highGame;
+        a.highGameProv = c.highGameProvenance ?? null;
+      } else if (c.highGame === a.highGame && c.highGameProvenance) {
+        a.highGameProv = pickEarlierProvenance(a.highGameProv, c.highGameProvenance);
+      }
+    }
+    if (c.highSet != null) {
+      if (a.highSet == null || c.highSet > a.highSet) {
+        a.highSet = c.highSet;
+        a.highSetProv = c.highSetProvenance ?? null;
+      } else if (c.highSet === a.highSet && c.highSetProvenance) {
+        a.highSetProv = pickEarlierProvenance(a.highSetProv, c.highSetProvenance);
+      }
+    }
     if (c.poaSum != null && c.poaGames != null) {
       a.poaSum += c.poaSum; a.poaGames += c.poaGames;
     }
