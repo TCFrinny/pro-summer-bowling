@@ -36,6 +36,8 @@ import {
 } from "./historical-snapshot";
 import {
   LeaderboardIdentityKind,
+  pickEarlierProvenance,
+  type HighScoreProvenance,
   type LeaderboardIdentity,
   type SeasonContribution,
 } from "./leaderboards";
