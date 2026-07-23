@@ -516,8 +516,13 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
     // First 5 are the 200+ rows (204, 203, 202, 201, 200).
     assert(board.entries.slice(0, 5).every((e) => e.primary >= 200),
       "200+ rows take the top ranks by natural desc sort");
-    assert(board.entries.length === 15,
-      `top-10 + 5 milestone extras all present (got ${board.entries.length})`);
+    // 5 milestone rows + top 5 non-milestone (rank 6..10). Rows 11..15
+    // (highGame 185..181) are below both the cap AND the milestone.
+    assert(board.entries.length === 10,
+      `cap holds when all extras fit inside top 10 (got ${board.entries.length})`);
+    // Confirm the sub-milestone tail is correctly excluded and no dup.
+    assert(!keys.includes("person:n9"),
+      "sub-milestone rank-11+ rows are excluded when non-qualifying");
   }
   // (4) A non-milestone category (scratchPinfall) remains capped at 10.
   {
