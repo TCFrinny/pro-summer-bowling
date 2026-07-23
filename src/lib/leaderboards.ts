@@ -269,7 +269,7 @@ export function aggregateSeasonContributions(
         a.highGame = c.highGame;
         a.highGameProv = c.highGameProvenance ?? null;
       } else if (c.highGame === a.highGame && c.highGameProvenance) {
-        a.highGameProv = pickEarlierProvenance(a.highGameProv, c.highGameProvenance);
+        a.highGameProv = pickMoreRecentProvenance(a.highGameProv, c.highGameProvenance);
       }
     }
     if (c.highSet != null) {
@@ -277,7 +277,7 @@ export function aggregateSeasonContributions(
         a.highSet = c.highSet;
         a.highSetProv = c.highSetProvenance ?? null;
       } else if (c.highSet === a.highSet && c.highSetProvenance) {
-        a.highSetProv = pickEarlierProvenance(a.highSetProv, c.highSetProvenance);
+        a.highSetProv = pickMoreRecentProvenance(a.highSetProv, c.highSetProvenance);
       }
     }
     if (c.poaSum != null && c.poaGames != null) {

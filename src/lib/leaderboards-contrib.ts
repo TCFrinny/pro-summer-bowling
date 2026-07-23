@@ -36,7 +36,7 @@ import {
 } from "./historical-snapshot";
 import {
   LeaderboardIdentityKind,
-  pickEarlierProvenance,
+  pickMoreRecentProvenance,
   type HighScoreProvenance,
   type LeaderboardIdentity,
   type SeasonContribution,
@@ -325,7 +325,7 @@ export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonCon
         c.highGame = agg.highGame;
         c.highGameProvenance = p;
       } else if (agg.highGame === c.highGame) {
-        c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+        c.highGameProvenance = pickMoreRecentProvenance(c.highGameProvenance, p);
       }
     }
     if (agg.highSet != null) {
@@ -334,7 +334,7 @@ export function buildCurrentSeasonContribs(input: CurrentSeasonInput): SeasonCon
         c.highSet = agg.highSet;
         c.highSetProvenance = p;
       } else if (agg.highSet === c.highSet) {
-        c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+        c.highSetProvenance = pickMoreRecentProvenance(c.highSetProvenance, p);
       }
     }
     if (agg.poaGames > 0) {
@@ -478,7 +478,7 @@ export function buildHistoricalSeasonContribs(
     if (c.highGame == null || value > c.highGame) {
       c.highGame = value; c.highGameProvenance = p;
     } else if (value === c.highGame) {
-      c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+      c.highGameProvenance = pickMoreRecentProvenance(c.highGameProvenance, p);
     }
   };
   const applyHighSet = (c: SeasonContribution, ref: string, value: number) => {
@@ -488,7 +488,7 @@ export function buildHistoricalSeasonContribs(
     if (c.highSet == null || value > c.highSet) {
       c.highSet = value; c.highSetProvenance = p;
     } else if (value === c.highSet) {
-      c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+      c.highSetProvenance = pickMoreRecentProvenance(c.highSetProvenance, p);
     }
   };
 
