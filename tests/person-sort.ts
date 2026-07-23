@@ -137,5 +137,91 @@ function assert(cond: unknown, msg: string): asserts cond {
   }
 }
 
+// 8) Public Bowlers page: rostered and substitute groups each alphabetized
+//    independently, mixed capitalization respected, and a newly added
+//    mid-alphabet entry lands in its correct position without any manual
+//    resort at the call site.
+{
+  const rostered = [
+    { id: "b03", name: "zach"   },
+    { id: "b01", name: "Alice"  },
+    { id: "b02", name: "bob"    },
+  ];
+  const subs = [
+    { id: "s02", name: "Diana" },
+    { id: "s01", name: "carla" },
+  ];
+  const rosteredOut = sortPersonOptions(rostered).map((r) => r.name);
+  assert(
+    rosteredOut.join("|") === "Alice|bob|zach",
+    "public roster alphabetical: " + rosteredOut.join(","),
+  );
+  const subsOut = sortPersonOptions(subs).map((s) => s.name);
+  assert(
+    subsOut.join("|") === "carla|Diana",
+    "public subs alphabetical: " + subsOut.join(","),
+  );
+
+  // Newly added rostered bowler "Charlie" appears in position 2 immediately,
+  // without any additional sort step at the display site.
+  const afterAdd = sortPersonOptions([
+    ...rostered,
+    { id: "b04", name: "Charlie" },
+  ]).map((r) => r.name);
+  assert(
+    afterAdd.join("|") === "Alice|bob|Charlie|zach",
+    "newly added entry position: " + afterAdd.join(","),
+  );
+}
+
+// 9) Admin listRosterAndSubs uses the shared comparator (not id-based).
+//    Source-level audit — the server function must sort by
+//    comparePersonOptions so admin lists always render A–Z by name.
+{
+  const src = fs.readFileSync(
+    path.join(process.cwd(), "src/lib/league-repo.functions.ts"),
+    "utf8",
+  );
+  if (!/from "@\/lib\/person-sort"/.test(src)) {
+    throw new Error(
+      "person-sort test: league-repo.functions.ts must import from @/lib/person-sort",
+    );
+  }
+  if (!/rostered\.sort\(comparePersonOptions\)/.test(src)) {
+    throw new Error(
+      "person-sort test: listRosterAndSubs must sort rostered by comparePersonOptions",
+    );
+  }
+  if (!/subs\.sort\(comparePersonOptions\)/.test(src)) {
+    throw new Error(
+      "person-sort test: listRosterAndSubs must sort subs by comparePersonOptions",
+    );
+  }
+}
+
+// 10) Public /bowlers route uses the shared sorter for both groups.
+{
+  const src = fs.readFileSync(
+    path.join(process.cwd(), "src/routes/bowlers.tsx"),
+    "utf8",
+  );
+  if (!/from "@\/lib\/person-sort"/.test(src)) {
+    throw new Error("person-sort test: /bowlers must import from @/lib/person-sort");
+  }
+  const calls = src.match(/sortPersonOptions\s*\(/g) ?? [];
+  if (calls.length < 2) {
+    throw new Error(
+      "person-sort test: /bowlers must call sortPersonOptions for both rostered and subs",
+    );
+  }
+  // The old case-sensitive .sort((a, b) => a.name.localeCompare(b.name))
+  // must be gone — that comparator does not fold case.
+  if (/\.sort\(\(a, b\) => a\.name\.localeCompare\(b\.name\)\)/.test(src)) {
+    throw new Error(
+      "person-sort test: /bowlers still uses raw case-sensitive name sort",
+    );
+  }
+}
+
 // eslint-disable-next-line no-console
 console.log("person-sort tests passed");

@@ -397,6 +397,9 @@ export function buildSubstituteData(
     };
   }
 
-  substitutes.sort((a, b) => a.name.localeCompare(b.name));
+  substitutes.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }) ||
+    a.id.localeCompare(b.id),
+  );
   return { substitutes, substituteProfiles };
 }
