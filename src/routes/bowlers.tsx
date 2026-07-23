@@ -35,12 +35,12 @@ function BowlersLayout() {
 function BowlersIndex() {
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
-  const rostered = BOWLERS.filter((b) =>
-    b.name.toLowerCase().includes(needle),
-  ).sort((a, b) => a.name.localeCompare(b.name));
-  const subs = getPublicSubstitutes()
-    .filter((s) => s.name.toLowerCase().includes(needle))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const rostered = sortPersonOptions(
+    BOWLERS.filter((b) => b.name.toLowerCase().includes(needle)),
+  );
+  const subs = sortPersonOptions(
+    getPublicSubstitutes().filter((s) => s.name.toLowerCase().includes(needle)),
+  );
 
   return (
     <AppShell>
