@@ -374,7 +374,7 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
       [s.id]: { gamesRolled: 3, scratchPinfall: 840, highGame: 280, highSet: 840, weeks: [] } as any,
     },
   } as any;
-  const rows = buildCurrentSeasonContribs({ seasonId: "cur", championPersonId: null, snapshot });
+  const rows = buildCurrentSeasonContribs({ seasonId: "cur", seasonLabel: "2026 Summer", seasonSortYear: 2026, championPersonId: null, snapshot });
   const bRow = rows.find((r) => r.identity.key === "current-roster:b01")!;
   assert(bRow, "rostered contribution present");
   assert(bRow.games === 3, `rostered games must equal published-week games only (got ${bRow.games})`);
