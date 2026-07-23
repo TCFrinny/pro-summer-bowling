@@ -67,10 +67,10 @@ export interface LeaderboardIdentity {
  * `week` is null for older summary-only historical data where the exact
  * week is not documented — UI renders "Week unavailable". `seasonSortYear`
  * is the four-digit year (or null) used for the deterministic
- * "earliest documented occurrence" tie-break when the same value was
- * achieved multiple times: lower year wins, then lower week; null week and
- * null year sort AFTER known values so a documented week always beats an
- * undocumented one on tie.
+ * "most recent documented occurrence" tie-break when the same value was
+ * achieved multiple times: higher year wins, then higher week. A null
+ * year / null week sorts AFTER any documented value, so a documented
+ * occurrence always beats an undocumented one at the same score.
  */
 export interface HighScoreProvenance {
   seasonId: string;
@@ -80,23 +80,45 @@ export interface HighScoreProvenance {
   value: number;
 }
 
-/** True when `a` is the earlier documented occurrence at the same value.
- *  Undefined `a` means "no incumbent yet", so `b` wins. */
-export function pickEarlierProvenance(
+/** Return the MORE RECENT documented occurrence at the same value.
+ *  Undefined `a` means "no incumbent yet", so `b` wins. Documented
+ *  provenance always beats undocumented (null year / null week). */
+export function pickMoreRecentProvenance(
   a: HighScoreProvenance | null | undefined,
   b: HighScoreProvenance,
 ): HighScoreProvenance {
   if (!a) return b;
-  // year: null sorts LAST
-  const ay = a.seasonSortYear ?? Number.POSITIVE_INFINITY;
-  const by = b.seasonSortYear ?? Number.POSITIVE_INFINITY;
-  if (ay !== by) return ay < by ? a : b;
-  const aw = a.week ?? Number.POSITIVE_INFINITY;
-  const bw = b.week ?? Number.POSITIVE_INFINITY;
-  if (aw !== bw) return aw < bw ? a : b;
+  // year: null sorts LAST (least recent). Higher year wins.
+  const ay = a.seasonSortYear ?? Number.NEGATIVE_INFINITY;
+  const by = b.seasonSortYear ?? Number.NEGATIVE_INFINITY;
+  if (ay !== by) return ay > by ? a : b;
+  // week: null sorts LAST (least recent). Higher week wins.
+  const aw = a.week ?? Number.NEGATIVE_INFINITY;
+  const bw = b.week ?? Number.NEGATIVE_INFINITY;
+  if (aw !== bw) return aw > bw ? a : b;
   // Deterministic final tie-break so the choice is stable across runs.
   return a.seasonId <= b.seasonId ? a : b;
 }
+
+/** Compare two provenance values for RECENCY ordering in a sorted list.
+ *  Returns negative when `a` is more recent (should appear first).
+ *  Missing provenance sorts AFTER any provenance. */
+export function provenanceRecencyCmp(
+  a: HighScoreProvenance | null | undefined,
+  b: HighScoreProvenance | null | undefined,
+): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const ay = a.seasonSortYear ?? Number.NEGATIVE_INFINITY;
+  const by = b.seasonSortYear ?? Number.NEGATIVE_INFINITY;
+  if (ay !== by) return by - ay;
+  const aw = a.week ?? Number.NEGATIVE_INFINITY;
+  const bw = b.week ?? Number.NEGATIVE_INFINITY;
+  if (aw !== bw) return bw - aw;
+  return 0;
+}
+
 
 /** A per-season contribution for a single identity. Missing measurements
  *  MUST be `null` (never 0). */
