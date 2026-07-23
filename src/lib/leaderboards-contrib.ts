@@ -399,6 +399,48 @@ export function buildHistoricalSeasonContribs(
   seasonId: string,
   snap: HistoricalSnapshot,
 ): SeasonContribution[] {
+  const seasonLabel = snap.seasonLabel;
+  const seasonSortYear = extractYearFromLabel(seasonLabel);
+  const prov = (value: number, week: number | null): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
+  // Walk weekly matches ONCE to derive per-participant earliest-occurrence
+  // week for High Game / High Set. Summary-only participants (no weekly
+  // data) receive null-week provenance downstream.
+  interface WkBest {
+    hg: number | null; hgWeek: number | null;
+    hs: number | null; hsWeek: number | null;
+  }
+  const weeklyByRef = new Map<string, WkBest>();
+  const ensureWk = (ref: string): WkBest => {
+    let w = weeklyByRef.get(ref);
+    if (!w) { w = { hg: null, hgWeek: null, hs: null, hsWeek: null }; weeklyByRef.set(ref, w); }
+    return w;
+  };
+  const trackHG = (w: WkBest, score: number, wk: number) => {
+    if (w.hg == null || score > w.hg) { w.hg = score; w.hgWeek = wk; }
+    else if (score === w.hg && (w.hgWeek == null || wk < w.hgWeek)) w.hgWeek = wk;
+  };
+  const trackHS = (w: WkBest, total: number, wk: number) => {
+    if (w.hs == null || total > w.hs) { w.hs = total; w.hsWeek = wk; }
+    else if (total === w.hs && (w.hsWeek == null || wk < w.hsWeek)) w.hsWeek = wk;
+  };
+  for (const week of snap.weeks ?? []) {
+    for (const m of week.matches ?? []) {
+      const wk = m.weekNumber ?? week.weekNumber;
+      if (!m.absentA && m.scratchGamesA) {
+        const w = ensureWk(m.actualA);
+        for (const s of m.scratchGamesA) trackHG(w, s, wk);
+        trackHS(w, m.scratchTotalA, wk);
+      }
+      if (!m.absentB && m.scratchGamesB) {
+        const w = ensureWk(m.actualB);
+        for (const s of m.scratchGamesB) trackHG(w, s, wk);
+        trackHS(w, m.scratchTotalB, wk);
+      }
+    }
+  }
+
   const champion = deriveHistoricalChampion(snap);
   const ratingRows = ratingGamesFromHistoricalSnapshot(snap);
   const seasonRatings = computeSeasonRatings(ratingRows);
@@ -418,6 +460,28 @@ export function buildHistoricalSeasonContribs(
     aliasesByKey.set(key, arr);
   };
 
+  const applyHighGame = (c: SeasonContribution, ref: string, value: number) => {
+    const wk = weeklyByRef.get(ref);
+    // Prefer the tracked week when the tracked best matches this value.
+    const week = wk && wk.hg === value ? wk.hgWeek : null;
+    const p = prov(value, week);
+    if (c.highGame == null || value > c.highGame) {
+      c.highGame = value; c.highGameProvenance = p;
+    } else if (value === c.highGame) {
+      c.highGameProvenance = pickEarlierProvenance(c.highGameProvenance, p);
+    }
+  };
+  const applyHighSet = (c: SeasonContribution, ref: string, value: number) => {
+    const wk = weeklyByRef.get(ref);
+    const week = wk && wk.hs === value ? wk.hsWeek : null;
+    const p = prov(value, week);
+    if (c.highSet == null || value > c.highSet) {
+      c.highSet = value; c.highSetProvenance = p;
+    } else if (value === c.highSet) {
+      c.highSetProvenance = pickEarlierProvenance(c.highSetProvenance, p);
+    }
+  };
+
   // Summary rows are indexed by ref so participant metadata rows whose
   // weekly personal data is missing can fill from summary WITHOUT the
   // later loop double-counting them.
@@ -434,9 +498,6 @@ export function buildHistoricalSeasonContribs(
     const stat = (snap.participantStats ?? []).find((s) => s.participantRef === p.ref);
     const standing = (snap.standings ?? []).find((s) => s.participantRef === p.ref);
     const summary = summaryByRef.get(p.ref);
-    // Snapshot-derived buckets win when present; only fall back to summary
-    // when weekly data is unavailable. Never mix the two for the same
-    // bucket — that would double-count.
     const games = stat?.games ?? standing?.games ?? summary?.games ?? null;
     const pinfall = stat?.scratchPinfall ?? standing?.scratchPinfall ?? summary?.scratchPinfall ?? null;
     const hg = stat?.highGame ?? standing?.highGame ?? summary?.highGame ?? null;
@@ -446,8 +507,8 @@ export function buildHistoricalSeasonContribs(
     if (usedSummary) filledFromSummary.add(p.ref);
     if (games != null) c.games += games;
     if (pinfall != null) c.scratchPinfall += pinfall;
-    if (hg != null) c.highGame = Math.max(c.highGame ?? 0, hg);
-    if (hs != null) c.highSet = Math.max(c.highSet ?? 0, hs);
+    if (hg != null) applyHighGame(c, p.ref, hg);
+    if (hs != null) applyHighSet(c, p.ref, hs);
     const rec = extractHistoricalRecordContribution({
       seasonId, role: p.role, participantRef: p.ref,
       weeks: snap.weeks, standings: snap.standings,
