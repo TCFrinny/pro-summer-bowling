@@ -477,6 +477,7 @@ export const LEADERBOARD_CATEGORIES: CategoryDef[] = [
     eligible: (r) => r.highSet != null,
     format: int, formatSample: int,
     milestoneThreshold: HIGH_SET_MILESTONE,
+    provenanceOf: (r) => r.highSetProvenance,
   },
   {
     id: "careerPOA", group: "scoring", label: "Career POA",
