@@ -305,6 +305,8 @@ export function aggregateSeasonContributions(
       scratchAverage: a.games > 0 ? Number((a.scratchPinfall / a.games).toFixed(3)) : null,
       highGame: a.highGame,
       highSet: a.highSet,
+      highGameProvenance: a.highGame != null ? a.highGameProv : null,
+      highSetProvenance: a.highSet != null ? a.highSetProv : null,
       poaSum: a.poaSum,
       poaGames: a.poaGames,
       careerPOA: a.poaGames > 0 ? Number((a.poaSum / a.poaGames).toFixed(3)) : null,
