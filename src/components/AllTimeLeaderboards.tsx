@@ -1,7 +1,12 @@
 /**
  * Public All-Time Leaderboards — compact selector + Top 10 table.
- * Reads the aggregated `AllTimeRow[]` from `getAllTimeLeaderboards` and
- * renders one category at a time.
+ *
+ * Career-aggregate categories (`AllTimeRow[]`) drive most tabs. The four
+ * High Game / High Set boards are performance-level (`PerformanceRow[]`):
+ *  - Scratch High Game / Scratch High Set: every 200+ / 500+ performance
+ *    displayed, no top-N cap.
+ *  - HDCP High Game / HDCP High Set: Top 10 performances plus every row
+ *    tied at the 10th-place score.
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -11,9 +16,12 @@ import { Loader2 } from "lucide-react";
 import { getAllTimeLeaderboards } from "@/lib/leaderboards-repo.functions";
 import {
   LEADERBOARD_CATEGORIES,
+  PERFORMANCE_LEADERBOARD_CATEGORIES,
   buildLeaderboard,
+  buildPerformanceLeaderboard,
   type LeaderboardCategoryId,
   type LeaderboardGroup,
+  type PerformanceCategoryId,
 } from "@/lib/leaderboards";
 
 const GROUP_LABELS: Record<LeaderboardGroup, string> = {
@@ -24,31 +32,84 @@ const GROUP_LABELS: Record<LeaderboardGroup, string> = {
 };
 const GROUP_ORDER: LeaderboardGroup[] = ["records", "scoring", "frame", "ratings"];
 
+// Menu entries mix career and performance categories. Career "highGame"
+// and "highSet" (person-level) are hidden from the UI in favor of the
+// four performance-level replacements.
+type MenuEntry =
+  | {
+      kind: "career";
+      id: LeaderboardCategoryId;
+      group: LeaderboardGroup;
+      label: string;
+      primaryLabel: string;
+      secondaryLabel: string;
+    }
+  | {
+      kind: "performance";
+      id: PerformanceCategoryId;
+      group: LeaderboardGroup;
+      label: string;
+      primaryLabel: string;
+      secondaryLabel: string;
+    };
+
+const CAREER_HIDDEN_IDS: ReadonlySet<LeaderboardCategoryId> =
+  new Set<LeaderboardCategoryId>(["highGame", "highSet"]);
+
+const MENU: MenuEntry[] = (() => {
+  const items: MenuEntry[] = [];
+  for (const c of LEADERBOARD_CATEGORIES) {
+    if (CAREER_HIDDEN_IDS.has(c.id)) continue;
+    items.push({
+      kind: "career", id: c.id, group: c.group, label: c.label,
+      primaryLabel: c.primaryLabel, secondaryLabel: c.secondaryLabel,
+    });
+    if (c.id === "scratchPinfall") {
+      // Insert performance-level HG/HS immediately after Scratch Pinfall.
+      for (const p of PERFORMANCE_LEADERBOARD_CATEGORIES) {
+        items.push({
+          kind: "performance", id: p.id, group: p.group, label: p.label,
+          primaryLabel: p.primaryLabel, secondaryLabel: p.secondaryLabel,
+        });
+      }
+    }
+  }
+  return items;
+})();
+
 export function AllTimeLeaderboards() {
   const q = useQuery({
-    queryKey: ["all-time-leaderboards", "v1"],
+    queryKey: ["all-time-leaderboards", "v2"],
     queryFn: () => getAllTimeLeaderboards(),
     staleTime: 60_000,
   });
 
   const [group, setGroup] = useState<LeaderboardGroup>("records");
   const catsInGroup = useMemo(
-    () => LEADERBOARD_CATEGORIES.filter((c) => c.group === group),
+    () => MENU.filter((c) => c.group === group),
     [group],
   );
-  const [categoryId, setCategoryId] = useState<LeaderboardCategoryId>(
+  const [categoryKey, setCategoryKey] = useState<string>(
     catsInGroup[0]?.id ?? "gameWins",
   );
-  // Reset the active category when the group changes.
-  const activeCat = useMemo(() => {
-    const found = catsInGroup.find((c) => c.id === categoryId);
-    return found ?? catsInGroup[0];
-  }, [catsInGroup, categoryId]);
+  const activeCat = useMemo(
+    () => catsInGroup.find((c) => c.id === categoryKey) ?? catsInGroup[0],
+    [catsInGroup, categoryKey],
+  );
 
   const board = useMemo(() => {
     if (!q.data || !activeCat) return null;
-    return buildLeaderboard(q.data.rows, activeCat.id, 10);
+    if (activeCat.kind === "career") {
+      return buildLeaderboard(q.data.rows, activeCat.id, 10);
+    }
+    return buildPerformanceLeaderboard(q.data.performances, activeCat.id, 10);
   }, [q.data, activeCat]);
+
+  const showProvenance =
+    !!activeCat &&
+    (activeCat.kind === "performance" ||
+      activeCat.id === "highGame" ||
+      activeCat.id === "highSet");
 
   return (
     <section className="mt-10 border-t border-border pt-8">
@@ -74,7 +135,6 @@ export function AllTimeLeaderboards() {
 
       {q.data && activeCat && (
         <>
-          {/* Group selector */}
           <div className="mb-2 flex flex-wrap gap-1.5">
             {GROUP_ORDER.map((g) => (
               <button
@@ -82,8 +142,8 @@ export function AllTimeLeaderboards() {
                 type="button"
                 onClick={() => {
                   setGroup(g);
-                  const first = LEADERBOARD_CATEGORIES.find((c) => c.group === g);
-                  if (first) setCategoryId(first.id);
+                  const first = MENU.find((c) => c.group === g);
+                  if (first) setCategoryKey(first.id);
                 }}
                 className={
                   "rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest transition-colors " +
@@ -96,13 +156,12 @@ export function AllTimeLeaderboards() {
               </button>
             ))}
           </div>
-          {/* Category selector */}
           <div className="mb-3 flex flex-wrap gap-1.5">
             {catsInGroup.map((c) => (
               <button
                 key={c.id}
                 type="button"
-                onClick={() => setCategoryId(c.id)}
+                onClick={() => setCategoryKey(c.id)}
                 className={
                   "rounded-md border px-2 py-1 text-xs transition-colors " +
                   (activeCat.id === c.id
@@ -115,7 +174,6 @@ export function AllTimeLeaderboards() {
             ))}
           </div>
 
-          {/* Table */}
           {board && board.entries.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-[420px] text-sm">
@@ -128,18 +186,15 @@ export function AllTimeLeaderboards() {
                   </tr>
                 </thead>
                 <tbody>
-                  {board.entries.map((e, i) => {
-                    const showProv =
-                      (activeCat.id === "highGame" || activeCat.id === "highSet") && !!e.provenance;
-                    return (
+                  {board.entries.map((e, i) => (
                     <tr
-                      key={`${e.identity.key}-${i}`}
+                      key={`${e.identity.key}-${e.occurrenceKey ?? i}`}
                       className="border-t border-border/60"
                     >
                       <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{e.rank}</td>
                       <td className="px-2 py-1.5">
                         <NameLink identity={e.identity} />
-                        {showProv && e.provenance && (
+                        {showProvenance && e.provenance && (
                           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
                             {e.provenance.seasonLabel}
                             {" · "}
@@ -153,11 +208,12 @@ export function AllTimeLeaderboards() {
                         {e.primaryDisplay}
                       </td>
                       <td className="hidden px-2 py-1.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                        {e.sampleDisplay}
+                        {activeCat.kind === "performance" && e.provenance
+                          ? `${e.provenance.seasonLabel}${e.provenance.week != null ? ` · Wk ${e.provenance.week}` : " · Wk —"}`
+                          : e.sampleDisplay}
                       </td>
                     </tr>
-                    );
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -184,7 +240,6 @@ function NameLink({
   };
 }) {
   const cls = "text-foreground hover:text-primary hover:underline";
-  // Explicit route kind wins; fall back for older aggregate payloads.
   const kind = identity.hrefKind ?? (identity.personId ? "person" : "historical");
   if (kind === "person" && identity.personId) {
     return (

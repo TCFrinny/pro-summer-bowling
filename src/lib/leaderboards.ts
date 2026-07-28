@@ -636,6 +636,8 @@ export interface LeaderboardEntry {
   sampleDisplay: string;
   /** Present only on High Game / High Set entries. */
   provenance?: HighScoreProvenance | null;
+  /** Present on performance-level rows. Stable within tied score. */
+  occurrenceKey?: string;
 }
 
 export interface LeaderboardResult {
@@ -673,25 +675,14 @@ export function buildLeaderboard(
   eligible.sort((a, b) => {
     if (a.v !== b.v) return cat.direction === "desc" ? b.v - a.v : a.v - b.v;
     if (cat.provenanceOf) {
-      // High Game / High Set: within a tied score, order by most-recent
-      // provenance (newer year → higher week → documented beats
-      // undocumented). Then go DIRECTLY to alphabetical name — sample size
-      // is not a High Game/High Set tie-breaker. Rank is assigned from
-      // primary `v` only, so recency changes only visual order.
       const p = provenanceRecencyCmp(a.provenance, b.provenance);
       if (p !== 0) return p;
       return nameCmp(a.id.displayName, b.id.displayName);
     }
-    // Other categories: larger eligible sample first, then alphabetical.
     if (a.sample !== b.sample) return b.sample - a.sample;
     return nameCmp(a.id.displayName, b.id.displayName);
   });
 
-
-
-  // Competition ranking on the PRIMARY metric only. Rows with equal
-  // primary values share the same rank even when their samples differ
-  // (sample is a within-rank sort tiebreaker, not part of the rank key).
   const entries: LeaderboardEntry[] = [];
   let rank = 0;
   let prevV: number | null = null;
@@ -700,9 +691,6 @@ export function buildLeaderboard(
     if (prevV === null || cur.v !== prevV) rank = i + 1;
     prevV = cur.v;
     if (rank > limit) {
-      // Milestone override: keep including qualifying rows past the cap.
-      // Eligible is sorted desc by primary, so once we drop below the
-      // threshold we can stop.
       if (cat.milestoneThreshold == null) break;
       if (cat.direction !== "desc") break;
       if (cur.v < cat.milestoneThreshold) break;
@@ -716,6 +704,147 @@ export function buildLeaderboard(
       sampleDisplay: cat.formatSample(cur.sample),
       provenance: cur.provenance,
     });
+  }
+  return { category: cat, entries };
+}
+
+// ---------------------------------------------------------------------------
+// Performance-level leaderboards (v2.0.6) — High Game / High Set only.
+//
+// Scratch High Game / Scratch High Set: a bowler may appear multiple times.
+// Every individual scratch game >= 200 and every scratch three-game set
+// >= 500 is displayed. No top-N cap.
+//
+// Handicap High Game / Handicap High Set: performance-level Top 10 plus
+// every additional row tied at the 10th-place score. No milestone rule.
+//
+// Rows carry an occurrenceKey so a bowler with two 200+ games in the
+// SAME week still appears twice (game index / side / match keep them
+// distinct). Sorting inside a tied score: most-recent provenance first
+// (documented beats undocumented), then case-insensitive alphabetical
+// display name, then deterministic occurrenceKey.
+// ---------------------------------------------------------------------------
+
+export type PerformanceKind = "scratch-game" | "scratch-set" | "hdcp-game" | "hdcp-set";
+export type PerformanceCategoryId =
+  | "scratchHighGame" | "scratchHighSet" | "hdcpHighGame" | "hdcpHighSet";
+
+export interface PerformanceRow {
+  kind: PerformanceKind;
+  identity: LeaderboardIdentity;
+  score: number;
+  provenance: HighScoreProvenance;
+  occurrenceKey: string;
+}
+
+export interface PerformanceCategoryDef {
+  id: PerformanceCategoryId;
+  group: LeaderboardGroup;
+  label: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+  performanceKind: PerformanceKind;
+  /** Scratch categories: score >= threshold is always kept; no top-N cap. */
+  milestoneThreshold?: number;
+  /** Handicap categories: Top-N by rank with ties at the Nth-place score. */
+  topN?: number;
+}
+
+export const PERFORMANCE_LEADERBOARD_CATEGORIES: PerformanceCategoryDef[] = [
+  {
+    id: "scratchHighGame", group: "scoring", label: "Scratch High Game",
+    primaryLabel: "Game", secondaryLabel: "Season / Week",
+    performanceKind: "scratch-game",
+    milestoneThreshold: HIGH_GAME_MILESTONE,
+  },
+  {
+    id: "scratchHighSet", group: "scoring", label: "Scratch High Set",
+    primaryLabel: "Set", secondaryLabel: "Season / Week",
+    performanceKind: "scratch-set",
+    milestoneThreshold: HIGH_SET_MILESTONE,
+  },
+  {
+    id: "hdcpHighGame", group: "scoring", label: "HDCP High Game",
+    primaryLabel: "Game", secondaryLabel: "Season / Week",
+    performanceKind: "hdcp-game",
+    topN: 10,
+  },
+  {
+    id: "hdcpHighSet", group: "scoring", label: "HDCP High Set",
+    primaryLabel: "Set", secondaryLabel: "Season / Week",
+    performanceKind: "hdcp-set",
+    topN: 10,
+  },
+];
+
+export function findPerformanceCategory(id: PerformanceCategoryId): PerformanceCategoryDef {
+  const c = PERFORMANCE_LEADERBOARD_CATEGORIES.find((x) => x.id === id);
+  if (!c) throw new Error(`Unknown performance leaderboard category ${id}`);
+  return c;
+}
+
+export interface PerformanceLeaderboardResult {
+  category: PerformanceCategoryDef;
+  entries: LeaderboardEntry[];
+}
+
+export function buildPerformanceLeaderboard(
+  perfs: readonly PerformanceRow[],
+  categoryId: PerformanceCategoryId,
+  limit = 10,
+): PerformanceLeaderboardResult {
+  const cat = findPerformanceCategory(categoryId);
+  const filtered = perfs.filter((p) => p.kind === cat.performanceKind);
+  filtered.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    const p = provenanceRecencyCmp(a.provenance, b.provenance);
+    if (p !== 0) return p;
+    const n = nameCmp(a.identity.displayName, b.identity.displayName);
+    if (n !== 0) return n;
+    return a.occurrenceKey < b.occurrenceKey ? -1
+         : a.occurrenceKey > b.occurrenceKey ?  1 : 0;
+  });
+
+  const entries: LeaderboardEntry[] = [];
+  let rank = 0;
+  let prevScore: number | null = null;
+
+  if (cat.milestoneThreshold != null) {
+    // SCRATCH: include every row whose score meets the milestone. No cap.
+    for (let i = 0; i < filtered.length; i++) {
+      const cur = filtered[i];
+      if (cur.score < cat.milestoneThreshold) break;
+      if (prevScore === null || cur.score !== prevScore) rank = i + 1;
+      prevScore = cur.score;
+      entries.push({
+        rank, identity: cur.identity,
+        primary: cur.score, primaryDisplay: String(cur.score),
+        sample: 0, sampleDisplay: "",
+        provenance: cur.provenance,
+        occurrenceKey: cur.occurrenceKey,
+      });
+    }
+  } else {
+    // HDCP: Top-N by score-rank with ties at the Nth-place cutoff score.
+    const cap = cat.topN ?? limit;
+    let cutoffScore: number | null = null;
+    for (let i = 0; i < filtered.length; i++) {
+      const cur = filtered[i];
+      if (prevScore === null || cur.score !== prevScore) rank = i + 1;
+      prevScore = cur.score;
+      if (rank <= cap) {
+        cutoffScore = cur.score;
+      } else if (cutoffScore == null || cur.score !== cutoffScore) {
+        break;
+      }
+      entries.push({
+        rank, identity: cur.identity,
+        primary: cur.score, primaryDisplay: String(cur.score),
+        sample: 0, sampleDisplay: "",
+        provenance: cur.provenance,
+        occurrenceKey: cur.occurrenceKey,
+      });
+    }
   }
   return { category: cat, entries };
 }

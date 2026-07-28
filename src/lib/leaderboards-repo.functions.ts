@@ -18,12 +18,15 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   aggregateSeasonContributions,
   type AllTimeRow,
+  type PerformanceRow,
   type SeasonContribution,
 } from "@/lib/leaderboards";
 import type { PublicSnapshot } from "@/lib/mock-data";
 import {
   buildCurrentSeasonContribs,
+  buildCurrentSeasonPerformances,
   buildHistoricalSeasonContribs,
+  buildHistoricalSeasonPerformances,
   extractYearFromLabel,
   selectPublicHistoricalSeasonIds,
   type SeasonMetaLite,
@@ -64,6 +67,7 @@ function makePublicClient(): Sb {
 
 export interface AllTimeLeaderboardsResult {
   rows: AllTimeRow[];
+  performances: PerformanceRow[];
   contributingSeasons: number;
 }
 
@@ -87,10 +91,9 @@ export const getAllTimeLeaderboards = createServerFn({ method: "GET" })
     }));
 
     const allContribs: SeasonContribution[] = [];
+    const allPerfs: PerformanceRow[] = [];
     let contributingSeasons = 0;
 
-    // Current-season public snapshot — anon SELECT is allowed on
-    // public_snapshots for the current season.
     const currentSeason = seasons.find((s) => s.isCurrent);
     if (currentSeason) {
       const snapQ = await (pub.from as unknown as LooseFrom)("public_snapshots")
@@ -99,39 +102,39 @@ export const getAllTimeLeaderboards = createServerFn({ method: "GET" })
       if (snapQ.data) {
         const snap = snapQ.data.snapshot as PublicSnapshot | null;
         if (snap && Array.isArray(snap.bowlers) && snap.matchesByWeek) {
-          const contribs = buildCurrentSeasonContribs({
+          const input = {
             seasonId: currentSeason.id,
             seasonLabel: currentSeason.label,
             seasonSortYear: extractYearFromLabel(currentSeason.label),
             championPersonId: currentSeason.championPersonId,
             snapshot: snap,
-          });
+          };
+          const contribs = buildCurrentSeasonContribs(input);
+          const perfs = buildCurrentSeasonPerformances(input);
           allContribs.push(...contribs);
-          if (contribs.length > 0) contributingSeasons += 1;
+          allPerfs.push(...perfs);
+          if (contribs.length > 0 || perfs.length > 0) contributingSeasons += 1;
         }
       }
     }
 
-    // Archived + public_visible historical snapshots. RLS refuses anon
-    // SELECT on `historical_season_snapshots`; we load through service role
-    // and ALWAYS apply `filterPublicHistoricalSnapshot()` before use.
     const publicArchivedIds = selectPublicHistoricalSeasonIds(seasons);
     if (publicArchivedIds.length > 0) {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const sb = supabaseAdmin as unknown as Sb;
       const q = await (sb.from as unknown as LooseFrom)("historical_season_snapshots")
         .select("season_id,snapshot").in("season_id", publicArchivedIds);
-      // FAIL CLOSED: any error throws rather than returning a partial
-      // leaderboard that silently omits historical seasons.
       if (q.error) throw new Error(`historical snapshots query failed: ${q.error.message}`);
       for (const row of (q.data as Array<{ season_id: string; snapshot: HistoricalSnapshot }>) ?? []) {
         const filtered = filterPublicHistoricalSnapshot(row.snapshot);
         const contribs = buildHistoricalSeasonContribs(row.season_id, filtered);
+        const perfs = buildHistoricalSeasonPerformances(row.season_id, filtered);
         allContribs.push(...contribs);
-        if (contribs.length > 0) contributingSeasons += 1;
+        allPerfs.push(...perfs);
+        if (contribs.length > 0 || perfs.length > 0) contributingSeasons += 1;
       }
     }
 
     const rows = aggregateSeasonContributions(allContribs);
-    return { rows, contributingSeasons };
+    return { rows, performances: allPerfs, contributingSeasons };
   });

@@ -40,6 +40,7 @@ import {
   type HighScoreProvenance,
   type LeaderboardIdentity,
   type SeasonContribution,
+  type PerformanceRow,
 } from "./leaderboards";
 
 // ---------------------------------------------------------------------------
@@ -607,4 +608,204 @@ export function selectPublicHistoricalSeasonIds(
   return seasons
     .filter((s) => !s.isCurrent && s.status === "archived" && s.publicVisible)
     .map((s) => s.id);
+}
+
+// ---------------------------------------------------------------------------
+// Performance-level builders (v2.0.6) — one row per game / per three-game
+// set actually rolled. Feeds Scratch/HDCP High Game/High Set leaderboards.
+// Never emit rows for absent sides or unpublished weeks.
+// ---------------------------------------------------------------------------
+
+export function buildCurrentSeasonPerformances(
+  input: CurrentSeasonInput,
+): PerformanceRow[] {
+  const { seasonId, seasonLabel, seasonSortYear, snapshot } = input;
+  const publishedWeeks = new Set<number>(
+    (snapshot.weeks ?? []).filter((w) => w.published).map((w) => w.week),
+  );
+  const bowlerIdentity = new Map<string, LeaderboardIdentity>();
+  for (const b of snapshot.bowlers ?? []) {
+    bowlerIdentity.set(b.id, b.personId
+      ? idPerson(b.personId, b.name)
+      : idCurrentRoster(b.id, b.name));
+  }
+  const subIdentity = new Map<string, LeaderboardIdentity>();
+  for (const s of snapshot.substitutes ?? []) {
+    subIdentity.set(s.id, s.personId
+      ? idPerson(s.personId, s.name)
+      : idCurrentSub(s.id, s.name));
+  }
+  const out: PerformanceRow[] = [];
+  const prov = (week: number, value: number): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
+  for (const [wkStr, matches] of Object.entries(snapshot.matchesByWeek ?? {}) as Array<[string, Match[]]>) {
+    const wk = Number(wkStr);
+    if (!publishedWeeks.has(wk)) continue;
+    for (const m of matches) {
+      if (m.status !== "completed" || !m.result) continue;
+      const r: MatchResult = m.result;
+      for (const side of ["A", "B"] as const) {
+        const part = side === "A" ? r.participationA : r.participationB;
+        if (part.status === "absent") continue;
+        const isSub = part.status === "substitute";
+        const actualId = isSub
+          ? (part.actualId ?? "")
+          : (side === "A" ? r.scheduledA : r.scheduledB);
+        if (!actualId) continue;
+        const identity = isSub
+          ? subIdentity.get(actualId)
+          : bowlerIdentity.get(actualId);
+        if (!identity) continue;
+        const scratchGames = side === "A" ? r.gamesA : r.gamesB;
+        const hdcpGames = side === "A" ? r.handicapGamesA : r.handicapGamesB;
+        const mask: [boolean, boolean, boolean] =
+          r.scoreOnly && r.pairCompleted ? r.pairCompleted : [true, true, true];
+        let allThree = true;
+        let scratchSum = 0;
+        let hdcpSum = 0;
+        for (let i = 0; i < 3; i++) {
+          if (!mask[i]) { allThree = false; continue; }
+          const s = scratchGames[i];
+          const h = hdcpGames[i];
+          if (typeof s !== "number" || typeof h !== "number") {
+            allThree = false; continue;
+          }
+          out.push({
+            kind: "scratch-game", identity, score: s, provenance: prov(wk, s),
+            occurrenceKey: `${m.id}:${side}:g${i}:s`,
+          });
+          out.push({
+            kind: "hdcp-game", identity, score: h, provenance: prov(wk, h),
+            occurrenceKey: `${m.id}:${side}:g${i}:h`,
+          });
+          scratchSum += s;
+          hdcpSum += h;
+        }
+        if (allThree) {
+          out.push({
+            kind: "scratch-set", identity, score: scratchSum, provenance: prov(wk, scratchSum),
+            occurrenceKey: `${m.id}:${side}:set:s`,
+          });
+          out.push({
+            kind: "hdcp-set", identity, score: hdcpSum, provenance: prov(wk, hdcpSum),
+            occurrenceKey: `${m.id}:${side}:set:h`,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export function buildHistoricalSeasonPerformances(
+  seasonId: string,
+  snap: HistoricalSnapshot,
+): PerformanceRow[] {
+  const seasonLabel = snap.seasonLabel;
+  const seasonSortYear = extractYearFromLabel(seasonLabel);
+  const prov = (week: number | null, value: number): HighScoreProvenance => ({
+    seasonId, seasonLabel, seasonSortYear, week, value,
+  });
+  // Resolve identity for a participant ref.
+  const identityByRef = new Map<string, LeaderboardIdentity>();
+  for (const p of snap.participants ?? []) {
+    identityByRef.set(p.ref, p.personId
+      ? idPerson(p.personId, p.displayName)
+      : idHistorical(seasonId, p.ref, p.displayName));
+  }
+  // Fallback: summary records name people whose participant metadata may
+  // be missing (older seasons). Use those for identity too.
+  for (const s of snap.summaryRecords ?? []) {
+    if (identityByRef.has(s.participantRef)) continue;
+    identityByRef.set(s.participantRef, s.personId
+      ? idPerson(s.personId, s.displayName)
+      : idHistorical(seasonId, s.participantRef, s.displayName));
+  }
+  const out: PerformanceRow[] = [];
+  // Track which (ref, kind) combinations received real weekly data. If
+  // present, summary fallback is skipped to prevent double counting.
+  const hasWeeklyScratchGame = new Set<string>();
+  const hasWeeklyScratchSet = new Set<string>();
+
+  for (const week of snap.weeks ?? []) {
+    for (const m of week.matches ?? []) {
+      const wk = m.weekNumber ?? week.weekNumber;
+      for (const side of ["A", "B"] as const) {
+        const absent = side === "A" ? m.absentA : m.absentB;
+        const hasGameData = side === "A" ? m.hasGameDataA : m.hasGameDataB;
+        if (absent || !hasGameData) continue;
+        const ref = side === "A" ? m.actualA : m.actualB;
+        if (!ref) continue;
+        let identity = identityByRef.get(ref);
+        if (!identity) {
+          identity = idHistorical(seasonId, ref,
+            (side === "A" ? m.actualNameA : m.actualNameB) || ref);
+          identityByRef.set(ref, identity);
+        }
+        const scratchGames = side === "A" ? m.scratchGamesA : m.scratchGamesB;
+        const hdcpGames = side === "A" ? m.handicapGamesA : m.handicapGamesB;
+        const scratchTotal = side === "A" ? m.scratchTotalA : m.scratchTotalB;
+        const hdcpTotal = side === "A" ? m.handicapTotalA : m.handicapTotalB;
+        const occBase = `${m.slotId}:${side}`;
+        if (scratchGames) {
+          for (let i = 0; i < 3; i++) {
+            const s = scratchGames[i];
+            const h = hdcpGames?.[i];
+            if (typeof s === "number") {
+              out.push({
+                kind: "scratch-game", identity, score: s, provenance: prov(wk, s),
+                occurrenceKey: `${occBase}:g${i}:s`,
+              });
+              hasWeeklyScratchGame.add(ref);
+            }
+            if (typeof h === "number") {
+              out.push({
+                kind: "hdcp-game", identity, score: h, provenance: prov(wk, h),
+                occurrenceKey: `${occBase}:g${i}:h`,
+              });
+            }
+          }
+          if (typeof scratchTotal === "number" && scratchGames.every((v) => typeof v === "number")) {
+            out.push({
+              kind: "scratch-set", identity, score: scratchTotal, provenance: prov(wk, scratchTotal),
+              occurrenceKey: `${occBase}:set:s`,
+            });
+            hasWeeklyScratchSet.add(ref);
+          }
+          if (typeof hdcpTotal === "number") {
+            out.push({
+              kind: "hdcp-set", identity, score: hdcpTotal, provenance: prov(wk, hdcpTotal),
+              occurrenceKey: `${occBase}:set:h`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Summary-only fallback: preserve a legacy season's known personal
+  // scratch high game / high set as a single row with `Week unavailable`
+  // when the weekly data lacks any performance for that participant.
+  // Handicap-side fallback is not possible: summary records do not carry
+  // handicap high game / high set.
+  for (const s of snap.summaryRecords ?? []) {
+    const identity = identityByRef.get(s.participantRef);
+    if (!identity) continue;
+    if (typeof s.highGame === "number" && !hasWeeklyScratchGame.has(s.participantRef)) {
+      out.push({
+        kind: "scratch-game", identity, score: s.highGame,
+        provenance: prov(null, s.highGame),
+        occurrenceKey: `summary:${s.participantRef}:g`,
+      });
+    }
+    if (typeof s.highSet === "number" && !hasWeeklyScratchSet.has(s.participantRef)) {
+      out.push({
+        kind: "scratch-set", identity, score: s.highSet,
+        provenance: prov(null, s.highSet),
+        occurrenceKey: `summary:${s.participantRef}:s`,
+      });
+    }
+  }
+  return out;
 }

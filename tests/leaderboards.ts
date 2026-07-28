@@ -804,7 +804,298 @@ function base(identity: LeaderboardIdentity, over: Partial<SeasonContribution> =
   }
 }
 
-console.log("leaderboards milestone tests OK");
+// -----------------------------------------------------------------------
+// v2.0.6 — Performance-level Scratch / HDCP High Game & High Set.
+// Scratch: every 200+ game / 500+ set kept, no top-N cap.
+// HDCP: Top 10 performances plus every row tied at the 10th-place score.
+// A bowler may appear multiple times. Rows include exact season/week
+// provenance for the specific performance.
+// -----------------------------------------------------------------------
+{
+  const { buildPerformanceLeaderboard } = await import("../src/lib/leaderboards");
+  const idP = (personId: string, name: string): LeaderboardIdentity => ({
+    key: `person:${personId}`, displayName: name, personId,
+    unlinkedSeasonId: null, unlinkedParticipantRef: null,
+  });
+  const mkScratchGame = (
+    person: string, name: string, score: number,
+    season: string, year: number, week: number | null, occ: string,
+  ) => ({
+    kind: "scratch-game" as const,
+    identity: idP(person, name),
+    score,
+    provenance: { seasonId: season, seasonLabel: season, seasonSortYear: year, week, value: score },
+    occurrenceKey: occ,
+  });
+  const mkScratchSet = (
+    person: string, name: string, score: number,
+    season: string, year: number, week: number | null, occ: string,
+  ) => ({
+    kind: "scratch-set" as const,
+    identity: idP(person, name),
+    score,
+    provenance: { seasonId: season, seasonLabel: season, seasonSortYear: year, week, value: score },
+    occurrenceKey: occ,
+  });
+  const mkHdcpGame = (
+    person: string, name: string, score: number,
+    season: string, year: number, week: number | null, occ: string,
+  ) => ({
+    kind: "hdcp-game" as const,
+    identity: idP(person, name),
+    score,
+    provenance: { seasonId: season, seasonLabel: season, seasonSortYear: year, week, value: score },
+    occurrenceKey: occ,
+  });
+  const mkHdcpSet = (
+    person: string, name: string, score: number,
+    season: string, year: number, week: number | null, occ: string,
+  ) => ({
+    kind: "hdcp-set" as const,
+    identity: idP(person, name),
+    score,
+    provenance: { seasonId: season, seasonLabel: season, seasonSortYear: year, week, value: score },
+    occurrenceKey: occ,
+  });
+
+  // (P1) One bowler with three scratch games 246, 233, 214 spanning
+  // seasons/weeks appears three times on Scratch High Game.
+  {
+    const perfs = [
+      mkScratchGame("alice", "Alice", 246, "2024", 2024, 3, "m1:A:g0:s"),
+      mkScratchGame("alice", "Alice", 233, "2025", 2025, 4, "m2:A:g1:s"),
+      mkScratchGame("alice", "Alice", 214, "2026", 2026, 1, "m3:A:g2:s"),
+    ];
+    const b = buildPerformanceLeaderboard(perfs, "scratchHighGame");
+    assert(b.entries.length === 3, `expected 3 performances, got ${b.entries.length}`);
+    assert(b.entries[0].primary === 246 && b.entries[2].primary === 214,
+      "sorted by score desc");
+    assert(b.entries.every((e) => e.identity.personId === "alice"),
+      "same bowler appears multiple times");
+  }
+
+  // (P2) Two 200+ scratch games in the SAME week appear twice, distinct.
+  {
+    const perfs = [
+      mkScratchGame("alice", "Alice", 220, "2026", 2026, 4, "m9:A:g0:s"),
+      mkScratchGame("alice", "Alice", 210, "2026", 2026, 4, "m9:A:g1:s"),
+    ];
+    const b = buildPerformanceLeaderboard(perfs, "scratchHighGame");
+    assert(b.entries.length === 2, "two distinct in-week performances kept");
+    assert(b.entries[0].occurrenceKey !== b.entries[1].occurrenceKey,
+      "occurrence keys differ");
+  }
+
+  // (P3) Multiple 500+ sets by same bowler.
+  {
+    const perfs = [
+      mkScratchSet("bob", "Bob", 620, "2026", 2026, 2, "m1:A:set:s"),
+      mkScratchSet("bob", "Bob", 555, "2026", 2026, 5, "m2:A:set:s"),
+      mkScratchSet("bob", "Bob", 500, "2026", 2026, 6, "m3:A:set:s"),
+    ];
+    const b = buildPerformanceLeaderboard(perfs, "scratchHighSet");
+    assert(b.entries.length === 3, "all qualifying sets kept");
+  }
+
+  // (P4) Boundary values — 200/500 included, 199/499 excluded.
+  {
+    const perfs = [
+      mkScratchGame("a", "A", 200, "2026", 2026, 1, "o1"),
+      mkScratchGame("b", "B", 199, "2026", 2026, 1, "o2"),
+      mkScratchSet("c", "C", 500, "2026", 2026, 1, "o3"),
+      mkScratchSet("d", "D", 499, "2026", 2026, 1, "o4"),
+    ];
+    const bg = buildPerformanceLeaderboard(perfs, "scratchHighGame");
+    const bs = buildPerformanceLeaderboard(perfs, "scratchHighSet");
+    assert(bg.entries.length === 1 && bg.entries[0].primary === 200, "200 included, 199 excluded");
+    assert(bs.entries.length === 1 && bs.entries[0].primary === 500, "500 included, 499 excluded");
+  }
+
+  // (P5) More than 10 qualifying scratch milestones all retained.
+  {
+    const perfs = [];
+    for (let i = 0; i < 15; i++) {
+      perfs.push(mkScratchGame(`p${i}`, `P${i}`, 214 - i, "2026", 2026, i + 1, `m${i}`));
+    }
+    const b = buildPerformanceLeaderboard(perfs, "scratchHighGame");
+    assert(b.entries.length === 15, `all 15 milestone rows kept, got ${b.entries.length}`);
+  }
+
+  // (P6) Equal scratch scores share rank; ordered by recency, alphabetical,
+  // then occurrence key.
+  {
+    const perfs = [
+      mkScratchGame("z", "Zed", 246, "2025", 2025, 1, "z1"),
+      mkScratchGame("a", "Ann", 246, "2026", 2026, 2, "a1"),
+      mkScratchGame("b", "Bea", 246, "2026", 2026, 2, "b1"),
+      mkScratchGame("b", "Bea", 246, "2026", 2026, 2, "b2"),
+      mkScratchGame("c", "Cid", 230, "2026", 2026, 5, "c1"),
+    ];
+    const b = buildPerformanceLeaderboard(perfs, "scratchHighGame");
+    assert(b.entries[0].rank === 1 && b.entries[3].rank === 1,
+      "tied 246s share rank 1");
+    assert(b.entries[4].rank === 5, "next score ranks 5 after 4 tied rows");
+    // Within 246 rank: 2026 rows first (newer), then 2025.
+    assert(b.entries[0].identity.personId === "a", "2026/Ann first (most recent + alpha)");
+    assert(b.entries[1].identity.personId === "b" && b.entries[1].occurrenceKey === "b1",
+      "Bea b1 before b2");
+    assert(b.entries[2].occurrenceKey === "b2", "then Bea b2 (occurrence-key tiebreak)");
+    assert(b.entries[3].identity.personId === "z", "2025 last within tied score");
+  }
+
+  // (P7) Legacy summary-only fallback: single row with Week unavailable;
+  // no duplication when detailed weekly data present.
+  {
+    const { buildHistoricalSeasonPerformances } = await import("../src/lib/leaderboards-contrib");
+    const snap = {
+      version: 1, builtAt: 0, seasonId: "s24", seasonLabel: "2024",
+      pointSystem: 7, totalWeeks: 2,
+      participants: [
+        { ref: "p1", displayName: "Legacy A", role: "rostered", personId: null },
+        { ref: "p2", displayName: "Legacy B", role: "rostered", personId: null },
+      ],
+      weeks: [
+        {
+          weekNumber: 1, date: null, published: true, completed: true, schedule: [],
+          matches: [
+            {
+              slotId: "m1", weekNumber: 1, lanePair: "1-2", slot: 1,
+              detailMode: "GAME_SCORES", scheduledA: "p1", scheduledB: "p2",
+              scheduledNameA: "Legacy A", scheduledNameB: "Legacy B",
+              actualA: "p1", actualB: "p2", actualNameA: "Legacy A", actualNameB: "Legacy B",
+              isSubA: false, isSubB: false, absentA: false, absentB: false,
+              entryAverageA: 150, entryAverageB: 150, handicapA: 10, handicapB: 10,
+              hasGameDataA: true, hasGameDataB: false,
+              scratchGamesA: [220, 180, 190], scratchGamesB: null,
+              handicapGamesA: [230, 190, 200], handicapGamesB: [0, 0, 0],
+              scratchTotalA: 590, scratchTotalB: 0,
+              handicapTotalA: 620, handicapTotalB: 0,
+              gameAwardsA: [0, 0, 0], gameAwardsB: [0, 0, 0],
+              gamePointsA: 0, gamePointsB: 0, setPointA: 0, setPointB: 0,
+              totalPointsA: 0, totalPointsB: 0, finalPointsA: 0, finalPointsB: 0,
+              overrideEnabled: false, winner: "A",
+              linescoreA: null, linescoreB: null,
+            },
+          ],
+        },
+      ],
+      standings: [], summaryOnly: false,
+      summaryRecords: [
+        // Legacy A has weekly data → summary must NOT create fallback rows.
+        { id: "sr1", participantRef: "p1", personId: null, displayName: "Legacy A",
+          role: "rostered", bowlerNumber: null, games: 3, scratchPinfall: 590,
+          average: null, highGame: 999, highSet: 999, points: null, pointsLost: null,
+          finalFinish: null, isChampion: false, notes: null },
+        // Legacy B has NO weekly data → summary fallback produces one HG + one HS row.
+        { id: "sr2", participantRef: "p2", personId: null, displayName: "Legacy B",
+          role: "rostered", bowlerNumber: null, games: 3, scratchPinfall: 400,
+          average: null, highGame: 210, highSet: 520, points: null, pointsLost: null,
+          finalFinish: null, isChampion: false, notes: null },
+      ],
+      participantStats: [],
+    } as any;
+    const perfs = buildHistoricalSeasonPerformances("s24", snap);
+    // Legacy A: 3 scratch games from weekly data, 1 scratch set, no summary duplication.
+    const aGames = perfs.filter((p) => p.kind === "scratch-game" && p.identity.displayName === "Legacy A");
+    const aSets = perfs.filter((p) => p.kind === "scratch-set" && p.identity.displayName === "Legacy A");
+    assert(aGames.length === 3, `Legacy A weekly scratch games (got ${aGames.length})`);
+    assert(aSets.length === 1, `Legacy A weekly scratch set`);
+    assert(!aGames.some((p) => p.provenance.week === null),
+      "no summary-fallback row when weekly data exists");
+    // Legacy B: exactly one fallback game + one fallback set, week null.
+    const bGames = perfs.filter((p) => p.kind === "scratch-game" && p.identity.displayName === "Legacy B");
+    const bSets = perfs.filter((p) => p.kind === "scratch-set" && p.identity.displayName === "Legacy B");
+    assert(bGames.length === 1 && bGames[0].provenance.week === null, "Legacy B summary HG fallback");
+    assert(bSets.length === 1 && bSets[0].provenance.week === null, "Legacy B summary HS fallback");
+    assert(bGames[0].score === 210 && bSets[0].score === 520, "fallback carries summary values");
+  }
+
+  // (P8) HDCP High Game — Top 10 plus every row tied at 10th-place cutoff.
+  {
+    const perfs = [];
+    // 9 unique HDCP games at 260..252, then three at 250 (the cutoff).
+    for (let i = 0; i < 9; i++) {
+      perfs.push(mkHdcpGame(`p${i}`, `P${i}`, 260 - i, "2026", 2026, i + 1, `p${i}`));
+    }
+    perfs.push(mkHdcpGame("t1", "TA", 250, "2026", 2026, 4, "t1"));
+    perfs.push(mkHdcpGame("t2", "TB", 250, "2026", 2026, 5, "t2"));
+    perfs.push(mkHdcpGame("t3", "TC", 250, "2026", 2026, 6, "t3"));
+    perfs.push(mkHdcpGame("lo", "Lo", 240, "2026", 2026, 7, "lo"));
+    const b = buildPerformanceLeaderboard(perfs, "hdcpHighGame", 10);
+    assert(b.entries.length === 12,
+      `HDCP HG top-10 with tied-cutoff yields 9 + 3 = 12 (got ${b.entries.length})`);
+    assert(b.entries.every((e) => e.primary >= 250), "all kept >= cutoff");
+    assert(!b.entries.some((e) => e.identity.personId === "lo"), "below-cutoff dropped");
+    // Every tied row at 250 shares rank 10.
+    const at250 = b.entries.filter((e) => e.primary === 250);
+    assert(at250.length === 3 && at250.every((e) => e.rank === 10),
+      "three tied at 250 share rank 10");
+  }
+
+  // (P9) HDCP High Set — same rule.
+  {
+    const perfs = [];
+    for (let i = 0; i < 9; i++) {
+      perfs.push(mkHdcpSet(`p${i}`, `P${i}`, 800 - i, "2026", 2026, i + 1, `p${i}`));
+    }
+    perfs.push(mkHdcpSet("t1", "TA", 790, "2026", 2026, 3, "t1"));
+    perfs.push(mkHdcpSet("t2", "TB", 790, "2026", 2026, 4, "t2"));
+    perfs.push(mkHdcpSet("lo", "Lo", 700, "2026", 2026, 8, "lo"));
+    const b = buildPerformanceLeaderboard(perfs, "hdcpHighSet", 10);
+    assert(b.entries.length === 11, `HDCP HS 9 + 2 tied at 10th cutoff (got ${b.entries.length})`);
+    assert(!b.entries.some((e) => e.primary === 700), "sub-cutoff excluded");
+  }
+
+  // (P10) Bowler may occupy multiple HDCP Top-10 rows.
+  {
+    const perfs = [
+      mkHdcpGame("alice", "Alice", 260, "2026", 2026, 1, "o1"),
+      mkHdcpGame("alice", "Alice", 258, "2026", 2026, 2, "o2"),
+      mkHdcpGame("alice", "Alice", 255, "2026", 2026, 3, "o3"),
+      mkHdcpGame("bob",   "Bob",   250, "2026", 2026, 4, "o4"),
+    ];
+    const b = buildPerformanceLeaderboard(perfs, "hdcpHighGame", 10);
+    assert(b.entries.filter((e) => e.identity.personId === "alice").length === 3,
+      "Alice occupies three HDCP rows");
+  }
+
+  // (P11) HDCP rows below the cutoff excluded, even if scratch >= 200.
+  //       (Milestone rule is SCRATCH only.)
+  {
+    const perfs = [];
+    for (let i = 0; i < 10; i++) {
+      perfs.push(mkHdcpGame(`p${i}`, `P${i}`, 300 - i, "2026", 2026, i + 1, `p${i}`));
+    }
+    // Rank 11+: HDCP 200 (a real 200+ score but on HDCP board).
+    perfs.push(mkHdcpGame("lo", "Lo", 200, "2026", 2026, 1, "lo"));
+    const b = buildPerformanceLeaderboard(perfs, "hdcpHighGame", 10);
+    assert(!b.entries.some((e) => e.identity.personId === "lo"),
+      "HDCP milestone rule does not apply — 200 dropped when below cutoff");
+    assert(b.entries.length === 10, `Top 10 exactly with no cutoff tie (got ${b.entries.length})`);
+  }
+
+  // (P12) Other All-Time categories retain career/person-level behavior.
+  {
+    const rows = aggregateSeasonContributions([
+      base(idPerson("a", "A"), { games: 30, scratchPinfall: 30 * 200 }),
+      base(idPerson("b", "B"), { games: 30, scratchPinfall: 30 * 190 }),
+    ]);
+    const avg = buildLeaderboard(rows, "scratchAverage", 10);
+    assert(avg.entries.length === 2, "person-level categories still return career rows");
+    assert(avg.entries[0].identity.personId === "a", "scratchAverage ordering unchanged");
+  }
+
+  // (P13) Missing optional provenance/legacy data is safe: empty list is OK.
+  {
+    const b = buildPerformanceLeaderboard([], "scratchHighGame");
+    assert(b.entries.length === 0, "empty performances → empty board");
+    const b2 = buildPerformanceLeaderboard([], "hdcpHighSet", 10);
+    assert(b2.entries.length === 0, "empty HDCP set board");
+  }
+}
+
+console.log("v2.0.6 performance leaderboards OK");
+
 
 
 
