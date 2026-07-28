@@ -40,6 +40,7 @@ import {
   type HighScoreProvenance,
   type LeaderboardIdentity,
   type SeasonContribution,
+  type PerformanceRow,
 } from "./leaderboards";
 
 // ---------------------------------------------------------------------------
