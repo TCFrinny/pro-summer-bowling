@@ -182,7 +182,9 @@ export function AllTimeLeaderboards() {
                     <th className="px-2 py-2 text-left">#</th>
                     <th className="px-2 py-2 text-left">Bowler</th>
                     <th className="px-2 py-2 text-right">{activeCat.primaryLabel}</th>
-                    <th className="hidden px-2 py-2 text-right sm:table-cell">{activeCat.secondaryLabel}</th>
+                    {activeCat.kind !== "performance" && (
+                      <th className="hidden px-2 py-2 text-right sm:table-cell">{activeCat.secondaryLabel}</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -207,11 +209,11 @@ export function AllTimeLeaderboards() {
                       <td className="px-2 py-1.5 text-right font-medium tabular-nums">
                         {e.primaryDisplay}
                       </td>
-                      <td className="hidden px-2 py-1.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-                        {activeCat.kind === "performance" && e.provenance
-                          ? `${e.provenance.seasonLabel}${e.provenance.week != null ? ` · Wk ${e.provenance.week}` : " · Wk —"}`
-                          : e.sampleDisplay}
-                      </td>
+                      {activeCat.kind !== "performance" && (
+                        <td className="hidden px-2 py-1.5 text-right tabular-nums text-muted-foreground sm:table-cell">
+                          {e.sampleDisplay}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
