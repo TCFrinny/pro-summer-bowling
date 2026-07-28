@@ -18,12 +18,15 @@ import type { Database } from "@/integrations/supabase/types";
 import {
   aggregateSeasonContributions,
   type AllTimeRow,
+  type PerformanceRow,
   type SeasonContribution,
 } from "@/lib/leaderboards";
 import type { PublicSnapshot } from "@/lib/mock-data";
 import {
   buildCurrentSeasonContribs,
+  buildCurrentSeasonPerformances,
   buildHistoricalSeasonContribs,
+  buildHistoricalSeasonPerformances,
   extractYearFromLabel,
   selectPublicHistoricalSeasonIds,
   type SeasonMetaLite,
