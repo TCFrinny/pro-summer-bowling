@@ -113,6 +113,10 @@ export interface Bowler {
    *  `person_id` from the rostered_bowlers row. Older saved snapshots
    *  MUST still parse and render — treat as undefined when missing. */
   personId?: string;
+  /** Human-facing league ID Number (`bowler_number`) for the current season.
+   *  Optional/nullable so older cached snapshots without this field still
+   *  parse and render. NEVER the internal row id or the person UUID. */
+  bowlerNumber?: string | null;
 }
 
 export type MatchStatus = "scheduled" | "completed";

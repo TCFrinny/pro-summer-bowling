@@ -73,6 +73,8 @@ export function rosteredRowToBowler(row: RosteredRow): Bowler {
     movement: 0,
   };
   if (row.person_id) b.personId = row.person_id;
+  const num = (row.bowler_number ?? "").trim();
+  b.bowlerNumber = num.length > 0 ? num : null;
   return b;
 }
 
@@ -226,6 +228,30 @@ export function isDuplicateActive(
     throw new Error("roster-adapter: active,non-archived row missing from snapshot");
   }
 
+
+  // Displayed ID Number is threaded through from bowler_number, never the
+  // internal row id or person id.
+  if (b.bowlerNumber !== "01001") {
+    throw new Error(`roster-adapter: bowlerNumber must come from bowler_number (${b.bowlerNumber})`);
+  }
+  if (b.bowlerNumber === b.id || b.bowlerNumber === b.personId) {
+    throw new Error("roster-adapter: displayed ID must not be an internal id");
+  }
+  // Legacy / missing bowler_number stays safe (null, no crash).
+  const legacy = rosteredRowToBowler({
+    id: "b09", name: "Legacy", entry_average: 130, handicap: 24,
+    active: true, archived: false, bowler_number: null, season_id: "s1",
+  });
+  if (legacy.bowlerNumber !== null) {
+    throw new Error("roster-adapter: missing bowler_number must adapt to null");
+  }
+  const blank = rosteredRowToBowler({
+    id: "b10", name: "Blank", entry_average: 130, handicap: 24,
+    active: true, archived: false, bowler_number: "   ", season_id: "s1",
+  });
+  if (blank.bowlerNumber !== null) {
+    throw new Error("roster-adapter: whitespace bowler_number must adapt to null");
+  }
 
   // ID minting: skip existing.
   const nid = nextRosterIdFrom([{ id: "b01" }, { id: "b02" }, { id: "b04" }]);
