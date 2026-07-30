@@ -36,7 +36,12 @@ export interface PersonSortOption {
  *  displayed league ID Number. Used by public person lists so a visitor can
  *  search either way. Internal row ids / person UUIDs are never matched. */
 export function personMatchesQuery(
-  option: { name?: string | null; displayName?: string | null; bowlerNumber?: string | number | null },
+  option: {
+    name?: string | null;
+    displayName?: string | null;
+    bowlerNumber?: string | number | null;
+    [key: string]: unknown;
+  },
   query: string,
 ): boolean {
   const needle = (query ?? "").trim().toLowerCase();
