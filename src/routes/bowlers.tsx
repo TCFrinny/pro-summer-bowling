@@ -4,7 +4,7 @@ import { BOWLERS, getPublicSubstitutes, getSubstituteProfile } from "@/lib/mock-
 import { useLeagueSnapshot } from "@/lib/league-store";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
-import { sortPersonOptions } from "@/lib/person-sort";
+import { sortPersonOptions, personMatchesQuery } from "@/lib/person-sort";
 
 export const Route = createFileRoute("/bowlers")({
   head: () => ({
@@ -36,10 +36,10 @@ function BowlersIndex() {
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
   const rostered = sortPersonOptions(
-    BOWLERS.filter((b) => b.name.toLowerCase().includes(needle)),
+    BOWLERS.filter((b) => personMatchesQuery(b, q)),
   );
   const subs = sortPersonOptions(
-    getPublicSubstitutes().filter((s) => s.name.toLowerCase().includes(needle)),
+    getPublicSubstitutes().filter((s) => personMatchesQuery(s, q)),
   );
 
   return (
@@ -49,7 +49,7 @@ function BowlersIndex() {
         subtitle={`${BOWLERS.length} on the roster · ${getPublicSubstitutes().length} in the substitute pool`}
       >
         <Input
-          placeholder="Search bowlers or subs…"
+          placeholder="Search by name or ID…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           className="w-56"
@@ -82,6 +82,11 @@ function BowlersIndex() {
                   </div>
                   <div className="font-display text-xl text-gold">{b.points}</div>
                 </div>
+                {b.bowlerNumber ? (
+                  <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    ID {b.bowlerNumber}
+                  </div>
+                ) : null}
                 <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                   <span>avg {b.scratchAverage.toFixed(3)}</span>
                   <span>hdcp {b.handicap}</span>
@@ -139,6 +144,11 @@ function BowlersIndex() {
                       sub
                     </span>
                   </div>
+                  {s.bowlerNumber ? (
+                    <div className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      ID {s.bowlerNumber}
+                    </div>
+                  ) : null}
                   <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                     <span>
                       avg {avg} · {profile?.matchesSubbed ?? 0} match
