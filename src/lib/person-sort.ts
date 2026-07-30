@@ -32,6 +32,21 @@ export interface PersonSortOption {
   bowlerNumber?: string | number | null;
 }
 
+/** Case-insensitive, trimmed substring match on the DISPLAYED name OR the
+ *  displayed league ID Number. Used by public person lists so a visitor can
+ *  search either way. Internal row ids / person UUIDs are never matched. */
+export function personMatchesQuery(
+  option: { name?: string | null; displayName?: string | null; bowlerNumber?: string | number | null },
+  query: string,
+): boolean {
+  const needle = (query ?? "").trim().toLowerCase();
+  if (needle.length === 0) return true;
+  const name = String(option.name ?? option.displayName ?? "").toLowerCase();
+  if (name.includes(needle)) return true;
+  const num = option.bowlerNumber == null ? "" : String(option.bowlerNumber).trim().toLowerCase();
+  return num.length > 0 && num.includes(needle);
+}
+
 function displayNameOf(o: PersonSortOption): string {
   const raw = o.name ?? o.displayName ?? "";
   return String(raw).trim();
@@ -125,5 +140,32 @@ export function sortPersonOptions<T extends PersonSortOption>(
   const tieOut = sortPersonOptions(tie).map((t) => t.id);
   if (tieOut.join("|") !== "a|b") {
     throw new Error("person-sort: id tie-breaker regression");
+  }
+})();
+
+(function selfTestQuery() {
+  const roster = { id: "b01", name: "Alice", bowlerNumber: "01234" };
+  const sub = { id: "s01", name: "Bob", bowlerNumber: "07777" };
+  if (!personMatchesQuery(roster, " 0123 ")) throw new Error("person-sort: roster ID search must match");
+  if (!personMatchesQuery(sub, "7777")) throw new Error("person-sort: sub ID search must match");
+  if (!personMatchesQuery(roster, "ALI")) throw new Error("person-sort: name search must stay case-insensitive");
+  if (personMatchesQuery(roster, "b01")) throw new Error("person-sort: internal row id must not match");
+  if (personMatchesQuery(sub, "s01")) throw new Error("person-sort: internal sub id must not match");
+  if (!personMatchesQuery(roster, "")) throw new Error("person-sort: empty query matches all");
+  if (!personMatchesQuery({ id: "b02", name: "Cara", bowlerNumber: null }, "cara")) {
+    throw new Error("person-sort: missing ID must stay safe");
+  }
+  if (personMatchesQuery({ id: "b02", name: "Cara", bowlerNumber: null }, "01")) {
+    throw new Error("person-sort: missing ID must not match numeric query");
+  }
+  // Filtering by ID must not disturb alphabetical ordering.
+  const pool = [
+    { id: "b03", name: "Zoe",   bowlerNumber: "01001" },
+    { id: "b01", name: "alice", bowlerNumber: "01002" },
+    { id: "b02", name: "Bob",   bowlerNumber: "02001" },
+  ];
+  const filtered = sortPersonOptions(pool.filter((p) => personMatchesQuery(p, "010")));
+  if (filtered.map((f) => f.name).join("|") !== "alice|Zoe") {
+    throw new Error("person-sort: ID filter must preserve alphabetical order");
   }
 })();
