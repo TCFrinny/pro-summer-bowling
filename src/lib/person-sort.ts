@@ -36,12 +36,7 @@ export interface PersonSortOption {
  *  displayed league ID Number. Used by public person lists so a visitor can
  *  search either way. Internal row ids / person UUIDs are never matched. */
 export function personMatchesQuery(
-  option: {
-    name?: string | null;
-    displayName?: string | null;
-    bowlerNumber?: string | number | null;
-    [key: string]: unknown;
-  },
+  option: Omit<PersonSortOption, "id">,
   query: string,
 ): boolean {
   const needle = (query ?? "").trim().toLowerCase();
@@ -157,10 +152,11 @@ export function sortPersonOptions<T extends PersonSortOption>(
   if (personMatchesQuery(roster, "b01")) throw new Error("person-sort: internal row id must not match");
   if (personMatchesQuery(sub, "s01")) throw new Error("person-sort: internal sub id must not match");
   if (!personMatchesQuery(roster, "")) throw new Error("person-sort: empty query matches all");
-  if (!personMatchesQuery({ id: "b02", name: "Cara", bowlerNumber: null }, "cara")) {
+  const noNumber = { id: "b02", name: "Cara", bowlerNumber: null };
+  if (!personMatchesQuery(noNumber, "cara")) {
     throw new Error("person-sort: missing ID must stay safe");
   }
-  if (personMatchesQuery({ id: "b02", name: "Cara", bowlerNumber: null }, "01")) {
+  if (personMatchesQuery(noNumber, "01")) {
     throw new Error("person-sort: missing ID must not match numeric query");
   }
   // Filtering by ID must not disturb alphabetical ordering.
