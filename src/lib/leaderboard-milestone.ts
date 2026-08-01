@@ -42,3 +42,25 @@ export function mergeMilestoneRows<T>(
   extras.sort((a, b) => value(b) - value(a));
   return [...base, ...extras];
 }
+
+/**
+ * Top-N performance selection that keeps every row tied with the value
+ * occupying the Nth (cutoff) place. Used for HANDICAP High Game / High Set
+ * boards, which do NOT use the scratch 200+/500+ milestone expansion.
+ *
+ * `all` is sorted by `value` descending (stable within equal values, so the
+ * caller's incoming order acts as a deterministic tie-break). If fewer than
+ * `n` rows exist, all of them are returned.
+ */
+export function topNWithCutoffTies<T>(
+  all: readonly T[],
+  value: (r: T) => number,
+  n: number,
+): T[] {
+  const sorted = [...all].sort((a, b) => value(b) - value(a));
+  if (sorted.length <= n) return sorted;
+  const cutoff = value(sorted[n - 1]!);
+  let end = n;
+  while (end < sorted.length && value(sorted[end]!) === cutoff) end++;
+  return sorted.slice(0, end);
+}
