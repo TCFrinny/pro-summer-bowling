@@ -1,5 +1,5 @@
 /**
- * v2.0.9 — Standard Leaderboards HDCP cap rule.
+ * v2.0.10 — Standard Leaderboards HDCP cap rule and stale-snapshot repair.
  *
  * The duckpin 200+/500+ milestone expansion is SCRATCH ONLY. HDCP High
  * Game / High Set boards show the Top 10 handicap performances plus every
@@ -88,7 +88,111 @@ await (async () => {
       }
     }
   }
+
+  // (7) Legacy persisted boards are capped at read time without touching
+  //     scratch or unrelated arrays. This reproduces the production symptom:
+  //     38 HDCP games and 91 HDCP sets persisted before v2.0.9.
+  {
+    const {
+      _installSnapshotProvider,
+      getStandardLeaderboards,
+      normalizeStandardLeaderboards,
+    } = await import("../src/lib/mock-data");
+    const { getLeagueState } = await import("../src/lib/league-store");
+    type GameRow = {
+      bowlerId: string;
+      bowlerName: string;
+      week: number;
+      matchId: string;
+      opponent: string;
+      scratch: number;
+      handicap: number;
+    };
+    type SetRow = {
+      bowlerId: string;
+      bowlerName: string;
+      week: number;
+      matchId: string;
+      opponent: string;
+      scratchSet: number;
+      handicapSet: number;
+    };
+    const gameValues = Array.from({ length: 38 }, (_, i) => 300 - i);
+    gameValues[10] = gameValues[9]!;
+    gameValues[11] = gameValues[9]!;
+    const setValues = Array.from({ length: 91 }, (_, i) => 700 - i);
+    setValues[10] = setValues[9]!;
+    setValues[11] = setValues[9]!;
+    const games: GameRow[] = gameValues.map((handicap, i) => ({
+      bowlerId: `g${i}`,
+      bowlerName: `Game ${i}`,
+      week: 1,
+      matchId: `gm${i}`,
+      opponent: "Opponent",
+      scratch: handicap - 20,
+      handicap,
+    }));
+    const sets: SetRow[] = setValues.map((handicapSet, i) => ({
+      bowlerId: `s${i}`,
+      bowlerName: `Set ${i}`,
+      week: 1,
+      matchId: `sm${i}`,
+      opponent: "Opponent",
+      scratchSet: handicapSet - 60,
+      handicapSet,
+    }));
+    const current = getLeagueState().snapshot;
+    const scratchGames = current.seasonBoards.standard.scratchHighGame;
+    const scratchSets = current.seasonBoards.standard.scratchHighSeries;
+    const legacy = {
+      ...current.seasonBoards.standard,
+      scratchHighGame: scratchGames,
+      scratchHighSeries: scratchSets,
+      hcpHighGame: games,
+      hcpHighSeries: sets,
+    };
+
+    const normalized = normalizeStandardLeaderboards(legacy);
+    assert(normalized !== legacy, "normalization returns a safe board copy");
+    assert(normalized.hcpHighGame.length === 12,
+      `38 legacy games become Top 10 plus ties, got ${normalized.hcpHighGame.length}`);
+    assert(normalized.hcpHighSeries.length === 12,
+      `91 legacy sets become Top 10 plus ties, got ${normalized.hcpHighSeries.length}`);
+    assert(normalized.hcpHighGame.every((r) => r.handicap >= gameValues[9]!),
+      "200+ HDCP games below the cutoff are removed");
+    assert(normalized.hcpHighSeries.every((r) => r.handicapSet >= setValues[9]!),
+      "500+ HDCP sets below the cutoff are removed");
+    assert(normalized.hcpHighGame.filter((r) => r.handicap === gameValues[9]).length === 3,
+      "all HDCP game cutoff ties remain");
+    assert(normalized.hcpHighSeries.filter((r) => r.handicapSet === setValues[9]).length === 3,
+      "all HDCP set cutoff ties remain");
+    assert(normalized.scratchHighGame === scratchGames && normalized.scratchHighSeries === scratchSets,
+      "scratch arrays remain byte-for-byte/reference-content unchanged");
+    assert(legacy.hcpHighGame.length === 38 && legacy.hcpHighSeries.length === 91,
+      "persisted legacy board is not mutated");
+    const normalizedAgain = normalizeStandardLeaderboards(normalized);
+    assert(JSON.stringify(normalizedAgain) === JSON.stringify(normalized),
+      "normalizing an already-correct board is idempotent");
+
+    const fakeSnapshot = {
+      ...current,
+      seasonBoards: { ...current.seasonBoards, standard: legacy },
+      weekBoards: {
+        ...current.weekBoards,
+        99: { standard: legacy, advanced: current.seasonBoards.advanced },
+      },
+    };
+    _installSnapshotProvider(() => fakeSnapshot);
+    try {
+      assert(getStandardLeaderboards("season").hcpHighGame.length === 12,
+        "season read path normalizes stale HDCP games");
+      assert(getStandardLeaderboards(99).hcpHighSeries.length === 12,
+        "weekly read path normalizes stale HDCP sets");
+    } finally {
+      _installSnapshotProvider(() => getLeagueState().snapshot);
+    }
+  }
 })();
 
 // eslint-disable-next-line no-console
-console.log("v2.0.9 HDCP leaderboard cap OK");
+console.log("v2.0.10 HDCP leaderboard read normalization OK");

@@ -772,6 +772,33 @@ export interface StandardLeaderboards {
   mostSpares: VolumeRow[];
   fewestOpens: VolumeRow[];
 }
+
+/**
+ * Correct the HDCP caps when reading persisted standard boards. Public
+ * snapshots can outlive the code version that built them, so snapshots saved
+ * before v2.0.9 may still contain scratch-style 200+/500+ HDCP expansion.
+ *
+ * Return a new board object without mutating the persisted snapshot. Only the
+ * two HDCP performance arrays are replaced; every unrelated board is retained
+ * exactly as stored.
+ */
+export function normalizeStandardLeaderboards(
+  boards: StandardLeaderboards,
+): StandardLeaderboards {
+  return {
+    ...boards,
+    hcpHighGame: topNWithCutoffTies(
+      boards.hcpHighGame,
+      (row) => row.handicap,
+      10,
+    ),
+    hcpHighSeries: topNWithCutoffTies(
+      boards.hcpHighSeries,
+      (row) => row.handicapSet,
+      10,
+    ),
+  };
+}
 export interface AdvancedLeaderboards {
   scope: "season" | number;
   rows: AdvancedRow[];
@@ -1538,7 +1565,10 @@ export function getBowlerSeasonExtras(id: BowlerId): BowlerSeasonExtras {
 }
 export function getStandardLeaderboards(scope: "season" | number): StandardLeaderboards {
   const s = snap();
-  return scope === "season" ? s.seasonBoards.standard : s.weekBoards[scope]?.standard ?? s.seasonBoards.standard;
+  const stored = scope === "season"
+    ? s.seasonBoards.standard
+    : s.weekBoards[scope]?.standard ?? s.seasonBoards.standard;
+  return normalizeStandardLeaderboards(stored);
 }
 export function getAdvancedLeaderboards(scope: "season" | number): AdvancedLeaderboards {
   const s = snap();
