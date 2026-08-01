@@ -45,6 +45,7 @@ import {
   HIGH_GAME_MILESTONE,
   HIGH_SET_MILESTONE,
   mergeMilestoneRows,
+  topNWithCutoffTies,
 } from "./leaderboard-milestone";
 
 export type {
@@ -1368,14 +1369,8 @@ export function buildSnapshot(input: {
         (x) => x.scratchSet, HIGH_SET_MILESTONE,
       ),
       topScratchAverages: topN(averages, (x) => x.scratchAverage, 10),
-      hcpHighGame: mergeMilestoneRows(
-        topN(hcpGames, (x) => x.handicap, 5), hcpGames,
-        (x) => x.handicap, HIGH_GAME_MILESTONE,
-      ),
-      hcpHighSeries: mergeMilestoneRows(
-        topN(hcpSets, (x) => x.handicapSet, 5), hcpSets,
-        (x) => x.handicapSet, HIGH_SET_MILESTONE,
-      ),
+      hcpHighGame: topNWithCutoffTies(hcpGames, (x) => x.handicap, 10),
+      hcpHighSeries: topNWithCutoffTies(hcpSets, (x) => x.handicapSet, 10),
       topTotalPoints: topN([...creditedSeason.values()], (x) => x.points, 10),
       mostStrikes: topN(volume, (x) => x.strikes, 10),
       mostSpares: topN(volume, (x) => x.spares, 10),
