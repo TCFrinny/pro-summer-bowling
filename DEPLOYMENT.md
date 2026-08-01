@@ -168,8 +168,10 @@ Builds runs produced auto-generated names like
 `tcfrinny-pro-summer-bowling` from the repository slug), and Wrangler
 treats `name` as the Worker's identity. If the generated name drifts,
 `wrangler deploy` creates a **second Worker** at a different URL
-(for example `tcfrinny-pro-summer-bowling.mt-airy-lanes.workers.dev`)
-instead of updating the live `pro-summer-bowling` Worker. Pinning the
+(for example `tcfrinny-pro-summer-bowling.duckpins.workers.dev`)
+instead of updating the live `pro-summer-bowling` Worker, whose canonical
+production URL is `https://pro-summer-bowling.duckpins.workers.dev/`.
+Pinning the
 name in the patch step guarantees every deploy targets the same Worker
 regardless of Nitro upgrades, repo renames, or account-derived defaults.
 The patcher verifies both `keep_vars === true` and
