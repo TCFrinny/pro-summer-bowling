@@ -88,10 +88,10 @@ function LeaderboardsPage() {
       </Section>
 
       <Section title="Points / HCP Leaders (Credited — Scheduled Bowler)">
-        <Board title="High Game (HCP · Top 5 · all 200+)">
+        <Board title="High Game (HCP · Top 10)">
           <GameTable rows={boards.hcpHighGame} field="handicap" />
         </Board>
-        <Board title="High Series (HCP · Top 5 · all 500+)">
+        <Board title="High Series (HCP · Top 10)">
           <SetTable rows={boards.hcpHighSeries} field="handicapSet" />
         </Board>
         <Board title="Top Total Points">
