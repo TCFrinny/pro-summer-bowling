@@ -43,6 +43,7 @@ import "./ratings";
 import "./champion-and-rebuild";
 import "./leaderboards";
 import "./leaderboards-hdcp-cap";
+import "./final-week-position-round";
 
 
 
