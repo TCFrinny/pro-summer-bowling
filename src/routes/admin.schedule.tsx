@@ -18,6 +18,12 @@ import { Input } from "@/components/ui/input";
 import { AlertTriangle, CheckCircle2, Save, Trash2, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sortPersonOptions } from "@/lib/person-sort";
+import {
+  FINAL_WEEK_REPEAT_NOTE,
+  pairKeyFor,
+  resolveFinalWeek,
+  validateWeekDraft,
+} from "@/lib/schedule-week-validation";
 
 export const Route = createFileRoute("/admin/schedule")({
   head: () => ({
@@ -46,10 +52,6 @@ function emptyDraft(): DraftSlot[] {
     }
   }
   return rows;
-}
-
-function pairKey(a: string, b: string): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 function AdminSchedulePage() {
@@ -110,7 +112,7 @@ function AdminSchedulePage() {
       if (w.week_number >= week) continue;
       for (const s of query.data.slots) {
         if (s.week_id !== w.id) continue;
-        if (s.bowler_a_id && s.bowler_b_id) set.add(pairKey(s.bowler_a_id, s.bowler_b_id));
+        if (s.bowler_a_id && s.bowler_b_id) set.add(pairKeyFor(s.bowler_a_id, s.bowler_b_id));
       }
     }
     return set;
@@ -130,31 +132,25 @@ function AdminSchedulePage() {
     [draft],
   );
 
-  const warnings = useMemo(() => {
-    const w: string[] = [];
-    let incomplete = 0;
-    for (const r of draft) {
-      if (!r.bowlerA || !r.bowlerB) incomplete++;
-      if (r.bowlerA && r.bowlerA === r.bowlerB) {
-        w.push(`Lanes ${r.lanePair} slot ${r.slot}: bowler cannot face themself`);
-      }
-    }
-    if (incomplete > 0) w.push(`${incomplete} matchup(s) incomplete`);
-    const dupes: string[] = [];
-    for (const [id, c] of usedBowlers) {
-      if (c > 1) {
-        const name = activeRoster.find((b) => b.id === id)?.name ?? id;
-        dupes.push(`${name}×${c}`);
-      }
-    }
-    if (dupes.length) w.push(`Duplicate bowlers in week: ${dupes.join(", ")}`);
-    for (const r of filledSlots) {
-      if (priorPairKeys.has(pairKey(r.bowlerA, r.bowlerB))) {
-        w.push(`Lanes ${r.lanePair} slot ${r.slot}: repeat matchup from an earlier week`);
-      }
-    }
-    return w;
-  }, [draft, filledSlots, usedBowlers, priorPairKeys, activeRoster]);
+  const finalWeek = useMemo(
+    () => resolveFinalWeek(
+      query.data?.seasonTotalWeeks ?? null,
+      (query.data?.weeks ?? []).map((w) => w.week_number),
+    ),
+    [query.data],
+  );
+  const isFinalWeekSelected = week === finalWeek;
+
+  const warnings = useMemo(
+    () => validateWeekDraft({
+      weekNumber: week,
+      finalWeek,
+      rows: draft,
+      activeBowlers: activeRoster.map((b) => ({ id: b.id, name: b.name })),
+      priorPairKeys,
+    }),
+    [week, finalWeek, draft, activeRoster, priorPairKeys],
+  );
 
   const setSlot = (idx: number, patch: Partial<DraftSlot>) => {
     setDraft((prev) => {
@@ -207,7 +203,7 @@ function AdminSchedulePage() {
     <>
       <PageHeader
         title="Admin · Manual Schedule Editor"
-        subtitle="Administrators set every week's schedule by hand. Warnings surface duplicates and repeat pairings but never rewrite your choices."
+        subtitle="Administrators set every week's schedule by hand. Warnings surface duplicates and repeat pairings but never rewrite your choices. Final-week position round: repeat opponents are allowed."
       />
 
       {query.isLoading && (
@@ -298,6 +294,12 @@ function AdminSchedulePage() {
           )}
         </div>
       </div>
+
+      {isFinalWeekSelected && (
+        <div className="mb-4 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+          {FINAL_WEEK_REPEAT_NOTE}
+        </div>
+      )}
 
       {flash && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-border bg-accent/40 px-3 py-2 text-xs">
