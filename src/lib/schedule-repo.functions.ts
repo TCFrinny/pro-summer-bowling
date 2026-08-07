@@ -136,12 +136,14 @@ export const getAdminScheduleData = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await ensureAdmin(context);
     const seasonId = await ensureSeasonId(context);
-    const [roster, subs, weeksRes] = await Promise.all([
+    const [roster, subs, weeksRes, seasonRes] = await Promise.all([
       loadActiveRoster(context, seasonId),
       loadSubs(context, seasonId),
       context.supabase.from("weeks")
         .select("id, week_number, date, published, completed")
         .eq("season_id", seasonId).order("week_number"),
+      context.supabase.from("seasons")
+        .select("total_weeks").eq("id", seasonId).maybeSingle(),
     ]);
     if (weeksRes.error) throw new Error(weeksRes.error.message);
     const weeks = weeksRes.data ?? [];
@@ -162,6 +164,7 @@ export const getAdminScheduleData = createServerFn({ method: "GET" })
     if (resultsRes.error) throw new Error(resultsRes.error.message);
     return {
       seasonId,
+      seasonTotalWeeks: seasonRes.error ? null : (seasonRes.data?.total_weeks ?? null),
       roster,
       subs,
       weeks,
